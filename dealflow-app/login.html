@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign in — Deal Flow</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f5fed" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Deal Flow" />
+<script src="js/pwa.js"></script>
+</head>
+<body>
+  <div class="auth-card">
+    <h1 id="formTitle">Sign in</h1>
+    <p class="sub" id="formSub">Access your team's deal pipeline.</p>
+
+    <div id="errorBox" class="error-msg hidden"></div>
+
+    <form id="authForm">
+      <div id="nameField" class="hidden">
+        <label for="fullName">Full name</label>
+        <input id="fullName" type="text" autocomplete="name" />
+      </div>
+
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email" />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" required autocomplete="current-password" minlength="6" />
+
+      <div class="form-actions">
+        <button type="submit" class="btn" id="submitBtn">Sign in</button>
+      </div>
+    </form>
+
+    <p class="help-text" style="margin-top:16px;">
+      <span id="toggleText">New here?</span>
+      <a href="#" id="toggleMode">Create an account</a>
+    </p>
+    <p class="help-text">
+      New accounts start as an <strong>intern</strong>. A team lead can promote you
+      later in Supabase (Table Editor &gt; profiles &gt; role).
+    </p>
+  </div>
+
+  <script type="module">
+    import { supabase } from "./js/supabaseClient.js";
+
+    let mode = "signin"; // or "signup"
+
+    const form = document.getElementById("authForm");
+    const errorBox = document.getElementById("errorBox");
+    const nameField = document.getElementById("nameField");
+    const fullName = document.getElementById("fullName");
+    const email = document.getElementById("email");
+    const password = document.getElementById("password");
+    const submitBtn = document.getElementById("submitBtn");
+    const toggleMode = document.getElementById("toggleMode");
+    const toggleText = document.getElementById("toggleText");
+    const formTitle = document.getElementById("formTitle");
+    const formSub = document.getElementById("formSub");
+
+    // If already signed in, skip straight to the app.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) window.location.href = "buyers.html";
+    });
+
+    toggleMode.addEventListener("click", (e) => {
+      e.preventDefault();
+      mode = mode === "signin" ? "signup" : "signin";
+      const isSignup = mode === "signup";
+      nameField.classList.toggle("hidden", !isSignup);
+      fullName.required = isSignup;
+      submitBtn.textContent = isSignup ? "Create account" : "Sign in";
+      formTitle.textContent = isSignup ? "Create account" : "Sign in";
+      formSub.textContent = isSignup
+        ? "Set up your login for the deal pipeline."
+        : "Access your team's deal pipeline.";
+      toggleText.textContent = isSignup ? "Already have an account?" : "New here?";
+      toggleMode.textContent = isSignup ? "Sign in" : "Create an account";
+      errorBox.classList.add("hidden");
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorBox.classList.add("hidden");
+      submitBtn.disabled = true;
+
+      try {
+        if (mode === "signup") {
+          const { error } = await supabase.auth.signUp({
+            email: email.value.trim(),
+            password: password.value,
+            options: { data: { full_name: fullName.value.trim() } },
+          });
+          if (error) throw error;
+          errorBox.classList.remove("hidden");
+          errorBox.style.background = "#e7f8ee";
+          errorBox.style.color = "#1f9d55";
+          errorBox.textContent = "Account created. Check your email to confirm, then sign in.";
+        } else {
+          const { error } = await supabase.auth.signInWithPassword({
+            email: email.value.trim(),
+            password: password.value,
+          });
+          if (error) throw error;
+          window.location.href = "buyers.html";
+        }
+      } catch (err) {
+        errorBox.classList.remove("hidden");
+        errorBox.style.background = "#fdecec";
+        errorBox.style.color = "#d1453b";
+        errorBox.textContent = err.message || String(err);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

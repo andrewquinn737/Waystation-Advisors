@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Finance — Deal Flow</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f5fed" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Deal Flow" />
+<script src="js/pwa.js"></script>
+</head>
+<body data-page="finance.html">
+  <nav class="topnav" id="topnav"></nav>
+
+  <main>
+    <div class="page-header">
+      <h1>Finance</h1>
+    </div>
+    <div id="errorBox" class="error-msg hidden"></div>
+
+    <div class="page-header">
+      <h2 style="font-size:15px;margin:0;">Monthly subscriptions</h2>
+      <button class="btn" id="addPaymentBtn">+ Log payment</button>
+    </div>
+    <div id="paymentsWrap"></div>
+
+    <div class="page-header" style="margin-top:32px;">
+      <h2 style="font-size:15px;margin:0;">Commissions</h2>
+    </div>
+    <div id="commissionsWrap"></div>
+  </main>
+
+  <div class="modal-backdrop hidden" id="paymentModalBackdrop">
+    <div class="modal">
+      <h2>Log subscription payment</h2>
+      <div id="paymentModalError" class="error-msg hidden"></div>
+      <form id="paymentForm">
+        <label for="buyerSelect">Buyer</label>
+        <select id="buyerSelect" required></select>
+
+        <div class="form-row">
+          <div>
+            <label for="periodMonth">Month</label>
+            <input id="periodMonth" type="month" required />
+          </div>
+          <div>
+            <label for="amount">Amount ($)</label>
+            <input id="amount" type="number" step="0.01" min="0" required />
+          </div>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin-top:14px;">
+          <input type="checkbox" id="paid" style="width:auto;" />
+          <span style="font-weight:400;">Already paid</span>
+        </label>
+
+        <div class="form-actions">
+          <button type="submit" class="btn">Save</button>
+          <button type="button" class="btn secondary" id="paymentCancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="js/finance.js"></script>
+</body>
+</html>

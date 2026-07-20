@@ -1,0 +1,137 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e2e5ea;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --accent: #2f5fed;
+  --accent-hover: #2449c4;
+  --danger: #d1453b;
+  --success: #1f9d55;
+  --warn: #c98a12;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- Top nav ---- */
+.topnav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topnav .brand { font-weight: 700; font-size: 16px; }
+.topnav .links { display: flex; gap: 18px; align-items: center; }
+.topnav .links a { color: var(--text); font-size: 14px; padding: 6px 4px; }
+.topnav .links a.active { color: var(--accent); font-weight: 600; }
+.topnav .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); }
+.role-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1ff;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- Layout ---- */
+main { max-width: 1080px; margin: 0 auto; padding: 24px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.page-header h1 { font-size: 20px; margin: 0; }
+
+/* ---- Cards / auth ---- */
+.auth-card {
+  max-width: 380px;
+  margin: 80px auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+}
+.auth-card h1 { font-size: 18px; margin: 0 0 4px; }
+.auth-card p.sub { color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
+
+/* ---- Forms ---- */
+label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+input, select, textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+textarea { resize: vertical; min-height: 60px; }
+.btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { background: var(--accent-hover); }
+.btn.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn.danger { background: var(--danger); }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.form-row { display: flex; gap: 12px; }
+.form-row > div { flex: 1; }
+.form-actions { margin-top: 16px; display: flex; gap: 8px; }
+
+/* ---- Table ---- */
+table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+th, td { text-align: left; padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--border); }
+th { background: #fafbfc; color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
+tr:last-child td { border-bottom: none; }
+td.muted { color: var(--text-muted); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- Status pills ---- */
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.pill.new, .pill.pitched { background: #eef1ff; color: var(--accent); }
+.pill.vetted, .pill.interested { background: #fff6e0; color: var(--warn); }
+.pill.negotiating { background: #ffeede; color: #c9660c; }
+.pill.dead, .pill.closed_lost, .pill.cancelled { background: #fdecec; color: var(--danger); }
+.pill.closed_won, .pill.active, .pill.paid { background: #e7f8ee; color: var(--success); }
+.pill.paused, .pill.owed { background: #fff6e0; color: var(--warn); }
+.pill.invoiced { background: #eef1ff; color: var(--accent); }
+
+/* ---- Modal ---- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(20,22,28,.4);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 60px 16px; overflow-y: auto; z-index: 50;
+}
+.modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; }
+.modal h2 { margin: 0 0 4px; font-size: 17px; }
+.modal .close { position: absolute; }
+
+.hidden { display: none !important; }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
+.error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+.help-text { color: var(--text-muted); font-size: 12.5px; margin-top: 6px; }
+.section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); margin: 28px 0 10px; }
+.toolbar { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; }
+.toolbar input[type="search"] { max-width: 240px; }
+.count-badge { color: var(--text-muted); font-size: 13px; }
