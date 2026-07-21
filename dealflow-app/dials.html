@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Dials — Waystation Advisors</title>
 <link rel="stylesheet" href="css/style.css" />
+<link rel="icon" href="favicon.ico" sizes="any" />
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
+<link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
 <link rel="manifest" href="manifest.json" />
 <meta name="theme-color" content="#2f5fed" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -20,8 +23,68 @@
     <div class="page-header">
       <h1>Dials</h1>
     </div>
-    <div class="empty-state">Nothing here yet — check back soon.</div>
+    <div id="errorBox" class="error-msg hidden"></div>
+
+    <div class="dials-toolbar">
+      <div class="segmented" id="typeSwitch">
+        <button type="button" data-type="buyer" class="active">Buyers</button>
+        <button type="button" data-type="seller">Sellers</button>
+      </div>
+      <div class="segmented small" id="statusSwitch">
+        <button type="button" data-status="current" class="active">Current</button>
+        <button type="button" data-status="archived">Archived</button>
+      </div>
+    </div>
+
+    <div class="dials-tabbar">
+      <div class="dials-tabs" id="dialTabs"></div>
+      <button type="button" class="dial-tab-add" id="addTabBtn" title="New list">+</button>
+      <button type="button" class="btn secondary small" id="generateListBtn" title="Coming soon">Generate new list</button>
+    </div>
+
+    <div id="dialsTableWrap"></div>
   </main>
+
+  <button class="fab" id="addDialBtn" title="New dial">+</button>
+
+  <!-- Dial detail / create popup -->
+  <div class="modal-backdrop hidden" id="dialModalBackdrop">
+    <div class="dial-modal-stack">
+      <div class="modal dial-modal">
+        <div class="dial-modal-header">
+          <h2 id="dialModalTitle">New dial</h2>
+          <button type="button" class="fs-close" id="dialModalClose">&times;</button>
+        </div>
+        <div id="dialModalError" class="error-msg hidden"></div>
+        <div id="dialModalBody"></div>
+        <div class="form-actions" id="dialModalActions"></div>
+      </div>
+      <div class="dial-nav-row hidden" id="dialNavRow">
+        <button type="button" class="dial-nav-btn" id="dialPrevBtn">&#8249; Previous</button>
+        <button type="button" class="dial-nav-btn" id="dialNextBtn">Next &#8250;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Create client" flow — same New Client form as the Clients page,
+       pre-filled from the dial being converted. -->
+  <div class="fullscreen-modal hidden" id="clientModal">
+    <div class="fs-header">
+      <h2 id="clientModalTitle">New client</h2>
+      <button type="button" class="fs-close" id="clientModalClose">&times;</button>
+    </div>
+    <div class="fs-body" id="clientModalBody"></div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="requiredPopup">
+    <div class="modal">
+      <h2>Missing information</h2>
+      <p id="requiredPopupText"></p>
+      <div class="form-actions">
+        <button type="button" class="btn" id="requiredPopupOk">OK</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="js/dials.js"></script>
 </body>
