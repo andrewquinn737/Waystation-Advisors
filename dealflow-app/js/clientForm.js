@@ -2,6 +2,11 @@
 // Clients page itself) and dials.js (the "Create client" shortcut, which
 // pre-fills this same form from a dial's info).
 
+// Buyer support is temporarily hidden (not removed) — everything is treated
+// as a seller for now. Flip this back to true to re-expose the Buyer/Seller
+// choice and buyer-specific fields without touching any other code.
+export const BUYERS_ENABLED = false;
+
 export const STATES = [
   "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
   "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
@@ -24,7 +29,7 @@ export function lookingForLabel(type) {
 export function defaultClient(profile, overrides) {
   return Object.assign(
     {
-      first_name: "", last_name: "", client_type: "buyer", city: "", state: "",
+      first_name: "", last_name: "", client_type: BUYERS_ENABLED ? "buyer" : "seller", city: "", state: "",
       email: "", phone: "", linkedin: "", company_name: "", industry: "",
       annual_revenue: null, employee_count: null, founded_year: null, founded_month: null,
       money_to_spend_min: null, money_to_spend_max: null, looking_for: "", other_notes: "",
@@ -51,11 +56,13 @@ export function buildEditableSections(client) {
             <input id="f_last_name" value="${escapeHtml(client.last_name)}" />
           </div>
         </div>
-        <div class="field-label-row"><label for="f_client_type">Buyer / Seller</label><span class="field-required-msg hidden" data-field="client_type">required</span></div>
-        <select id="f_client_type">
-          <option value="buyer" ${type === "buyer" ? "selected" : ""}>Buyer</option>
-          <option value="seller" ${type === "seller" ? "selected" : ""}>Seller</option>
-        </select>
+        <div class="${BUYERS_ENABLED ? "" : "hidden"}">
+          <div class="field-label-row"><label for="f_client_type">Buyer / Seller</label><span class="field-required-msg hidden" data-field="client_type">required</span></div>
+          <select id="f_client_type">
+            <option value="buyer" ${type === "buyer" ? "selected" : ""}>Buyer</option>
+            <option value="seller" ${type === "seller" ? "selected" : ""}>Seller</option>
+          </select>
+        </div>
         <div class="form-row">
           <div>
             <div class="field-label-row"><label for="f_city">City</label><span class="field-required-msg hidden" data-field="city">required</span></div>

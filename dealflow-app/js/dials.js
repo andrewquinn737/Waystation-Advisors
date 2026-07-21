@@ -8,16 +8,19 @@ import {
   wireEditableFormEvents,
   collectFormData,
   getMissingFields,
+  BUYERS_ENABLED,
 } from "./clientForm.js";
+import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
-const { profile } = session;
+const { profile, user } = session;
 const isLead = profile.role === "team_lead";
+const internEmail = user?.email || "";
 
 let allLists = []; // every dial_lists row (all types/statuses)
 let dials = []; // dials belonging to the currently selected tab
-let currentType = "buyer"; // 'buyer' | 'seller'
+let currentType = BUYERS_ENABLED ? "buyer" : "seller"; // 'buyer' | 'seller'
 let currentStatus = "current"; // 'current' | 'archived'
 let currentListId = null;
 let currentDialIndex = -1;
@@ -55,7 +58,12 @@ const els = {
   newListCreateBtn: document.getElementById("newListCreateBtn"),
   newListCancelBtn: document.getElementById("newListCancelBtn"),
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
+  introCallPopup: document.getElementById("introCallPopup"),
+  introCallPopupBody: document.getElementById("introCallPopupBody"),
+  introCallPopupClose: document.getElementById("introCallPopupClose"),
 };
+
+els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
 function openConfirmDelete(onConfirm) {
   els.confirmDeleteModal.classList.remove("hidden");
@@ -258,7 +266,13 @@ els.statusSwitch.querySelectorAll("button").forEach((btn) => {
   });
 });
 
-// "Generate new list" is an intentional no-op placeholder for now.
+// Buyer support is hidden for now — everything is Sellers only. The switch
+// and its click-handling code above stay intact for when this is re-enabled.
+els.typeSwitch.classList.toggle("hidden", !BUYERS_ENABLED);
+
+// "Generate new list" is an intentional no-op placeholder for now, and is
+// hidden (not removed) until it does something.
+els.generateListBtn.classList.add("hidden");
 
 // ---------------------------------------------------------------------------
 // Dials list (spreadsheet-like table)
@@ -407,7 +421,7 @@ function renderDialModal() {
     els.dialModalActions.innerHTML = `
       <button type="button" class="btn" id="dialSaveBtn">Save</button>
       <button type="button" class="btn secondary" id="dialCancelBtn">Cancel</button>
-      ${!isCreate && isLead ? `<button type="button" class="btn danger" id="dialDeleteBtn" style="margin-left:auto;">Delete</button>` : ""}
+      ${!isCreate ? `<button type="button" class="btn danger" id="dialDeleteBtn" style="margin-left:auto;">Delete</button>` : ""}
     `;
   } else {
     els.dialModalActions.innerHTML = "";
@@ -552,11 +566,13 @@ function openCreateClientFromDial(dial) {
     ${buildEditableSections(prefill)}
     <div class="form-actions">
       <button type="button" class="btn" id="saveNewClientBtn">Save</button>
+      <button type="button" class="btn secondary" id="scheduleIntroCallNewClientBtn">Schedule intro call</button>
       <button type="button" class="btn secondary" id="cancelNewClientBtn">Cancel</button>
     </div>
   `;
   wireEditableFormEvents(els.clientModalBody);
-  document.getElementById("saveNewClientBtn").addEventListener("click", handleSaveNewClientFromDial);
+  document.getElementById("saveNewClientBtn").addEventListener("click", () => handleSaveNewClientFromDial());
+  document.getElementById("scheduleIntroCallNewClientBtn").addEventListener("click", handleSaveAndScheduleFromDial);
   document.getElementById("cancelNewClientBtn").addEventListener("click", closeClientModal);
   els.clientModal.classList.remove("hidden");
 }
@@ -565,7 +581,11 @@ function closeClientModal() {
   els.clientModal.classList.add("hidden");
 }
 
-async function handleSaveNewClientFromDial() {
+// Validates the New Client form (shared with the Clients page) and, if
+// valid, inserts the row. Returns the inserted client row, or null if
+// validation failed or the insert errored (errors are already surfaced to
+// the user in both cases).
+async function validateAndInsertClientFromDial() {
   const data = collectFormData(els.clientModalBody);
   els.clientModalBody.querySelectorAll(".field-required-msg").forEach((el) => el.classList.add("hidden"));
   const { missing, popupLabels } = getMissingFields(data);
@@ -576,12 +596,48 @@ async function handleSaveNewClientFromDial() {
     });
     els.requiredPopupText.textContent = `Please fill out the missing information. The following is required: ${popupLabels.join(", ")}.`;
     els.requiredPopup.classList.remove("hidden");
-    return;
+    return null;
   }
   data.assigned_to = profile.id;
-  const { error } = await supabase.from("clients").insert(data);
-  if (error) return showError(document.getElementById("clientModalError"), error);
+  const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
+  if (error) {
+    showError(document.getElementById("clientModalError"), error);
+    return null;
+  }
+  return inserted;
+}
+
+async function handleSaveNewClientFromDial() {
+  const inserted = await validateAndInsertClientFromDial();
+  if (!inserted) return;
   closeClientModal();
+}
+
+// "Schedule intro call" from the Dials "Create client" flow: saves the
+// client first (same validation/insert as Save), then immediately opens the
+// Intro Call scheduling popup for the client that was just created.
+async function handleSaveAndScheduleFromDial() {
+  const inserted = await validateAndInsertClientFromDial();
+  if (!inserted) return;
+  closeClientModal();
+
+  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
+  els.introCallPopup.classList.remove("hidden");
+  wireIntroCallForm(els.introCallPopupBody, {
+    client: inserted,
+    internEmail,
+    onScheduled: async ({ date, time, timezone }) => {
+      const eventDate = new Date(`${date}T${time}:00`);
+      await supabase.from("client_events").insert({
+        client_id: inserted.id,
+        event_type: "intro_call",
+        event_date: eventDate.toISOString(),
+        details: { timezone },
+        created_by: profile.id,
+      });
+      setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
+    },
+  });
 }
 
 els.clientModalClose.addEventListener("click", closeClientModal);

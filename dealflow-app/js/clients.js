@@ -9,11 +9,13 @@ import {
   collectFormData,
   getMissingFields,
 } from "./clientForm.js";
+import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
-const { profile } = session;
+const { profile, user } = session;
 const isLead = profile.role === "team_lead";
+const internEmail = user?.email || "";
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -342,8 +344,29 @@ function wireTimelineEvents() {
   document.getElementById("addIntroCallBtn").addEventListener("click", () => {
     menu.classList.add("hidden");
     els.eventPopupTitle.textContent = "Intro Call";
-    els.eventPopupBody.innerHTML = `<p class="help-text">Intro call details coming soon.</p>`;
+    els.eventPopupBody.innerHTML = buildIntroCallFormHTML();
     els.eventPopup.classList.remove("hidden");
+    wireIntroCallForm(els.eventPopupBody, {
+      client: currentClient,
+      internEmail,
+      onScheduled: async ({ date, time, timezone }) => {
+        const eventDate = new Date(`${date}T${time}:00`);
+        await supabase.from("client_events").insert({
+          client_id: currentClient.id,
+          event_type: "intro_call",
+          event_date: eventDate.toISOString(),
+          details: { timezone },
+          created_by: profile.id,
+        });
+        setTimeout(async () => {
+          els.eventPopup.classList.add("hidden");
+          if (currentTab === "timeline") {
+            await loadEvents(currentClient.id);
+            renderModalBody();
+          }
+        }, 1200);
+      },
+    });
   });
 }
 
@@ -359,8 +382,13 @@ function updateSubtabActiveState() {
   });
 }
 
+// Progress and Timeline sub-tabs are hidden for now (code kept intact for
+// when they're re-enabled) — the sub-tab bar itself stays hidden always, so
+// Profile is the only view shown.
+const SUBTABS_ENABLED = false;
+
 function renderModalBody() {
-  els.clientSubtabs.classList.toggle("hidden", currentMode === "create");
+  els.clientSubtabs.classList.toggle("hidden", !SUBTABS_ENABLED || currentMode === "create");
 
   if (currentMode === "create") {
     els.clientModalTitle.textContent = "New client";
@@ -390,7 +418,7 @@ function renderModalBody() {
           ? `<div class="form-actions">
           <button type="button" class="btn" id="saveClientBtn">Save</button>
           <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
-          ${isLead ? `<button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>` : ""}
+          <button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>
         </div>`
           : ""
       }
