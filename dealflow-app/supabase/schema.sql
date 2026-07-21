@@ -243,18 +243,26 @@ create trigger deals_protect_closing
 -- ============================================================================
 create table clients (
   id uuid primary key default gen_random_uuid(),
-  name text not null,
+  first_name text not null,
+  last_name text not null,
   client_type text not null check (client_type in ('buyer', 'seller')),
   company_name text,               -- sellers only
-  contact_info text,
-  industry text,
-  location text,
-  annual_revenue numeric,
-  employee_count integer,
-  founded_year integer,
-  founded_month integer check (founded_month between 1 and 12),
+  email text,
+  phone text,
+  linkedin text,
+  city text,
+  state text,                      -- one of the 50 US states, or 'Not in the US'
+  industry text,                   -- sellers only
+  annual_revenue numeric,          -- sellers only
+  employee_count integer,          -- sellers only
+  founded_year integer,            -- sellers only
+  founded_month integer check (founded_month between 1 and 12), -- sellers only
+  money_to_spend_min numeric,      -- buyers only
+  money_to_spend_max numeric,      -- buyers only
   looking_for text,                -- what they're looking for in a buyer/seller
-  intern_name text,                -- intern/contractor working this client
+  other_notes text,
+  intern_name text,                -- auto-filled with the creating intern's name
+  assigned_to uuid references profiles(id), -- auto-set to the creating intern
   created_by uuid references profiles(id) default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -272,6 +280,93 @@ create policy "clients_insert_all" on clients
 create policy "clients_update_all" on clients
   for update using (auth.uid() is not null);
 create policy "clients_delete_lead_only" on clients
+  for delete using (is_team_lead());
+
+-- ============================================================================
+-- CLIENT EVENTS (the Timeline tab on a client's profile). A "created" event
+-- is inserted automatically whenever a client row is inserted.
+-- ============================================================================
+create table client_events (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references clients(id) on delete cascade,
+  event_type text not null,        -- 'created', 'intro_call', ...
+  event_date timestamptz not null default now(),
+  details jsonb,
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now()
+);
+
+alter table client_events enable row level security;
+create policy "client_events_select_all" on client_events
+  for select using (auth.uid() is not null);
+create policy "client_events_insert_all" on client_events
+  for insert with check (auth.uid() is not null);
+create policy "client_events_delete_lead_only" on client_events
+  for delete using (is_team_lead());
+
+create or replace function create_client_created_event()
+returns trigger language plpgsql security definer as $$
+begin
+  insert into client_events (client_id, event_type, event_date, created_by)
+  values (new.id, 'created', new.created_at, new.created_by);
+  return new;
+end;
+$$;
+create trigger trg_client_created_event
+  after insert on clients
+  for each row execute function create_client_created_event();
+
+-- ============================================================================
+-- DIALS (the "Dials" tab). A dial_list is a named tab, scoped to a
+-- buyer/seller category and a current/archived status. Dials are the raw
+-- call-list contacts within a given tab — lighter-weight than a full Client.
+-- ============================================================================
+create table dial_lists (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  dial_type text not null check (dial_type in ('buyer', 'seller')),
+  status text not null check (status in ('current', 'archived')) default 'current',
+  sort_order integer not null default 0,
+  created_by uuid references profiles(id) default auth.uid(),
+  created_at timestamptz not null default now()
+);
+
+alter table dial_lists enable row level security;
+create policy "dial_lists_select_all" on dial_lists
+  for select using (auth.uid() is not null);
+create policy "dial_lists_insert_all" on dial_lists
+  for insert with check (auth.uid() is not null);
+create policy "dial_lists_update_all" on dial_lists
+  for update using (auth.uid() is not null);
+create policy "dial_lists_delete_lead_only" on dial_lists
+  for delete using (is_team_lead());
+
+create table dials (
+  id uuid primary key default gen_random_uuid(),
+  list_id uuid not null references dial_lists(id) on delete cascade,
+  first_name text,
+  last_name text,
+  company_name text,          -- sellers only (their business name)
+  email text,
+  phone text,
+  linkedin text,
+  city text,
+  state text,
+  website text,               -- sellers only (their business website link)
+  call_notes text,
+  created_by uuid references profiles(id) default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table dials enable row level security;
+create policy "dials_select_all" on dials
+  for select using (auth.uid() is not null);
+create policy "dials_insert_all" on dials
+  for insert with check (auth.uid() is not null);
+create policy "dials_update_all" on dials
+  for update using (auth.uid() is not null);
+create policy "dials_delete_lead_only" on dials
   for delete using (is_team_lead());
 
 -- ============================================================================
