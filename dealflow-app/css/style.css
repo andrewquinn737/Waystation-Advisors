@@ -183,7 +183,7 @@ tr.clickable-row:hover { background: #faf8f2; }
 .count-badge { color: var(--text-muted); font-size: 13px; }
 
 /* ---- Popups need to sit above the full-screen client modal ---- */
-#requiredPopup, #eventPopup { z-index: 200; }
+#requiredPopup, #eventPopup, #confirmDeleteModal, #introCallPopup { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
