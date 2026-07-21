@@ -348,11 +348,14 @@ create table dials (
   last_name text,
   company_name text,          -- sellers only (their business name)
   email text,
-  phone text,
+  mobile_phone text,
+  company_phone text,
   linkedin text,
   city text,
   state text,
   website text,               -- sellers only (their business website link)
+  industry text,
+  summary text,
   call_notes text,
   created_by uuid references profiles(id) default auth.uid(),
   created_at timestamptz not null default now(),
