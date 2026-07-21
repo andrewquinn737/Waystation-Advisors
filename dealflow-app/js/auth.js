@@ -45,25 +45,39 @@ export function renderNav(profile) {
 
   const financeLink = profile.role === "team_lead" ? link("finance.html", "Finance") : "";
 
+  // Two nav presentations share the same markup pattern: a full top bar
+  // (desktop) and a fixed bottom tab bar (mobile — see the max-width:720px
+  // media query in css/style.css, which hides one and shows the other).
   mount.innerHTML = `
-    <div class="brand">Waystation Advisors</div>
-    <div class="links">
+    <div class="topnav-bar">
+      <div class="brand">Waystation Advisors</div>
+      <div class="links">
+        ${link("profile.html", "Profile")}
+        ${link("clients.html", "Clients")}
+        ${link("dials.html", "Dials")}
+        ${financeLink}
+      </div>
+      <div class="who">
+        <span>${profile.full_name}</span>
+        <span class="role-badge">${profile.role === "team_lead" ? "Team Lead" : "Intern"}</span>
+        <button class="btn secondary small" id="signOutBtn">Sign out</button>
+      </div>
+    </div>
+    <div class="bottom-tabbar">
       ${link("profile.html", "Profile")}
       ${link("clients.html", "Clients")}
       ${link("dials.html", "Dials")}
       ${financeLink}
-    </div>
-    <div class="who">
-      <span>${profile.full_name}</span>
-      <span class="role-badge">${profile.role === "team_lead" ? "Team Lead" : "Intern"}</span>
-      <button class="btn secondary small" id="signOutBtn">Sign out</button>
+      <button type="button" id="bottomSignOutBtn">Sign out</button>
     </div>
   `;
 
-  document.getElementById("signOutBtn").addEventListener("click", async () => {
+  const doSignOut = async () => {
     await supabase.auth.signOut();
     window.location.href = "login.html";
-  });
+  };
+  document.getElementById("signOutBtn").addEventListener("click", doSignOut);
+  document.getElementById("bottomSignOutBtn").addEventListener("click", doSignOut);
 }
 
 export function showError(el, err) {

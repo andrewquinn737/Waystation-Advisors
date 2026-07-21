@@ -10,6 +10,7 @@ import {
   getMissingFields,
 } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -83,6 +84,12 @@ function clientSecondary(c) {
   }
   return "—";
 }
+// "Company name, City, State" (or just location if no company) — used in the
+// mobile card list's subtitle line.
+function clientCompanyAndLocation(c) {
+  const loc = clientLocation(c);
+  return [c.company_name || "", loc === "—" ? "" : loc].filter(Boolean).join(", ");
+}
 
 // ---------------------------------------------------------------------------
 // List view
@@ -131,11 +138,31 @@ function renderTable() {
           .join("")}
       </tbody>
     </table>
+
+    <!-- Mobile-only simplified card list (shown instead of the table below
+         the 720px breakpoint — see css/style.css). No column labels, no
+         buyer/seller pill: just the name, then company + location, then
+         instant-contact icons. -->
+    <div class="mobile-list">
+      ${rows
+        .map(
+          (c) => `
+        <div class="mobile-card clickable-row" data-id="${c.id}">
+          <div class="mc-main">
+            <div class="mc-name">${escapeHtml(clientDisplayName(c))}</div>
+            <div class="mc-sub">${escapeHtml(clientCompanyAndLocation(c))}</div>
+          </div>
+          ${contactActionIcons({ phone: c.phone, email: c.email })}
+        </div>`
+        )
+        .join("")}
+    </div>
   `;
 
   els.tableWrap.querySelectorAll("[data-id]").forEach((row) => {
     row.addEventListener("click", () => openDetailModal(clients.find((c) => c.id === row.dataset.id)));
   });
+  stopContactActionPropagation(els.tableWrap);
 }
 
 els.search.addEventListener("input", renderTable);
@@ -147,41 +174,6 @@ els.search.addEventListener("input", renderTable);
 function rf(label, value) {
   const v = value === null || value === undefined || value === "" ? "" : String(value);
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
-}
-
-const CONTACT_ICONS = {
-  sms: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
-  tel: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
-  mailto: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
-};
-
-// Read-only phone/email field with "text / call / email" quick-action icons.
-// Only used in view mode — these actions are hidden while editing.
-function rfContact(label, value, kind) {
-  const v = value ? String(value) : "";
-  let actionsHTML = "";
-  if (v) {
-    if (kind === "phone") {
-      actionsHTML = `
-        <div class="contact-actions">
-          <a class="contact-action-btn" href="sms:${escapeHtml(v)}" title="Text">${CONTACT_ICONS.sms}</a>
-          <a class="contact-action-btn" href="tel:${escapeHtml(v)}" title="Call">${CONTACT_ICONS.tel}</a>
-        </div>`;
-    } else if (kind === "email") {
-      actionsHTML = `
-        <div class="contact-actions">
-          <a class="contact-action-btn" href="mailto:${escapeHtml(v)}" title="Email">${CONTACT_ICONS.mailto}</a>
-        </div>`;
-    }
-  }
-  return `
-    <div class="readonly-field">
-      <div class="rf-label">${escapeHtml(label)}</div>
-      <div class="rf-value-row">
-        <div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div>
-        ${actionsHTML}
-      </div>
-    </div>`;
 }
 
 function buildReadonlySections(client, showEditButton) {

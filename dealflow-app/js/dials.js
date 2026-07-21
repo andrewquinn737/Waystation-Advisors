@@ -11,6 +11,7 @@ import {
   BUYERS_ENABLED,
 } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -37,8 +38,7 @@ const els = {
   dialsTableWrap: document.getElementById("dialsTableWrap"),
   addDialBtn: document.getElementById("addDialBtn"),
   dialModalBackdrop: document.getElementById("dialModalBackdrop"),
-  dialModalTitle: document.getElementById("dialModalTitle"),
-  dialModalClose: document.getElementById("dialModalClose"),
+  dialModalHeader: document.getElementById("dialModalHeader"),
   dialModalError: document.getElementById("dialModalError"),
   dialModalBody: document.getElementById("dialModalBody"),
   dialModalActions: document.getElementById("dialModalActions"),
@@ -83,42 +83,9 @@ function openConfirmDelete(onConfirm) {
   noBtn.addEventListener("click", onNo);
 }
 
-const CONTACT_ICONS = {
-  sms: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
-  tel: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
-  mailto: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
-};
-
 function rf(label, value) {
   const v = value === null || value === undefined || value === "" ? "" : String(value);
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
-}
-
-function rfContact(label, value, kind) {
-  const v = value ? String(value) : "";
-  let actionsHTML = "";
-  if (v) {
-    if (kind === "phone") {
-      actionsHTML = `
-        <div class="contact-actions">
-          <a class="contact-action-btn" href="sms:${escapeHtml(v)}" title="Text">${CONTACT_ICONS.sms}</a>
-          <a class="contact-action-btn" href="tel:${escapeHtml(v)}" title="Call">${CONTACT_ICONS.tel}</a>
-        </div>`;
-    } else if (kind === "email") {
-      actionsHTML = `
-        <div class="contact-actions">
-          <a class="contact-action-btn" href="mailto:${escapeHtml(v)}" title="Email">${CONTACT_ICONS.mailto}</a>
-        </div>`;
-    }
-  }
-  return `
-    <div class="readonly-field">
-      <div class="rf-label">${escapeHtml(label)}</div>
-      <div class="rf-value-row">
-        <div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div>
-        ${actionsHTML}
-      </div>
-    </div>`;
 }
 
 function rfWebsite(label, value) {
@@ -137,8 +104,71 @@ function dialDisplayName(d) {
 function dialLocation(d) {
   return [d.city, d.state].filter(Boolean).join(", ") || "—";
 }
+// "Company name, City, State" — shown as the small subtitle under the dial's
+// name in the detail popup header, and in the mobile card list.
+function dialCompanyAndLocation(d) {
+  const loc = dialLocation(d);
+  return [d.company_name || "", loc === "—" ? "" : loc].filter(Boolean).join(", ");
+}
 function emptyDial() {
-  return { first_name: "", last_name: "", city: "", state: "", email: "", phone: "", linkedin: "", company_name: "", website: "", call_notes: "" };
+  return {
+    first_name: "", last_name: "", city: "", state: "", email: "",
+    mobile_phone: "", company_phone: "", linkedin: "", company_name: "",
+    website: "", industry: "", summary: "", call_notes: "",
+  };
+}
+
+// One row of a phone number with its "(Mobile)"/"(Company)" label + instant
+// contact icons — used inside the "Phone numbers" display block below.
+function phoneNumberRow(number, kind) {
+  return `
+    <div class="rf-value-row" style="margin-bottom: 8px;">
+      <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
+      ${contactActionIcons({ phone: number })}
+    </div>`;
+}
+
+// Display-mode "Phone numbers" section: shows whichever of mobile/company
+// are present, each with its own instant-contact icons.
+function buildPhoneNumbersHTML(dial) {
+  const rows = [];
+  if (dial.mobile_phone) rows.push(phoneNumberRow(dial.mobile_phone, "Mobile"));
+  if (dial.company_phone) rows.push(phoneNumberRow(dial.company_phone, "Company"));
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">Phone numbers</div>
+      ${rows.length ? rows.join("") : `<div class="rf-value empty">Not provided</div>`}
+    </div>`;
+}
+
+// Call notes are only ever shown in display mode, where they're directly
+// editable (autosaves on blur — see wireCallNotesAutosave).
+function buildCallNotesLiveHTML(dial) {
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">Call notes</div>
+      <textarea id="d_call_notes_live" class="call-notes-live">${escapeHtml(dial.call_notes || "")}</textarea>
+      <div class="help-text call-notes-saved hidden" id="callNotesSavedMsg">Saved</div>
+    </div>`;
+}
+
+function wireCallNotesAutosave() {
+  const notesEl = document.getElementById("d_call_notes_live");
+  if (!notesEl || !currentDial) return;
+  notesEl.addEventListener("blur", async () => {
+    const val = notesEl.value.trim() || null;
+    if (val === (currentDial.call_notes || null)) return;
+    const { error } = await supabase.from("dials").update({ call_notes: val }).eq("id", currentDial.id);
+    if (error) return showError(els.dialModalError, error);
+    currentDial.call_notes = val;
+    const idx = dials.findIndex((d) => d.id === currentDial.id);
+    if (idx !== -1) dials[idx].call_notes = val;
+    const msg = document.getElementById("callNotesSavedMsg");
+    if (msg) {
+      msg.classList.remove("hidden");
+      setTimeout(() => msg.classList.add("hidden"), 1500);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -319,17 +349,36 @@ function renderDialsTable() {
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
             ${showCompany ? `<td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>` : ""}
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
-            <td class="muted" data-label="Phone">${escapeHtml(d.phone || "—")}</td>
+            <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || "—")}</td>
             <td class="muted" data-label="Email">${escapeHtml(d.email || "—")}</td>
           </tr>`
           )
           .join("")}
       </tbody>
     </table>
+
+    <!-- Mobile-only simplified card list — no column labels, just name on
+         top, company + location smaller underneath, and instant-contact
+         icons using the mobile number only (never the company number). -->
+    <div class="mobile-list">
+      ${dials
+        .map(
+          (d, i) => `
+        <div class="mobile-card clickable-row" data-index="${i}">
+          <div class="mc-main">
+            <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
+            <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
+          </div>
+          ${contactActionIcons({ phone: d.mobile_phone, email: d.email })}
+        </div>`
+        )
+        .join("")}
+    </div>
   `;
   els.dialsTableWrap.querySelectorAll("[data-index]").forEach((row) => {
     row.addEventListener("click", () => openDialModal(Number(row.dataset.index)));
   });
+  stopContactActionPropagation(els.dialsTableWrap);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,15 +388,13 @@ function renderDialsTable() {
 function buildDialViewHTML(dial) {
   const isSeller = currentType === "seller";
   return `
-    ${rf("First name", dial.first_name)}
-    ${rf("Last name", dial.last_name)}
-    ${isSeller ? rf("Company name", dial.company_name) : ""}
-    ${rf("Location", dialLocation(dial) === "—" ? "" : dialLocation(dial))}
     ${rfContact("Email", dial.email, "email")}
-    ${rfContact("Phone number", dial.phone, "phone")}
+    ${buildPhoneNumbersHTML(dial)}
     ${rf("LinkedIn", dial.linkedin)}
     ${isSeller ? rfWebsite("Website", dial.website) : ""}
-    ${rf("Call notes", dial.call_notes)}
+    ${rf("Industry sector", dial.industry)}
+    ${rf("Summary", dial.summary)}
+    ${buildCallNotesLiveHTML(dial)}
   `;
 }
 
@@ -371,26 +418,36 @@ function buildDialEditHTML(dial) {
     </div>
     <label for="d_email">Email</label>
     <input id="d_email" type="email" value="${escapeHtml(dial.email)}" />
-    <label for="d_phone">Phone number</label>
-    <input id="d_phone" type="tel" value="${escapeHtml(dial.phone)}" />
+    <div class="form-row">
+      <div><label for="d_mobile_phone">Mobile number</label><input id="d_mobile_phone" type="tel" value="${escapeHtml(dial.mobile_phone)}" /></div>
+      <div><label for="d_company_phone">Company number</label><input id="d_company_phone" type="tel" value="${escapeHtml(dial.company_phone)}" /></div>
+    </div>
     <label for="d_linkedin">LinkedIn</label>
     <input id="d_linkedin" value="${escapeHtml(dial.linkedin)}" />
     ${isSeller ? `<label for="d_website">Website</label><input id="d_website" value="${escapeHtml(dial.website)}" />` : ""}
-    <label for="d_call_notes">Call notes</label>
-    <textarea id="d_call_notes">${escapeHtml(dial.call_notes || "")}</textarea>
+    <label for="d_industry">Industry sector</label>
+    <input id="d_industry" value="${escapeHtml(dial.industry)}" />
+    <label for="d_summary">Summary</label>
+    <textarea id="d_summary">${escapeHtml(dial.summary || "")}</textarea>
   `;
 }
 
 function collectDialFormData() {
+  // Note: call_notes is intentionally NOT collected here — it's edited
+  // directly in display mode (autosaves on blur, see wireCallNotesAutosave)
+  // and is not part of the edit form, so leaving it out of this object means
+  // saving other fields never touches/overwrites it.
   const data = {
     first_name: document.getElementById("d_first_name").value.trim() || null,
     last_name: document.getElementById("d_last_name").value.trim() || null,
     city: document.getElementById("d_city").value.trim() || null,
     state: document.getElementById("d_state").value || null,
     email: document.getElementById("d_email").value.trim() || null,
-    phone: document.getElementById("d_phone").value.trim() || null,
+    mobile_phone: document.getElementById("d_mobile_phone").value.trim() || null,
+    company_phone: document.getElementById("d_company_phone").value.trim() || null,
     linkedin: document.getElementById("d_linkedin").value.trim() || null,
-    call_notes: document.getElementById("d_call_notes").value.trim() || null,
+    industry: document.getElementById("d_industry").value.trim() || null,
+    summary: document.getElementById("d_summary").value.trim() || null,
   };
   if (currentType === "seller") {
     data.company_name = document.getElementById("d_company_name").value.trim() || null;
@@ -402,20 +459,43 @@ function collectDialFormData() {
 function renderDialModal() {
   const isCreate = dialMode === "create";
   const dial = isCreate ? emptyDial() : currentDial;
-  els.dialModalTitle.textContent = isCreate ? "New dial" : dialDisplayName(currentDial);
+  const isViewingExisting = !isCreate && dialMode === "view";
+
+  const subtitle = isCreate ? "" : dialCompanyAndLocation(currentDial);
+
+  // Header (title/subtitle/Create-client/close) and the edit-button row
+  // below it are fully rebuilt every render — they depend on which dial and
+  // mode is active — then re-wired, same pattern as the body/actions below.
+  els.dialModalHeader.innerHTML = `
+    <div class="dial-modal-header">
+      <div class="dial-modal-header-main">
+        <h2>${escapeHtml(isCreate ? "New dial" : dialDisplayName(currentDial))}</h2>
+        ${subtitle ? `<div class="dial-modal-subtitle">${escapeHtml(subtitle)}</div>` : ""}
+      </div>
+      <div class="dial-modal-header-actions">
+        ${isViewingExisting ? `<button type="button" class="btn secondary small" id="createClientFromDialBtn">Create client</button>` : ""}
+        <button type="button" class="fs-close" id="dialModalClose">&times;</button>
+      </div>
+    </div>
+    <div class="dial-modal-editrow">
+      ${isViewingExisting ? `<button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>` : ""}
+    </div>
+  `;
+  document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
+  if (isViewingExisting) {
+    document.getElementById("createClientFromDialBtn").addEventListener("click", () => openCreateClientFromDial(currentDial));
+    document.getElementById("dialEditBtn").addEventListener("click", () => {
+      dialMode = "edit";
+      renderDialModal();
+    });
+  }
+
   els.dialModalError.classList.add("hidden");
   els.dialModalError.textContent = "";
 
-  const topRow =
-    !isCreate && dialMode === "view"
-      ? `<div class="dial-modal-toprow">
-           <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
-           <button type="button" class="btn secondary small" id="createClientFromDialBtn">Create client</button>
-         </div>`
-      : "";
-
   const fieldsHTML = dialMode === "edit" || isCreate ? buildDialEditHTML(dial) : buildDialViewHTML(dial);
-  els.dialModalBody.innerHTML = `${topRow}${fieldsHTML}`;
+  els.dialModalBody.innerHTML = fieldsHTML;
+  stopContactActionPropagation(els.dialModalBody);
 
   if (dialMode === "edit" || isCreate) {
     els.dialModalActions.innerHTML = `
@@ -427,6 +507,8 @@ function renderDialModal() {
     els.dialModalActions.innerHTML = "";
   }
 
+  // Prev/Next now render inside the modal box itself, at the bottom (only
+  // relevant in display mode).
   const showNav = !isCreate && dialMode === "view" && dials.length > 1;
   els.dialNavRow.classList.toggle("hidden", !showNav);
   els.dialPrevBtn.disabled = currentDialIndex <= 0;
@@ -444,11 +526,7 @@ function renderDialModal() {
     const delBtn = document.getElementById("dialDeleteBtn");
     if (delBtn) delBtn.addEventListener("click", handleDeleteDial);
   } else {
-    document.getElementById("dialEditBtn").addEventListener("click", () => {
-      dialMode = "edit";
-      renderDialModal();
-    });
-    document.getElementById("createClientFromDialBtn").addEventListener("click", () => openCreateClientFromDial(currentDial));
+    wireCallNotesAutosave();
   }
 }
 
@@ -506,7 +584,9 @@ els.addDialBtn.addEventListener("click", () => {
   els.dialModalBackdrop.classList.remove("hidden");
   renderDialModal();
 });
-els.dialModalClose.addEventListener("click", closeDialModal);
+// Note: the close (x) button is inside #dialModalHeader, which is rebuilt on
+// every renderDialModal() call, so its click listener is wired there instead
+// of once here (see renderDialModal).
 
 // ---------------------------------------------------------------------------
 // Prev/next navigation — swipe, on-screen arrows, and keyboard arrows
@@ -556,7 +636,9 @@ function openCreateClientFromDial(dial) {
     city: dial.city || "",
     state: dial.state || "",
     email: dial.email || "",
-    phone: dial.phone || "",
+    // Only the mobile number transfers to a new client — never the company
+    // number.
+    phone: dial.mobile_phone || "",
     linkedin: dial.linkedin || "",
     company_name: currentType === "seller" ? dial.company_name || "" : "",
   });
