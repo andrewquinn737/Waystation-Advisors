@@ -1,20 +1,19 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
+import {
+  escapeHtml,
+  lookingForLabel,
+  defaultClient,
+  buildEditableSections,
+  wireEditableFormEvents,
+  collectFormData,
+  getMissingFields,
+} from "./clientForm.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
 const isLead = profile.role === "team_lead";
-
-const STATES = [
-  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
-  "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
-  "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
-  "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York",
-  "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
-  "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
-  "West Virginia", "Wisconsin", "Wyoming", "Not in the US",
-];
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -44,18 +43,11 @@ const els = {
   eventPopupClose: document.getElementById("eventPopupClose"),
 };
 
-function escapeHtml(str) {
-  if (str === null || str === undefined) return "";
-  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
 function fmtNum(n) {
   return n === null || n === undefined || n === "" ? "0" : Number(n).toLocaleString();
 }
 function monthName(m) {
   return MONTH_NAMES[m] || "";
-}
-function lookingForLabel(type) {
-  return type === "seller" ? "What they're looking for in a buyer" : "What they're looking for in a seller";
 }
 function clientDisplayName(c) {
   return `${c.first_name || ""} ${c.last_name || ""}`.trim() || "—";
@@ -131,134 +123,59 @@ els.search.addEventListener("input", renderTable);
 // Field sections — shared between "new client" and the Profile tab
 // ---------------------------------------------------------------------------
 
-function defaultClient() {
-  return {
-    first_name: "", last_name: "", client_type: "buyer", city: "", state: "",
-    email: "", phone: "", linkedin: "", company_name: "", industry: "",
-    annual_revenue: null, employee_count: null, founded_year: null, founded_month: null,
-    money_to_spend_min: null, money_to_spend_max: null, looking_for: "", other_notes: "",
-    intern_name: profile.full_name,
-  };
-}
-
-function buildEditableSections(client) {
-  const type = client.client_type || "buyer";
-  const founded = client.founded_year ? `${client.founded_year}-${String(client.founded_month || 1).padStart(2, "0")}` : "";
-  return `
-    <div class="accordion-section open" data-section="personal">
-      <div class="accordion-header"><span>Personal information</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        <div class="form-row">
-          <div>
-            <div class="field-label-row"><label for="f_first_name">First name</label><span class="field-required-msg hidden" data-field="first_name">required</span></div>
-            <input id="f_first_name" value="${escapeHtml(client.first_name)}" />
-          </div>
-          <div>
-            <div class="field-label-row"><label for="f_last_name">Last name</label><span class="field-required-msg hidden" data-field="last_name">required</span></div>
-            <input id="f_last_name" value="${escapeHtml(client.last_name)}" />
-          </div>
-        </div>
-        <div class="field-label-row"><label for="f_client_type">Buyer / Seller</label><span class="field-required-msg hidden" data-field="client_type">required</span></div>
-        <select id="f_client_type">
-          <option value="buyer" ${type === "buyer" ? "selected" : ""}>Buyer</option>
-          <option value="seller" ${type === "seller" ? "selected" : ""}>Seller</option>
-        </select>
-        <div class="form-row">
-          <div>
-            <div class="field-label-row"><label for="f_city">City</label><span class="field-required-msg hidden" data-field="city">required</span></div>
-            <input id="f_city" value="${escapeHtml(client.city)}" />
-          </div>
-          <div>
-            <div class="field-label-row"><label for="f_state">State</label><span class="field-required-msg hidden" data-field="state">required</span></div>
-            <select id="f_state">
-              <option value="">Select a state...</option>
-              ${STATES.map((s) => `<option value="${s}" ${client.state === s ? "selected" : ""}>${s}</option>`).join("")}
-            </select>
-          </div>
-        </div>
-        <div class="field-label-row"><label for="f_intern_name">Intern's name</label><span class="field-required-msg hidden" data-field="intern_name">required</span></div>
-        <input id="f_intern_name" value="${escapeHtml(client.intern_name || profile.full_name)}" readonly style="background:var(--bg); color:var(--text-muted);" />
-      </div>
-    </div>
-
-    <div class="accordion-section" data-section="contact">
-      <div class="accordion-header"><span>Contact information</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        <div class="field-label-row"><label for="f_email">Email</label><span class="field-required-msg hidden" data-field="contact">required</span></div>
-        <input id="f_email" type="email" value="${escapeHtml(client.email)}" />
-        <label for="f_phone">Phone number</label>
-        <input id="f_phone" type="tel" value="${escapeHtml(client.phone)}" />
-        <label for="f_linkedin">LinkedIn</label>
-        <input id="f_linkedin" value="${escapeHtml(client.linkedin)}" />
-      </div>
-    </div>
-
-    <div class="accordion-section" data-section="company">
-      <div class="accordion-header"><span>Company &amp; investment details</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        <div class="seller-fields ${type === "seller" ? "" : "hidden"}">
-          <div class="field-label-row"><label for="f_company_name">Company name</label><span class="field-required-msg hidden" data-field="company_name">required</span></div>
-          <input id="f_company_name" value="${escapeHtml(client.company_name)}" />
-          <div class="field-label-row"><label for="f_industry">Industry sector</label><span class="field-required-msg hidden" data-field="industry">required</span></div>
-          <input id="f_industry" value="${escapeHtml(client.industry)}" />
-          <div class="form-row">
-            <div>
-              <label for="f_revenue">Annual revenue ($)</label>
-              <input id="f_revenue" type="number" step="0.1" min="0" value="${client.annual_revenue ?? ""}" />
-            </div>
-            <div>
-              <label for="f_employees">Employees</label>
-              <input id="f_employees" type="number" step="1" min="0" value="${client.employee_count ?? ""}" />
-            </div>
-          </div>
-          <label for="f_founded">Founded (year / month)</label>
-          <input id="f_founded" type="month" value="${founded}" />
-        </div>
-        <div class="buyer-fields ${type === "buyer" ? "" : "hidden"}">
-          <div class="section-title" style="margin-top:0;">Money to spend (range)</div>
-          <div class="form-row">
-            <div>
-              <label for="f_money_min">Minimum ($)</label>
-              <input id="f_money_min" type="number" step="0.1" min="0" value="${client.money_to_spend_min ?? ""}" />
-            </div>
-            <div>
-              <label for="f_money_max">Maximum ($)</label>
-              <input id="f_money_max" type="number" step="0.1" min="0" value="${client.money_to_spend_max ?? ""}" />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="accordion-section" data-section="preferences">
-      <div class="accordion-header"><span>Preferences</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        <div class="field-label-row"><label for="f_looking_for" id="lookingForLabel">${lookingForLabel(type)}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
-        <textarea id="f_looking_for">${escapeHtml(client.looking_for || "")}</textarea>
-      </div>
-    </div>
-
-    <div class="accordion-section" data-section="notes">
-      <div class="accordion-header"><span>Other notes</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        <textarea id="f_other_notes">${escapeHtml(client.other_notes || "")}</textarea>
-      </div>
-    </div>
-  `;
-}
-
 function rf(label, value) {
   const v = value === null || value === undefined || value === "" ? "" : String(value);
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
 }
 
-function buildReadonlySections(client) {
+const CONTACT_ICONS = {
+  sms: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  tel: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  mailto: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
+};
+
+// Read-only phone/email field with "text / call / email" quick-action icons.
+// Only used in view mode — these actions are hidden while editing.
+function rfContact(label, value, kind) {
+  const v = value ? String(value) : "";
+  let actionsHTML = "";
+  if (v) {
+    if (kind === "phone") {
+      actionsHTML = `
+        <div class="contact-actions">
+          <a class="contact-action-btn" href="sms:${escapeHtml(v)}" title="Text">${CONTACT_ICONS.sms}</a>
+          <a class="contact-action-btn" href="tel:${escapeHtml(v)}" title="Call">${CONTACT_ICONS.tel}</a>
+        </div>`;
+    } else if (kind === "email") {
+      actionsHTML = `
+        <div class="contact-actions">
+          <a class="contact-action-btn" href="mailto:${escapeHtml(v)}" title="Email">${CONTACT_ICONS.mailto}</a>
+        </div>`;
+    }
+  }
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">${escapeHtml(label)}</div>
+      <div class="rf-value-row">
+        <div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div>
+        ${actionsHTML}
+      </div>
+    </div>`;
+}
+
+function buildReadonlySections(client, showEditButton) {
   const type = client.client_type;
   const location = [client.city, client.state].filter(Boolean).join(", ");
   const founded = client.founded_year ? `${monthName(client.founded_month)} ${client.founded_year}` : "";
   return `
     <div class="accordion-section open" data-section="personal">
-      <div class="accordion-header"><span>Personal information</span><span class="chevron">&#9662;</span></div>
+      <div class="accordion-header">
+        <div class="accordion-header-left">
+          <span>Personal information</span>
+          ${showEditButton ? `<button type="button" class="edit-icon-btn inline" id="editProfileBtn" title="Edit profile">&#9998;</button>` : ""}
+        </div>
+        <span class="chevron">&#9662;</span>
+      </div>
       <div class="accordion-body">
         ${rf("First name", client.first_name)}
         ${rf("Last name", client.last_name)}
@@ -270,8 +187,8 @@ function buildReadonlySections(client) {
     <div class="accordion-section" data-section="contact">
       <div class="accordion-header"><span>Contact information</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        ${rf("Email", client.email)}
-        ${rf("Phone number", client.phone)}
+        ${rfContact("Email", client.email, "email")}
+        ${rfContact("Phone number", client.phone, "phone")}
         ${rf("LinkedIn", client.linkedin)}
       </div>
     </div>
@@ -316,107 +233,16 @@ function wireAccordions() {
   });
 }
 
-function wireEditableFormEvents() {
-  wireAccordions();
-  const typeSel = document.getElementById("f_client_type");
-  const sellerFields = els.clientModalBody.querySelector(".seller-fields");
-  const buyerFields = els.clientModalBody.querySelector(".buyer-fields");
-  const lookingLabel = document.getElementById("lookingForLabel");
-  typeSel.addEventListener("change", () => {
-    const v = typeSel.value;
-    sellerFields.classList.toggle("hidden", v !== "seller");
-    buyerFields.classList.toggle("hidden", v !== "buyer");
-    lookingLabel.textContent = lookingForLabel(v);
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
-
-function collectFormData() {
-  const type = document.getElementById("f_client_type").value;
-  const data = {
-    first_name: document.getElementById("f_first_name").value.trim(),
-    last_name: document.getElementById("f_last_name").value.trim(),
-    client_type: type,
-    city: document.getElementById("f_city").value.trim(),
-    state: document.getElementById("f_state").value,
-    email: document.getElementById("f_email").value.trim(),
-    phone: document.getElementById("f_phone").value.trim(),
-    linkedin: document.getElementById("f_linkedin").value.trim(),
-    looking_for: document.getElementById("f_looking_for").value.trim(),
-    other_notes: document.getElementById("f_other_notes").value.trim(),
-    intern_name: document.getElementById("f_intern_name").value.trim(),
-  };
-  if (type === "seller") {
-    data.company_name = document.getElementById("f_company_name").value.trim();
-    data.industry = document.getElementById("f_industry").value.trim();
-    const rev = document.getElementById("f_revenue").value;
-    const emp = document.getElementById("f_employees").value;
-    data.annual_revenue = rev === "" ? null : Number(rev);
-    data.employee_count = emp === "" ? null : Number(emp);
-    const founded = document.getElementById("f_founded").value;
-    if (founded) {
-      const [y, m] = founded.split("-");
-      data.founded_year = Number(y);
-      data.founded_month = Number(m);
-    } else {
-      data.founded_year = null;
-      data.founded_month = null;
-    }
-    data.money_to_spend_min = null;
-    data.money_to_spend_max = null;
-  } else {
-    data.company_name = null;
-    data.industry = null;
-    data.annual_revenue = null;
-    data.employee_count = null;
-    data.founded_year = null;
-    data.founded_month = null;
-    const min = document.getElementById("f_money_min").value;
-    const max = document.getElementById("f_money_max").value;
-    data.money_to_spend_min = min === "" ? null : Number(min);
-    data.money_to_spend_max = max === "" ? null : Number(max);
-  }
-  return data;
-}
-
-function getMissingFields(data) {
-  const missing = [];
-  const popupLabels = [];
-
-  let nameMissing = false;
-  if (!data.first_name) { missing.push("first_name"); nameMissing = true; }
-  if (!data.last_name) { missing.push("last_name"); nameMissing = true; }
-  if (nameMissing) popupLabels.push("Name");
-
-  if (!data.client_type) { missing.push("client_type"); popupLabels.push("Buyer/Seller"); }
-
-  if (data.client_type === "seller" && !data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
-
-  if (!data.email && !data.phone) { missing.push("contact"); popupLabels.push("Phone number and/or email"); }
-
-  let locMissing = false;
-  if (!data.city) { missing.push("city"); locMissing = true; }
-  if (!data.state) { missing.push("state"); locMissing = true; }
-  if (locMissing) popupLabels.push("Location");
-
-  if (data.client_type === "seller" && !data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
-
-  if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
-
-  if (!data.intern_name) { missing.push("intern_name"); popupLabels.push("Intern's name"); }
-
-  return { missing, popupLabels };
-}
 
 function clearFieldErrors() {
   els.clientModalBody.querySelectorAll(".field-required-msg").forEach((el) => el.classList.add("hidden"));
 }
 
 function validateAndCollect() {
-  const data = collectFormData();
+  const data = collectFormData(els.clientModalBody);
   clearFieldErrors();
   const { missing, popupLabels } = getMissingFields(data);
   if (missing.length) {
@@ -475,17 +301,12 @@ function buildTimelineHTML() {
           .join("");
 
   return `
-    <div class="timeline-header">
-      <div></div>
-      <div style="position:relative;">
-        <button type="button" class="timeline-add-btn" id="timelineAddBtn" title="Add event">+</button>
-        <div class="timeline-add-menu hidden" id="timelineAddMenu">
-          <button type="button" id="addIntroCallBtn">Intro Call</button>
-        </div>
-      </div>
-    </div>
     <div class="timeline-list">
       ${itemsHTML}
+    </div>
+    <button type="button" class="timeline-add-btn" id="timelineAddBtn" title="Add event">+</button>
+    <div class="timeline-add-menu hidden" id="timelineAddMenu">
+      <button type="button" id="addIntroCallBtn">Intro Call</button>
     </div>
   `;
 }
@@ -526,13 +347,13 @@ function renderModalBody() {
     els.clientModalTitle.textContent = "New client";
     els.clientModalBody.innerHTML = `
       <div id="clientModalError" class="error-msg hidden"></div>
-      ${buildEditableSections(defaultClient())}
+      ${buildEditableSections(defaultClient(profile))}
       <div class="form-actions">
         <button type="button" class="btn" id="saveClientBtn">Save</button>
         <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
       </div>
     `;
-    wireEditableFormEvents();
+    wireEditableFormEvents(els.clientModalBody);
     document.getElementById("saveClientBtn").addEventListener("click", handleCreateSave);
     document.getElementById("cancelClientBtn").addEventListener("click", closeModal);
     return;
@@ -542,14 +363,9 @@ function renderModalBody() {
   updateSubtabActiveState();
 
   if (currentTab === "profile") {
-    const editIconHTML =
-      currentMode === "view"
-        ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button type="button" class="edit-icon-btn" id="editProfileBtn" title="Edit profile">&#9998;</button></div>`
-        : "";
     els.clientModalBody.innerHTML = `
-      ${editIconHTML}
       <div id="clientModalError" class="error-msg hidden"></div>
-      ${currentMode === "edit" ? buildEditableSections(currentClient) : buildReadonlySections(currentClient)}
+      ${currentMode === "edit" ? buildEditableSections(currentClient) : buildReadonlySections(currentClient, true)}
       ${
         currentMode === "edit"
           ? `<div class="form-actions">
@@ -561,7 +377,7 @@ function renderModalBody() {
       }
     `;
     if (currentMode === "edit") {
-      wireEditableFormEvents();
+      wireEditableFormEvents(els.clientModalBody);
       document.getElementById("saveClientBtn").addEventListener("click", handleEditSave);
       document.getElementById("cancelClientBtn").addEventListener("click", () => {
         currentMode = "view";
@@ -571,7 +387,8 @@ function renderModalBody() {
       if (delBtn) delBtn.addEventListener("click", handleDelete);
     } else {
       wireAccordions();
-      document.getElementById("editProfileBtn").addEventListener("click", () => {
+      document.getElementById("editProfileBtn").addEventListener("click", (e) => {
+        e.stopPropagation();
         currentMode = "edit";
         renderModalBody();
       });
