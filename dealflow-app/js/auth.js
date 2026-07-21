@@ -4,7 +4,7 @@ import { supabase } from "./supabaseClient.js";
  * Call at the top of every protected page. Redirects to login.html if
  * there's no session, otherwise returns { user, profile }.
  * If teamLeadOnly is true and the signed-in user is an intern, redirects
- * them to buyers.html (defense in depth — the database RLS is the real
+ * them to profile.html (defense in depth — the database RLS is the real
  * gate, this just avoids showing a page they'd get empty data on).
  */
 export async function requireSession({ teamLeadOnly = false } = {}) {
@@ -27,7 +27,7 @@ export async function requireSession({ teamLeadOnly = false } = {}) {
   }
 
   if (teamLeadOnly && profile.role !== "team_lead") {
-    window.location.href = "buyers.html";
+    window.location.href = "profile.html";
     return null;
   }
 
@@ -46,11 +46,11 @@ export function renderNav(profile) {
   const financeLink = profile.role === "team_lead" ? link("finance.html", "Finance") : "";
 
   mount.innerHTML = `
-    <div class="brand">Deal Flow</div>
+    <div class="brand">Waystation Advisors</div>
     <div class="links">
-      ${link("buyers.html", "Buyers")}
-      ${link("sellers.html", "Sellers")}
-      ${link("deals.html", "Deals")}
+      ${link("profile.html", "Profile")}
+      ${link("clients.html", "Clients")}
+      ${link("dials.html", "Dials")}
       ${financeLink}
     </div>
     <div class="who">

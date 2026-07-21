@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 
-// Finance is team-lead only — requireSession bounces interns back to buyers.html.
+// Finance is team-lead only — requireSession bounces interns back to profile.html.
 const session = await requireSession({ teamLeadOnly: true });
 if (!session) throw new Error("redirecting");
 
