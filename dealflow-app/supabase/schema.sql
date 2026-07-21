@@ -237,6 +237,58 @@ create trigger deals_protect_closing
   for each row execute function protect_deal_closing();
 
 -- ============================================================================
+-- CLIENTS (unified buyer/seller record — replaces the separate buyers/sellers
+-- tables for the new "Clients" tab). The old buyers/sellers/deals tables
+-- above are left in place since Finance still reads from them.
+-- ============================================================================
+create table clients (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  client_type text not null check (client_type in ('buyer', 'seller')),
+  company_name text,               -- sellers only
+  contact_info text,
+  industry text,
+  location text,
+  annual_revenue numeric,
+  employee_count integer,
+  founded_year integer,
+  founded_month integer check (founded_month between 1 and 12),
+  looking_for text,                -- what they're looking for in a buyer/seller
+  intern_name text,                -- intern/contractor working this client
+  created_by uuid references profiles(id) default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table clients enable row level security;
+
+-- Any signed-in user (intern or team lead) can view, add, and edit clients.
+-- Only team leads can delete. Adjust later if interns should be scoped to
+-- only the clients assigned to them.
+create policy "clients_select_all" on clients
+  for select using (auth.uid() is not null);
+create policy "clients_insert_all" on clients
+  for insert with check (auth.uid() is not null);
+create policy "clients_update_all" on clients
+  for update using (auth.uid() is not null);
+create policy "clients_delete_lead_only" on clients
+  for delete using (is_team_lead());
+
+-- ============================================================================
+-- TEAMS (shown in the Profile page's "Teams" popup). Empty for now — add
+-- rows here whenever you're ready to list your company's teams.
+-- ============================================================================
+create table teams (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table teams enable row level security;
+create policy "teams_select_all" on teams
+  for select using (auth.uid() is not null);
+
+-- ============================================================================
 -- Auto-create a profile row whenever someone signs up.
 -- New users default to 'intern' — a team lead must promote them in the
 -- profiles table (or via the app, if you add an admin screen for it).
