@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clients — Waystation Advisors</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f5fed" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
+<script src="js/pwa.js"></script>
+</head>
+<body data-page="clients.html">
+  <nav class="topnav" id="topnav"></nav>
+
+  <main>
+    <div class="page-header">
+      <h1>Clients</h1>
+    </div>
+    <div id="errorBox" class="error-msg hidden"></div>
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search clients..." />
+      <span class="count-badge" id="countBadge"></span>
+    </div>
+    <div id="tableWrap"></div>
+  </main>
+
+  <button class="fab" id="addBtn" title="New client">+</button>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <div class="modal">
+      <h2 id="modalTitle">Client</h2>
+      <div id="modalError" class="error-msg hidden"></div>
+      <form id="clientForm">
+        <input type="hidden" id="clientId" />
+
+        <label for="name">Name</label>
+        <input id="name" required />
+
+        <label for="clientType">Buyer / Seller</label>
+        <select id="clientType" required>
+          <option value="buyer">Buyer</option>
+          <option value="seller">Seller</option>
+        </select>
+
+        <div id="companyNameField">
+          <label for="companyName">Company name <span class="help-text" style="display:inline;">(seller only)</span></label>
+          <input id="companyName" />
+        </div>
+
+        <label for="contactInfo">Contact info</label>
+        <input id="contactInfo" placeholder="Email / phone" />
+
+        <div class="form-row">
+          <div>
+            <label for="industry">Industry sector</label>
+            <input id="industry" />
+          </div>
+          <div>
+            <label for="location">Location</label>
+            <input id="location" />
+          </div>
+        </div>
+
+        <div class="section-title">Size</div>
+        <div class="form-row">
+          <div>
+            <label for="revenue">Annual revenue ($)</label>
+            <input id="revenue" type="number" step="0.01" min="0" />
+          </div>
+          <div>
+            <label for="employees">Employees</label>
+            <input id="employees" type="number" min="0" step="1" />
+          </div>
+        </div>
+
+        <label for="founded">Founded (year / month)</label>
+        <input id="founded" type="month" />
+
+        <label for="lookingFor">What they're looking for in a buyer/seller</label>
+        <textarea id="lookingFor"></textarea>
+
+        <label for="internName">Intern / contractor's name</label>
+        <input id="internName" />
+
+        <div class="form-actions">
+          <button type="submit" class="btn" id="saveBtn">Save</button>
+          <button type="button" class="btn secondary" id="cancelBtn">Cancel</button>
+          <button type="button" class="btn danger hidden" id="deleteBtn" style="margin-left:auto;">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="js/clients.js"></script>
+</body>
+</html>

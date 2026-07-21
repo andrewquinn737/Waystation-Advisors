@@ -1,7 +1,7 @@
 {
-  "name": "Deal Flow",
-  "short_name": "Deal Flow",
-  "description": "Track sellers, buyers, deals, and payments.",
+  "name": "Waystation Advisors",
+  "short_name": "Waystation",
+  "description": "Track clients, dials, and payments.",
   "start_url": "/index.html",
   "scope": "/",
   "display": "standalone",

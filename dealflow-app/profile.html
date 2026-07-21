@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Profile — Waystation Advisors</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f5fed" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
+<script src="js/pwa.js"></script>
+</head>
+<body data-page="profile.html">
+  <nav class="topnav" id="topnav"></nav>
+
+  <main>
+    <div class="page-header">
+      <h1>Profile</h1>
+    </div>
+    <div id="errorBox" class="error-msg hidden"></div>
+
+    <div class="profile-card">
+      <div class="profile-avatar" id="avatarInitials">?</div>
+      <h1 id="profileName">—</h1>
+      <p class="help-text" id="profileRole"></p>
+      <p class="help-text" style="margin-top:16px;">More profile details are coming soon.</p>
+
+      <div class="form-actions" style="margin-top:20px;">
+        <button class="btn secondary" id="teamsBtn">Teams</button>
+      </div>
+    </div>
+  </main>
+
+  <div class="fullscreen-modal hidden" id="teamsModal">
+    <div class="fs-header">
+      <h2>Teams</h2>
+      <button class="fs-close" id="teamsCloseBtn">✕</button>
+    </div>
+    <div class="fs-body">
+      <div id="teamsWrap"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/profile.js"></script>
+</body>
+</html>

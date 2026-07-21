@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Waystation Advisors</title>
+<title>Dials — Waystation Advisors</title>
+<link rel="stylesheet" href="css/style.css" />
 <link rel="manifest" href="manifest.json" />
 <meta name="theme-color" content="#2f5fed" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -12,11 +13,16 @@
 <meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
 <script src="js/pwa.js"></script>
 </head>
-<body>
-  <script type="module">
-    import { supabase } from "./js/supabaseClient.js";
-    const { data: { session } } = await supabase.auth.getSession();
-    window.location.href = session ? "profile.html" : "login.html";
-  </script>
+<body data-page="dials.html">
+  <nav class="topnav" id="topnav"></nav>
+
+  <main>
+    <div class="page-header">
+      <h1>Dials</h1>
+    </div>
+    <div class="empty-state">Nothing here yet — check back soon.</div>
+  </main>
+
+  <script type="module" src="js/dials.js"></script>
 </body>
 </html>

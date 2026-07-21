@@ -2,11 +2,11 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "dealflow-shell-v1";
+const CACHE = "waystation-shell-v2";
 const SHELL = [
-  "/", "/index.html", "/login.html", "/buyers.html", "/sellers.html",
-  "/deals.html", "/finance.html", "/css/style.css",
-  "/js/auth.js", "/js/buyers.js", "/js/sellers.js", "/js/deals.js",
+  "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
+  "/dials.html", "/finance.html", "/css/style.css",
+  "/js/auth.js", "/js/profile.js", "/js/clients.js", "/js/dials.js",
   "/js/finance.js", "/js/config.js", "/js/supabaseClient.js",
   "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png",
 ];

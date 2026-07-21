@@ -1,4 +1,4 @@
-# Deploying Deal Flow
+# Deploying Waystation Advisors
 
 This app is plain HTML/CSS/JS — no build step, no npm install required. It talks
 directly to a Supabase project (a hosted Postgres database + login system).
@@ -65,18 +65,14 @@ if you'd rather use one of those.
    - Find your row, change `role` from `intern` to `team_lead`, save.
    - Refresh the app — you'll now see the Finance tab and full edit rights.
 3. Repeat that role change for other team leads. Everyone else who signs up
-   stays an intern automatically — they'll only see and edit buyers/sellers
-   assigned to them, with no access to financial data (enforced by the
-   database itself, not just hidden in the UI — see `supabase/schema.sql`).
+   stays an intern automatically.
 
 ## 5. Day-to-day use
 
-- **Interns**: sign up, get assigned buyers/sellers by a team lead (via the
-  "Assigned intern" dropdown on the Buyers/Sellers pages), and manage the
-  profile details and pipeline status of what's assigned to them.
-- **Team leads**: full visibility — add/assign buyers and sellers, move deals
-  through the pipeline, close deals (which auto-creates a commission record),
-  and log/track monthly subscription payments on the Finance page.
+- **Interns**: sign up, see their own info on the Profile page, and add/view
+  clients (buyers and sellers) on the Clients page.
+- **Team leads**: everything interns have, plus the Finance page — logging
+  and tracking monthly subscription payments and commissions.
 
 ## 6. Get it on interns' phones (no app store needed)
 
@@ -90,7 +86,7 @@ Once it's deployed (step 3), send interns the URL and have them:
    installing from Safari).
 2. Tap the **Share** icon (square with an arrow) in the toolbar.
 3. Scroll down and tap **Add to Home Screen**.
-4. It now appears as a "Deal Flow" icon and opens full-screen, no browser
+4. It now appears as a "Waystation Advisors" icon and opens full-screen, no browser
    bar.
 
 **Android, in Chrome:**
