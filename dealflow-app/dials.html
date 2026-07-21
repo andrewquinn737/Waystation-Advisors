@@ -22,6 +22,10 @@
   <main>
     <div class="page-header">
       <h1>Dials</h1>
+      <div class="segmented small" id="statusSwitch">
+        <button type="button" data-status="current" class="active">Current</button>
+        <button type="button" data-status="archived">Archived</button>
+      </div>
     </div>
     <div id="errorBox" class="error-msg hidden"></div>
 
@@ -29,10 +33,6 @@
       <div class="segmented" id="typeSwitch">
         <button type="button" data-type="buyer" class="active">Buyers</button>
         <button type="button" data-type="seller">Sellers</button>
-      </div>
-      <div class="segmented small" id="statusSwitch">
-        <button type="button" data-status="current" class="active">Current</button>
-        <button type="button" data-status="archived">Archived</button>
       </div>
     </div>
 
@@ -47,21 +47,21 @@
 
   <button class="fab" id="addDialBtn" title="New dial">+</button>
 
-  <!-- Dial detail / create popup -->
+  <!-- Dial detail / create popup. The header (title/subtitle/create-client/
+       edit buttons) is fully rebuilt by js/dials.js on every render since it
+       depends on which dial + mode is active, so it's just an empty mount
+       point here. -->
   <div class="modal-backdrop hidden" id="dialModalBackdrop">
     <div class="dial-modal-stack">
       <div class="modal dial-modal">
-        <div class="dial-modal-header">
-          <h2 id="dialModalTitle">New dial</h2>
-          <button type="button" class="fs-close" id="dialModalClose">&times;</button>
-        </div>
+        <div id="dialModalHeader"></div>
         <div id="dialModalError" class="error-msg hidden"></div>
         <div id="dialModalBody"></div>
         <div class="form-actions" id="dialModalActions"></div>
-      </div>
-      <div class="dial-nav-row hidden" id="dialNavRow">
-        <button type="button" class="dial-nav-btn" id="dialPrevBtn">&#8249; Previous</button>
-        <button type="button" class="dial-nav-btn" id="dialNextBtn">Next &#8250;</button>
+        <div class="dial-nav-row hidden" id="dialNavRow">
+          <button type="button" class="btn secondary dial-nav-btn" id="dialPrevBtn">&#8249; Previous</button>
+          <button type="button" class="btn secondary dial-nav-btn" id="dialNextBtn">Next &#8250;</button>
+        </div>
       </div>
     </div>
   </div>
