@@ -120,6 +120,59 @@ Possible, but worth knowing before you commit:
   native-wrapper route if you outgrow the PWA (e.g. need push notifications,
   camera access, or other native-only APIs).
 
+## Setting up the "Schedule Intro Call" Calendly integration
+
+The "Schedule intro call" button (on a client's Timeline, and in the Dials
+"Create client" flow) books a real Calendly event through a Supabase Edge
+Function called `schedule-intro-call`. The function code lives in
+`supabase/functions/schedule-intro-call/` and has already been deployed for
+you. It needs two secret values that only you can provide — the app's public
+frontend code never touches these, so there's nothing to leak by putting them
+in Supabase's own secrets vault.
+
+**1. Get a Calendly Personal Access Token (requires a paid Calendly plan —
+Standard or higher — since the Scheduling API isn't on the free plan).**
+
+- Go to Calendly → **Integrations** → **API & Webhooks** → **Personal Access
+  Tokens**, and generate a token with at least the `scheduled_events:write`
+  scope.
+- If you ever paste a token into a chat, doc, or anywhere outside Calendly's
+  own settings page, treat it as compromised and generate a new one — anyone
+  who sees it can book/cancel events as you.
+
+**2. Find your "30min" event type's API URI.**
+
+The booking API needs a specific `https://api.calendly.com/event_types/...`
+URI, not the public scheduling link. Run this on your own computer (never
+paste your token into a chat) — it keeps the token local to your machine:
+
+```bash
+export CALENDLY_TOKEN="paste-your-new-token-here"
+USER_URI=$(curl -s -H "Authorization: Bearer $CALENDLY_TOKEN" https://api.calendly.com/users/me | python3 -c "import sys,json;print(json.load(sys.stdin)['resource']['uri'])")
+curl -s -H "Authorization: Bearer $CALENDLY_TOKEN" "https://api.calendly.com/event_types?user=$USER_URI" | python3 -m json.tool
+```
+
+Look through the output for the event type whose `"slug"` is `"30min"`, and
+copy its `"uri"` value (looks like
+`https://api.calendly.com/event_types/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+
+**3. Add both values as Supabase Edge Function secrets.**
+
+In the Supabase dashboard: **Project Settings** → **Edge Functions** →
+**Secrets**, add:
+
+- `CALENDLY_TOKEN` — the token from step 1
+- `CALENDLY_EVENT_TYPE_URI` — the URI from step 2
+
+That's it — no redeploy needed, the function reads secrets at request time.
+Once both are set, "Schedule intro call" will actually book the event on
+Calendly, invite the client, and add the intern as a guest.
+
+**If it stops working later**: the most common cause is the token expiring,
+being revoked, or the Calendly plan lapsing back to free (which disables the
+Scheduling API). The error shown in the app will include Calendly's own
+message, which usually says exactly which of those it is.
+
 ## Costs
 
 Supabase and Vercel free tiers comfortably cover 50–500 records and a
