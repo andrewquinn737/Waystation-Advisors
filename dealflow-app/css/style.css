@@ -29,8 +29,8 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* ---- Top nav ---- */
-.topnav {
+/* ---- Top nav (desktop) ---- */
+.topnav-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -38,11 +38,29 @@ a:hover { text-decoration: underline; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.topnav .brand { font-weight: 700; font-size: 16px; padding-bottom: 3px; border-bottom: 2px solid var(--gold); }
-.topnav .links { display: flex; gap: 18px; align-items: center; }
-.topnav .links a { color: var(--text); font-size: 14px; padding: 6px 4px; }
-.topnav .links a.active { color: var(--accent); font-weight: 600; }
-.topnav .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); }
+.topnav-bar .brand { font-weight: 700; font-size: 16px; padding-bottom: 3px; border-bottom: 2px solid var(--gold); }
+.topnav-bar .links { display: flex; gap: 18px; align-items: center; }
+.topnav-bar .links a { color: var(--text); font-size: 14px; padding: 6px 4px; }
+.topnav-bar .links a.active { color: var(--accent); font-weight: 600; }
+.topnav-bar .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); }
+
+/* ---- Bottom tab bar (mobile only — shown via the max-width:720px media
+   query further down, which also hides .topnav-bar) ---- */
+.bottom-tabbar {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  gap: 2px;
+}
+.bottom-tabbar a, .bottom-tabbar button {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 10px 2px; font-size: 12px; font-weight: 600; color: var(--text-muted);
+  border: none; background: none; cursor: pointer; border-radius: 8px; text-decoration: none;
+  font-family: inherit;
+}
+.bottom-tabbar a.active { color: var(--accent); }
+.bottom-tabbar a:active, .bottom-tabbar button:active { background: var(--gold-soft); }
 .role-badge {
   font-size: 11px;
   text-transform: uppercase;
@@ -285,12 +303,22 @@ tr.clickable-row:hover { background: #faf8f2; }
 /* ---- Dial detail/create popup ---- */
 .dial-modal-stack { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 540px; }
 .dial-modal { position: relative; width: 100%; max-width: 540px; }
-.dial-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.dial-modal-toprow { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
-.dial-nav-row { display: flex; gap: 20px; }
-.dial-nav-btn { background: none; border: none; color: var(--text-muted); font-size: 13.5px; font-weight: 600; cursor: pointer; padding: 6px 12px; }
-.dial-nav-btn:hover:not(:disabled) { color: var(--accent); }
-.dial-nav-btn:disabled { opacity: .3; cursor: not-allowed; }
+.dial-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dial-modal-header-main h2 { margin: 0; font-size: 17px; }
+.dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+.dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.dial-modal-editrow { display: flex; justify-content: flex-end; min-height: 8px; margin: 8px 0; }
+
+/* Prev/Next now live inside the modal box itself (bottom), styled to match
+   the rest of the box's buttons rather than as plain text links. */
+.dial-nav-row { display: flex; gap: 8px; margin-top: 16px; }
+.dial-nav-btn { flex: 1; text-align: center; }
+.dial-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Editable "Call notes" textarea shown only in display mode (autosaves on
+   blur — see js/dials.js). */
+.call-notes-live { min-height: 80px; }
+.call-notes-saved { color: var(--success); }
 
 /* =============================================================================
    RESPONSIVE / MOBILE LAYOUT
@@ -301,20 +329,15 @@ tr.clickable-row:hover { background: #faf8f2; }
 
 /* ---- Tablet and down ---- */
 @media (max-width: 720px) {
-  main { padding: 16px; }
+  main { padding: 16px 16px 78px; }
   .page-header h1 { font-size: 18px; }
 
-  /* Top nav: brand + sign out stay on the top row; nav links drop to their
-     own full-width, horizontally-scrollable row underneath. */
-  .topnav { flex-wrap: wrap; padding: 10px 14px; gap: 8px 0; row-gap: 6px; }
-  .topnav .links {
-    order: 3; width: 100%; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch;
-    padding-bottom: 2px; scrollbar-width: none;
-  }
-  .topnav .links::-webkit-scrollbar { display: none; }
-  .topnav .links a { font-size: 13px; padding: 6px 8px; white-space: nowrap; flex-shrink: 0; }
-  .topnav .who span:first-child { display: none; } /* hide full name, keep role badge + sign out */
-  .topnav .who { gap: 8px; }
+  /* Top nav is replaced entirely by the fixed bottom tab bar on mobile. */
+  .topnav-bar { display: none; }
+  .bottom-tabbar { display: flex; }
+  .fab { bottom: 86px; }
+  .timeline-add-btn { bottom: 136px; }
+  .timeline-add-menu { bottom: 192px; }
 
   /* Forms: two-column rows (first/last name, city/state, revenue/employees,
      min/max spend, etc.) stack into one column. */
@@ -369,6 +392,12 @@ tr.clickable-row:hover { background: #faf8f2; }
   }
   table td:not([data-label])::before { content: none; }
 
+  /* Clients and Dials get their own bespoke mobile card layout (below)
+     instead of the generic labeled-card table transform above, so hide
+     their <table> and show .mobile-list in its place. Finance keeps the
+     generic table-to-card transform since it wasn't redesigned. */
+  #tableWrap table, #dialsTableWrap table { display: none; }
+
   /* Profile read-view rows (label/value + text/call/email quick-contact
      icons) wrap instead of squeezing or overflowing on narrow screens. */
   .rf-value-row { flex-wrap: wrap; }
@@ -376,13 +405,31 @@ tr.clickable-row:hover { background: #faf8f2; }
   .accordion-header { flex-wrap: wrap; gap: 8px; }
 }
 
+/* ---- Mobile card list (Clients + Dials) ----
+   Hidden by default (desktop shows the <table> instead); shown at
+   max-width:720px above. */
+.mobile-list { display: none; }
+@media (max-width: 720px) {
+  .mobile-list { display: block; }
+}
+.mobile-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 8px;
+}
+.mobile-card:last-child { margin-bottom: 0; }
+.mc-main { min-width: 0; }
+.mc-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mobile-card .contact-actions { flex-shrink: 0; }
+
 /* ---- Small phones ---- */
 @media (max-width: 420px) {
-  main { padding: 12px; }
+  main { padding: 12px 12px 78px; }
   .page-header h1 { font-size: 17px; }
-  .fab { right: 18px; bottom: 18px; width: 52px; height: 52px; font-size: 26px; }
-  .timeline-add-btn { right: 18px; bottom: 72px; }
-  .timeline-add-menu { right: 18px; bottom: 126px; }
+  .fab { right: 18px; bottom: 76px; width: 52px; height: 52px; font-size: 26px; }
+  .timeline-add-btn { right: 18px; bottom: 130px; }
+  .timeline-add-menu { right: 18px; bottom: 184px; }
   .modal { padding: 16px; }
   .accordion-header { padding: 10px 12px; }
   .accordion-body { padding: 12px; }
