@@ -49,7 +49,31 @@ const els = {
   requiredPopup: document.getElementById("requiredPopup"),
   requiredPopupText: document.getElementById("requiredPopupText"),
   requiredPopupOk: document.getElementById("requiredPopupOk"),
+  newListModal: document.getElementById("newListModal"),
+  newListError: document.getElementById("newListError"),
+  newListNameInput: document.getElementById("newListNameInput"),
+  newListCreateBtn: document.getElementById("newListCreateBtn"),
+  newListCancelBtn: document.getElementById("newListCancelBtn"),
+  confirmDeleteModal: document.getElementById("confirmDeleteModal"),
 };
+
+function openConfirmDelete(onConfirm) {
+  els.confirmDeleteModal.classList.remove("hidden");
+  const yesBtn = document.getElementById("confirmDeleteYesBtn");
+  const noBtn = document.getElementById("confirmDeleteNoBtn");
+  const cleanup = () => {
+    els.confirmDeleteModal.classList.add("hidden");
+    yesBtn.removeEventListener("click", onYes);
+    noBtn.removeEventListener("click", onNo);
+  };
+  const onYes = () => {
+    cleanup();
+    onConfirm();
+  };
+  const onNo = () => cleanup();
+  yesBtn.addEventListener("click", onYes);
+  noBtn.addEventListener("click", onNo);
+}
 
 const CONTACT_ICONS = {
   sms: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
@@ -180,18 +204,41 @@ function startRenameTab(btn, list) {
   });
 }
 
-els.addTabBtn.addEventListener("click", async () => {
-  const name = prompt("Name this list:");
-  if (!name || !name.trim()) return;
+els.addTabBtn.addEventListener("click", () => {
+  els.newListError.classList.add("hidden");
+  els.newListNameInput.value = "";
+  els.newListModal.classList.remove("hidden");
+  els.newListNameInput.focus();
+});
+
+els.newListCancelBtn.addEventListener("click", () => els.newListModal.classList.add("hidden"));
+
+async function createNewList() {
+  const name = els.newListNameInput.value.trim();
+  if (!name) {
+    els.newListError.textContent = "Please enter a name for the list.";
+    els.newListError.classList.remove("hidden");
+    return;
+  }
   const sortOrder = filteredLists().length;
   const { data, error } = await supabase
     .from("dial_lists")
-    .insert({ name: name.trim(), dial_type: currentType, status: currentStatus, sort_order: sortOrder })
+    .insert({ name, dial_type: currentType, status: currentStatus, sort_order: sortOrder })
     .select()
     .single();
-  if (error) return showError(els.errorBox, error);
+  if (error) {
+    els.newListError.textContent = error.message;
+    els.newListError.classList.remove("hidden");
+    return;
+  }
   currentListId = data.id;
+  els.newListModal.classList.add("hidden");
   await loadLists();
+}
+
+els.newListCreateBtn.addEventListener("click", createNewList);
+els.newListNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") createNewList();
 });
 
 els.typeSwitch.querySelectorAll("button").forEach((btn) => {
@@ -411,12 +458,13 @@ async function handleEditDialSave() {
   await loadDials();
 }
 
-async function handleDeleteDial() {
-  if (!confirm("Delete this dial? This cannot be undone.")) return;
-  const { error } = await supabase.from("dials").delete().eq("id", currentDial.id);
-  if (error) return showError(els.dialModalError, error);
-  closeDialModal();
-  await loadDials();
+function handleDeleteDial() {
+  openConfirmDelete(async () => {
+    const { error } = await supabase.from("dials").delete().eq("id", currentDial.id);
+    if (error) return showError(els.dialModalError, error);
+    closeDialModal();
+    await loadDials();
+  });
 }
 
 function openDialModal(index) {
@@ -433,9 +481,11 @@ function closeDialModal() {
 
 els.addDialBtn.addEventListener("click", () => {
   if (!currentListId) {
-    alert("Create a list first using the + next to the tabs.");
+    els.errorBox.textContent = "Create a list first using the + next to the tabs.";
+    els.errorBox.classList.remove("hidden");
     return;
   }
+  els.errorBox.classList.add("hidden");
   dialMode = "create";
   currentDial = null;
   currentDialIndex = -1;

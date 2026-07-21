@@ -41,7 +41,26 @@ const els = {
   eventPopupTitle: document.getElementById("eventPopupTitle"),
   eventPopupBody: document.getElementById("eventPopupBody"),
   eventPopupClose: document.getElementById("eventPopupClose"),
+  confirmDeleteModal: document.getElementById("confirmDeleteModal"),
 };
+
+function openConfirmDelete(onConfirm) {
+  els.confirmDeleteModal.classList.remove("hidden");
+  const yesBtn = document.getElementById("confirmDeleteYesBtn");
+  const noBtn = document.getElementById("confirmDeleteNoBtn");
+  const cleanup = () => {
+    els.confirmDeleteModal.classList.add("hidden");
+    yesBtn.removeEventListener("click", onYes);
+    noBtn.removeEventListener("click", onNo);
+  };
+  const onYes = () => {
+    cleanup();
+    onConfirm();
+  };
+  const onNo = () => cleanup();
+  yesBtn.addEventListener("click", onYes);
+  noBtn.addEventListener("click", onNo);
+}
 
 function fmtNum(n) {
   return n === null || n === undefined || n === "" ? "0" : Number(n).toLocaleString();
@@ -422,12 +441,13 @@ async function handleEditSave() {
   await loadClients();
 }
 
-async function handleDelete() {
-  if (!confirm("Delete this client? This cannot be undone.")) return;
-  const { error } = await supabase.from("clients").delete().eq("id", currentClient.id);
-  if (error) return showError(document.getElementById("clientModalError"), error);
-  closeModal();
-  await loadClients();
+function handleDelete() {
+  openConfirmDelete(async () => {
+    const { error } = await supabase.from("clients").delete().eq("id", currentClient.id);
+    if (error) return showError(document.getElementById("clientModalError"), error);
+    closeModal();
+    await loadClients();
+  });
 }
 
 function openCreateModal() {
