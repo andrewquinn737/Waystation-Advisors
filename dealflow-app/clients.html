@@ -72,6 +72,18 @@
     </div>
   </div>
 
+  <!-- Delete confirmation (in-app, replacing window.confirm) -->
+  <div class="modal-backdrop hidden" id="confirmDeleteModal">
+    <div class="modal">
+      <h2>Delete this client?</h2>
+      <p class="help-text">This cannot be undone.</p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="confirmDeleteYesBtn">Delete</button>
+        <button type="button" class="btn secondary" id="confirmDeleteNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="js/clients.js"></script>
 </body>
 </html>

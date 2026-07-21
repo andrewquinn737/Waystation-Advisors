@@ -86,6 +86,32 @@
     </div>
   </div>
 
+  <!-- Delete confirmation (in-app, replacing window.confirm) -->
+  <div class="modal-backdrop hidden" id="confirmDeleteModal">
+    <div class="modal">
+      <h2>Delete this dial?</h2>
+      <p class="help-text">This cannot be undone.</p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="confirmDeleteYesBtn">Delete</button>
+        <button type="button" class="btn secondary" id="confirmDeleteNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New-list dialog (in-app, replacing window.prompt) -->
+  <div class="modal-backdrop hidden" id="newListModal">
+    <div class="modal">
+      <h2>New list</h2>
+      <div id="newListError" class="error-msg hidden"></div>
+      <label for="newListNameInput">List name</label>
+      <input id="newListNameInput" placeholder="e.g. Q3 outreach" />
+      <div class="form-actions">
+        <button type="button" class="btn" id="newListCreateBtn">Create</button>
+        <button type="button" class="btn secondary" id="newListCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="js/dials.js"></script>
 </body>
 </html>
