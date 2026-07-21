@@ -30,68 +30,42 @@
 
   <button class="fab" id="addBtn" title="New client">+</button>
 
-  <div class="modal-backdrop hidden" id="modalBackdrop">
+  <!-- Client create / detail full-screen view. Body content is built dynamically
+       in js/clients.js since the fields shown depend on buyer vs seller, on
+       whether this is a brand-new client or an existing one, and on which of
+       the Profile / Progress / Timeline sub-tabs is active. -->
+  <div class="fullscreen-modal hidden" id="clientModal">
+    <div class="fs-header">
+      <h2 id="clientModalTitle">New client</h2>
+      <button class="fs-close" id="clientModalClose">&times;</button>
+    </div>
+    <div class="fs-body" id="clientModalBody"></div>
+    <div class="subtabs hidden" id="clientSubtabs">
+      <button type="button" data-tab="profile">Profile</button>
+      <button type="button" data-tab="progress">Progress</button>
+      <button type="button" data-tab="timeline">Timeline</button>
+    </div>
+  </div>
+
+  <!-- Small centered popup summarizing missing required fields -->
+  <div class="modal-backdrop hidden" id="requiredPopup">
     <div class="modal">
-      <h2 id="modalTitle">Client</h2>
-      <div id="modalError" class="error-msg hidden"></div>
-      <form id="clientForm">
-        <input type="hidden" id="clientId" />
+      <h2>Missing information</h2>
+      <p id="requiredPopupText"></p>
+      <div class="form-actions">
+        <button type="button" class="btn" id="requiredPopupOk">OK</button>
+      </div>
+    </div>
+  </div>
 
-        <label for="name">Name</label>
-        <input id="name" required />
-
-        <label for="clientType">Buyer / Seller</label>
-        <select id="clientType" required>
-          <option value="buyer">Buyer</option>
-          <option value="seller">Seller</option>
-        </select>
-
-        <div id="companyNameField">
-          <label for="companyName">Company name <span class="help-text" style="display:inline;">(seller only)</span></label>
-          <input id="companyName" />
-        </div>
-
-        <label for="contactInfo">Contact info</label>
-        <input id="contactInfo" placeholder="Email / phone" />
-
-        <div class="form-row">
-          <div>
-            <label for="industry">Industry sector</label>
-            <input id="industry" />
-          </div>
-          <div>
-            <label for="location">Location</label>
-            <input id="location" />
-          </div>
-        </div>
-
-        <div class="section-title">Size</div>
-        <div class="form-row">
-          <div>
-            <label for="revenue">Annual revenue ($)</label>
-            <input id="revenue" type="number" step="0.01" min="0" />
-          </div>
-          <div>
-            <label for="employees">Employees</label>
-            <input id="employees" type="number" min="0" step="1" />
-          </div>
-        </div>
-
-        <label for="founded">Founded (year / month)</label>
-        <input id="founded" type="month" />
-
-        <label for="lookingFor">What they're looking for in a buyer/seller</label>
-        <textarea id="lookingFor"></textarea>
-
-        <label for="internName">Intern / contractor's name</label>
-        <input id="internName" />
-
-        <div class="form-actions">
-          <button type="submit" class="btn" id="saveBtn">Save</button>
-          <button type="button" class="btn secondary" id="cancelBtn">Cancel</button>
-          <button type="button" class="btn danger hidden" id="deleteBtn" style="margin-left:auto;">Delete</button>
-        </div>
-      </form>
+  <!-- Small centered popup for timeline event details (e.g. Intro Call) -->
+  <div class="modal-backdrop hidden" id="eventPopup">
+    <div class="modal">
+      <h2 id="eventPopupTitle">Event</h2>
+      <div id="eventPopupBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="eventPopupClose">Close</button>
+      </div>
     </div>
   </div>
 
