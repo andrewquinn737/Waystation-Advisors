@@ -80,11 +80,11 @@ function renderPayments() {
           .map(
             (p) => `
           <tr data-id="${p.id}">
-            <td>${escapeHtml(buyerName(p.buyer_id))}</td>
-            <td class="muted">${new Date(p.period_month).toLocaleDateString(undefined, { year: "numeric", month: "long" })}</td>
-            <td class="num">$${Number(p.amount).toFixed(2)}</td>
-            <td><span class="pill ${p.paid ? "paid" : "owed"}">${p.paid ? "Paid" : "Unpaid"}</span></td>
-            <td><button class="btn secondary small" data-toggle="${p.id}">${p.paid ? "Mark unpaid" : "Mark paid"}</button></td>
+            <td data-label="Buyer">${escapeHtml(buyerName(p.buyer_id))}</td>
+            <td class="muted" data-label="Month">${new Date(p.period_month).toLocaleDateString(undefined, { year: "numeric", month: "long" })}</td>
+            <td class="num" data-label="Amount">$${Number(p.amount).toFixed(2)}</td>
+            <td data-label="Status"><span class="pill ${p.paid ? "paid" : "owed"}">${p.paid ? "Paid" : "Unpaid"}</span></td>
+            <td data-label=""><button class="btn secondary small" data-toggle="${p.id}">${p.paid ? "Mark unpaid" : "Mark paid"}</button></td>
           </tr>`
           )
           .join("")}
@@ -117,9 +117,9 @@ function renderCommissions() {
           .map(
             (c) => `
           <tr data-id="${c.id}">
-            <td>${escapeHtml(dealLabel(c.deal_id))}</td>
-            <td class="num">$${Number(c.amount).toFixed(2)}</td>
-            <td>
+            <td data-label="Deal">${escapeHtml(dealLabel(c.deal_id))}</td>
+            <td class="num" data-label="Amount">$${Number(c.amount).toFixed(2)}</td>
+            <td data-label="Status">
               <select data-status="${c.id}" style="width:auto;display:inline-block;">
                 <option value="owed" ${c.status === "owed" ? "selected" : ""}>Owed</option>
                 <option value="invoiced" ${c.status === "invoiced" ? "selected" : ""}>Invoiced</option>

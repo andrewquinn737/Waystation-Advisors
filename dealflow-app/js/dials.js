@@ -316,11 +316,11 @@ function renderDialsTable() {
           .map(
             (d, i) => `
           <tr class="clickable-row" data-index="${i}">
-            <td>${escapeHtml(dialDisplayName(d))}</td>
-            ${showCompany ? `<td class="muted">${escapeHtml(d.company_name || "—")}</td>` : ""}
-            <td class="muted">${escapeHtml(dialLocation(d))}</td>
-            <td class="muted">${escapeHtml(d.phone || "—")}</td>
-            <td class="muted">${escapeHtml(d.email || "—")}</td>
+            <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
+            ${showCompany ? `<td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>` : ""}
+            <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
+            <td class="muted" data-label="Phone">${escapeHtml(d.phone || "—")}</td>
+            <td class="muted" data-label="Email">${escapeHtml(d.email || "—")}</td>
           </tr>`
           )
           .join("")}

@@ -121,11 +121,11 @@ function renderTable() {
           .map(
             (c) => `
           <tr class="clickable-row" data-id="${c.id}">
-            <td>${escapeHtml(clientDisplayName(c))}</td>
-            <td><span class="pill ${c.client_type === "buyer" ? "active" : "new"}">${escapeHtml(c.client_type)}</span></td>
-            <td class="muted">${escapeHtml(clientSecondary(c))}</td>
-            <td class="muted">${escapeHtml(clientLocation(c))}</td>
-            <td class="muted">${escapeHtml(c.intern_name || "—")}</td>
+            <td data-label="Name">${escapeHtml(clientDisplayName(c))}</td>
+            <td data-label="Type"><span class="pill ${c.client_type === "buyer" ? "active" : "new"}">${escapeHtml(c.client_type)}</span></td>
+            <td class="muted" data-label="Company / Money to spend">${escapeHtml(clientSecondary(c))}</td>
+            <td class="muted" data-label="Location">${escapeHtml(clientLocation(c))}</td>
+            <td class="muted" data-label="Intern's name">${escapeHtml(c.intern_name || "—")}</td>
           </tr>`
           )
           .join("")}
