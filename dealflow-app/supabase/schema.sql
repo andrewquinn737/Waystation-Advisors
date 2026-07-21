@@ -279,8 +279,8 @@ create policy "clients_insert_all" on clients
   for insert with check (auth.uid() is not null);
 create policy "clients_update_all" on clients
   for update using (auth.uid() is not null);
-create policy "clients_delete_lead_only" on clients
-  for delete using (is_team_lead());
+create policy "clients_delete_all" on clients
+  for delete using (auth.uid() is not null);
 
 -- ============================================================================
 -- CLIENT EVENTS (the Timeline tab on a client's profile). A "created" event
@@ -366,8 +366,8 @@ create policy "dials_insert_all" on dials
   for insert with check (auth.uid() is not null);
 create policy "dials_update_all" on dials
   for update using (auth.uid() is not null);
-create policy "dials_delete_lead_only" on dials
-  for delete using (is_team_lead());
+create policy "dials_delete_all" on dials
+  for delete using (auth.uid() is not null);
 
 -- ============================================================================
 -- TEAMS (shown in the Profile page's "Teams" popup). Empty for now — add
