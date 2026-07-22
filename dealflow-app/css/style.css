@@ -384,7 +384,8 @@ tr.clickable-row { cursor: pointer; }
 .count-badge { color: var(--text-muted); font-size: 13px; }
 
 /* ---- Popups need to sit above the full-screen client modal ---- */
-#requiredPopup, #confirmDeleteModal, #introCallPopup { z-index: 200; }
+#requiredPopup, #confirmDeleteModal, #introCallPopup,
+#addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
@@ -802,6 +803,62 @@ html.is-mobile-device .mobile-list { display: block; }
 }
 .team-member-detail .readonly-field:first-child { border-top: none; }
 .copy-toast { font-size: 11px; font-weight: 600; color: var(--success); }
+
+/* ---- Admin/Teams management (js/profile.js) ---- */
+
+/* + / edit icons next to the Teams popup's X — admin-only, toggled via
+   .hidden in JS once loadTeams() knows whether the signed-in user is an
+   admin. The edit icon gets a subtle "on" state while edit mode is active. */
+.edit-icon-btn.active { background: var(--gold-soft); color: var(--text); border-color: var(--gold); }
+
+/* "+" popup: Account / Team, positioned the same escape-the-clip way as the
+   Categories submenu on Dials. */
+.teams-add-menu {
+  position: fixed; z-index: 210; display: flex; flex-direction: column; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 130px;
+}
+
+/* Team group header: name (renamable in edit mode) + member count on the
+   left, trash/chevron grouped on the right so justify-content:space-between
+   on .accordion-header still only sees two flex children. */
+.team-group-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.accordion-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.team-group-name.renamable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.team-trash-btn {
+  width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+@media (hover: hover) { .team-trash-btn:hover { background: #fdecec; color: var(--danger); border-color: var(--danger); } }
+
+/* Position label ("Intern"/"Admin") under a member's name — clickable only
+   for admins (position-toggle class only rendered when isAdmin), opening a
+   tiny 2-option dropdown right below it. Same look as .dial-status-menu. */
+.mc-sub-wrap { position: relative; display: inline-block; }
+.mc-sub.position-toggle { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.position-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 100px; overflow: hidden;
+}
+.position-option {
+  display: block; width: 100%; text-align: left; padding: 7px 10px; border: none;
+  background: none; font-size: 12.5px; color: var(--text); cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .position-option:hover { background: var(--bg); } }
+
+/* Hold-and-drag a member card into a different team box (admin-only — see
+   wireMemberDrag() in js/profile.js). The dragged card dims in place while a
+   floating "ghost" clone follows the pointer; whichever team box is
+   currently under the pointer is highlighted. */
+.team-member-card-wrap.dragging-source { opacity: .35; }
+.team-drag-ghost {
+  position: fixed; z-index: 300; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  transform: rotate(-1deg); opacity: .95;
+}
+.accordion-section.drag-over .accordion-header { background: var(--gold-soft); }
+.accordion-section.drag-over { border-color: var(--gold); }
 .copyable { cursor: pointer; }
 
 /* ---- Small phones ---- (still device-gated — see comment above; the
