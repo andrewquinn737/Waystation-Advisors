@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Sign in — Waystation Advisors</title>
 <script>
   // Device-type detection — see the matching comment in dials.html for why
@@ -25,6 +25,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
 <script src="js/pwa.js"></script>
+<script src="js/noZoom.js"></script>
 </head>
 <body>
   <div class="auth-card">
@@ -37,6 +38,11 @@
       <div id="nameField" class="hidden">
         <label for="fullName">Full name</label>
         <input id="fullName" type="text" autocomplete="name" />
+      </div>
+
+      <div id="phoneField" class="hidden">
+        <label for="phone">Phone number</label>
+        <input id="phone" type="tel" autocomplete="tel" />
       </div>
 
       <label for="email">Email</label>
@@ -54,10 +60,6 @@
       <span id="toggleText">New here?</span>
       <a href="#" id="toggleMode">Create an account</a>
     </p>
-    <p class="help-text">
-      New accounts start as an <strong>intern</strong>. A team lead can promote you
-      later in Supabase (Table Editor &gt; profiles &gt; role).
-    </p>
   </div>
 
   <script type="module">
@@ -69,6 +71,8 @@
     const errorBox = document.getElementById("errorBox");
     const nameField = document.getElementById("nameField");
     const fullName = document.getElementById("fullName");
+    const phoneField = document.getElementById("phoneField");
+    const phone = document.getElementById("phone");
     const email = document.getElementById("email");
     const password = document.getElementById("password");
     const submitBtn = document.getElementById("submitBtn");
@@ -88,6 +92,8 @@
       const isSignup = mode === "signup";
       nameField.classList.toggle("hidden", !isSignup);
       fullName.required = isSignup;
+      phoneField.classList.toggle("hidden", !isSignup);
+      phone.required = isSignup;
       submitBtn.textContent = isSignup ? "Create account" : "Sign in";
       formTitle.textContent = isSignup ? "Create account" : "Sign in";
       formSub.textContent = isSignup
@@ -108,7 +114,7 @@
           const { error } = await supabase.auth.signUp({
             email: email.value.trim(),
             password: password.value,
-            options: { data: { full_name: fullName.value.trim() } },
+            options: { data: { full_name: fullName.value.trim(), phone: phone.value.trim() } },
           });
           if (error) throw error;
           errorBox.classList.remove("hidden");

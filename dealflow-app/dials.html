@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Dials — Waystation Advisors</title>
 <script>
   // Device-type detection, run synchronously before css/style.css is parsed
@@ -31,6 +31,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
 <script src="js/pwa.js"></script>
+<script src="js/noZoom.js"></script>
 </head>
 <body data-page="dials.html">
   <nav class="topnav" id="topnav"></nav>
@@ -112,16 +113,6 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- "Create client" flow — same New Client form as the Clients page,
-       pre-filled from the dial being converted. -->
-  <div class="fullscreen-modal hidden" id="clientModal">
-    <div class="fs-header">
-      <h2 id="clientModalTitle">New client</h2>
-      <button type="button" class="fs-close" id="clientModalClose">&times;</button>
-    </div>
-    <div class="fs-body" id="clientModalBody"></div>
   </div>
 
   <div class="modal-backdrop hidden" id="requiredPopup">
