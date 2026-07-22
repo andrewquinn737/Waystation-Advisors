@@ -20,9 +20,53 @@ const els = {
   teamsBtn: document.getElementById("teamsBtn"),
   teamsModal: document.getElementById("teamsModal"),
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
+  teamsAddBtn: document.getElementById("teamsAddBtn"),
+  teamsEditBtn: document.getElementById("teamsEditBtn"),
+  teamsAddMenu: document.getElementById("teamsAddMenu"),
+  teamsAddAccountBtn: document.getElementById("teamsAddAccountBtn"),
+  teamsAddTeamBtn: document.getElementById("teamsAddTeamBtn"),
   teamsWrap: document.getElementById("teamsWrap"),
   profileSignOutBtn: document.getElementById("profileSignOutBtn"),
+  addAccountModal: document.getElementById("addAccountModal"),
+  addAccountError: document.getElementById("addAccountError"),
+  newAccountName: document.getElementById("newAccountName"),
+  newAccountPhone: document.getElementById("newAccountPhone"),
+  newAccountEmail: document.getElementById("newAccountEmail"),
+  newAccountPassword: document.getElementById("newAccountPassword"),
+  addAccountCreateBtn: document.getElementById("addAccountCreateBtn"),
+  addAccountCancelBtn: document.getElementById("addAccountCancelBtn"),
+  addTeamModal: document.getElementById("addTeamModal"),
+  addTeamError: document.getElementById("addTeamError"),
+  newTeamNameInput: document.getElementById("newTeamNameInput"),
+  addTeamCreateBtn: document.getElementById("addTeamCreateBtn"),
+  addTeamCancelBtn: document.getElementById("addTeamCancelBtn"),
+  confirmDeleteTeamModal: document.getElementById("confirmDeleteTeamModal"),
+  confirmDeleteAccountModal: document.getElementById("confirmDeleteAccountModal"),
 };
+
+// Generic "are you sure" confirm popup wiring — same pattern as js/dials.js's
+// openConfirmModal, duplicated locally rather than shared since these two
+// modules don't otherwise import from each other.
+function openConfirmModal(modalEl, yesId, noId, onConfirm, onClose) {
+  modalEl.classList.remove("hidden");
+  const yesBtn = document.getElementById(yesId);
+  const noBtn = document.getElementById(noId);
+  const cleanup = () => {
+    modalEl.classList.add("hidden");
+    yesBtn.removeEventListener("click", onYes);
+    noBtn.removeEventListener("click", onNo);
+  };
+  const onYes = () => {
+    cleanup();
+    onConfirm();
+  };
+  const onNo = () => {
+    cleanup();
+    if (onClose) onClose();
+  };
+  yesBtn.addEventListener("click", onYes);
+  noBtn.addEventListener("click", onNo);
+}
 
 function initials(name) {
   return (name || "")
@@ -34,54 +78,101 @@ function initials(name) {
 }
 
 els.profileName.textContent = profile.full_name;
-// Team leads are on hold for now — every account is an intern (see
-// is_team_lead() in supabase/schema.sql for the one place to re-enable it).
-els.profileRole.textContent = "Intern";
+els.profileRole.textContent = profile.role === "admin" ? "Admin" : "Intern";
 els.avatarInitials.textContent = initials(profile.full_name);
 
 // ---------------------------------------------------------------------------
-// Teams popup — 3 fixed, expandable groups (not user-creatable yet). Every
-// intern account lands in "Unassigned interns" by default (see the `team`
-// column's default in supabase/schema.sql / handle_new_user()); re-assigning
-// someone to Admins/Team 1 is a manual DB edit for now, same as promoting a
-// team lead used to be.
+// Teams popup — Admins + Unassigned interns are virtual groups (derived from
+// role='admin' / team_id is null, not real rows), and admins can create any
+// number of named teams in between (the `teams` table). See the ADMIN ROLE /
+// TEAMS section of supabase/schema.sql for the underlying columns/RLS.
 // ---------------------------------------------------------------------------
-const TEAM_GROUPS = ["Admins", "Team 1", "Unassigned interns"];
-let teamMembersByGroup = {};
+const ADMINS_KEY = "admins";
+const UNASSIGNED_KEY = "unassigned";
+
+let allMembers = []; // every profiles row
+let customTeams = []; // every teams row (sort_order asc)
+let teamMembersByGroup = {}; // groupKey -> members[]
+let isAdmin = false;
+let editMode = false;
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function memberPositionLabel(m) {
-  // Only "Intern" exists as a position today (team leads are on hold — see
-  // is_team_lead() in supabase/schema.sql).
-  return m.role === "team_lead" ? "Team Lead" : "Intern";
+  return m.role === "admin" ? "Admin" : "Intern";
+}
+
+// Which group (key) a given profile row currently belongs to. Admins always
+// show under the virtual Admins group regardless of team_id; everyone else
+// shows under their team_id's group, or Unassigned interns if that's null
+// (or points at a team that no longer exists).
+function groupKeyForMember(m) {
+  if (m.role === "admin") return ADMINS_KEY;
+  if (m.team_id && customTeams.some((t) => t.id === m.team_id)) return m.team_id;
+  return UNASSIGNED_KEY;
+}
+
+// Admins first, then every custom team (in sort_order), then Unassigned
+// interns last — a newly-created team lands right before Unassigned (see
+// createNewTeam()), matching "between the last listed team and unassigned
+// interns".
+function buildGroupDefs() {
+  return [
+    { key: ADMINS_KEY, label: "Admins", locked: true },
+    ...customTeams.map((t) => ({ key: t.id, label: t.name, locked: false })),
+    { key: UNASSIGNED_KEY, label: "Unassigned interns", locked: true },
+  ];
 }
 
 async function loadTeams() {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, role, phone, email, team")
-    .order("full_name", { ascending: true });
-  if (error) return showError(els.errorBox, error);
+  const [{ data: profiles, error: profErr }, { data: teamsData, error: teamsErr }] = await Promise.all([
+    supabase.from("profiles").select("id, full_name, role, phone, email, team_id").order("full_name", { ascending: true }),
+    supabase.from("teams").select("*").order("sort_order", { ascending: true }),
+  ]);
+  if (profErr) return showError(els.errorBox, profErr);
+  if (teamsErr) return showError(els.errorBox, teamsErr);
 
-  teamMembersByGroup = { "Admins": [], "Team 1": [], "Unassigned interns": [] };
-  (data || []).forEach((m) => {
-    const group = teamMembersByGroup[m.team] ? m.team : "Unassigned interns";
-    teamMembersByGroup[group].push(m);
+  allMembers = profiles || [];
+  customTeams = teamsData || [];
+
+  // Recompute from the freshly-loaded data (not the possibly-stale session
+  // profile) so an admin who just got promoted/demoted sees the +/edit
+  // controls appear/disappear without having to reload the whole page.
+  const me = allMembers.find((m) => m.id === profile.id);
+  isAdmin = me?.role === "admin";
+  els.teamsAddBtn.classList.toggle("hidden", !isAdmin);
+  els.teamsEditBtn.classList.toggle("hidden", !isAdmin);
+  if (!isAdmin) editMode = false;
+
+  teamMembersByGroup = {};
+  buildGroupDefs().forEach((g) => (teamMembersByGroup[g.key] = []));
+  allMembers.forEach((m) => {
+    teamMembersByGroup[groupKeyForMember(m)].push(m);
   });
   renderTeams();
 }
 
 function renderTeams() {
-  els.teamsWrap.innerHTML = TEAM_GROUPS.map((group, i) => {
-    const members = teamMembersByGroup[group] || [];
-    return `
-      <div class="accordion-section team-group ${i === 0 ? "open" : ""}" data-group="${escapeHtml(group)}">
+  const groups = buildGroupDefs();
+  els.teamsEditBtn.classList.toggle("active", editMode);
+
+  els.teamsWrap.innerHTML = groups
+    .map((g, i) => {
+      const members = teamMembersByGroup[g.key] || [];
+      const nameHTML =
+        editMode && !g.locked
+          ? `<span class="team-group-name renamable" data-team-id="${g.key}">${escapeHtml(g.label)}</span>`
+          : `<span class="team-group-name">${escapeHtml(g.label)}</span>`;
+      return `
+      <div class="accordion-section team-group ${i === 0 ? "open" : ""}" data-group="${g.key}">
         <div class="accordion-header">
-          <span>${escapeHtml(group)} <span class="help-text" style="display:inline;">(${members.length})</span></span>
-          <span class="chevron">&#9662;</span>
+          <span class="team-group-name-wrap">${nameHTML} <span class="help-text" style="display:inline;">(${members.length})</span></span>
+          <div class="accordion-header-right">
+            ${editMode && !g.locked ? `<button type="button" class="team-trash-btn" data-team-id="${g.key}" title="Delete team">&#128465;</button>` : ""}
+            <span class="chevron">&#9662;</span>
+          </div>
         </div>
         <div class="accordion-body team-group-body">
           ${
@@ -91,29 +182,98 @@ function renderTeams() {
           }
         </div>
       </div>`;
-  }).join("");
+    })
+    .join("");
 
   els.teamsWrap.querySelectorAll(".accordion-header").forEach((header) => {
-    header.addEventListener("click", () => header.parentElement.classList.toggle("open"));
-  });
-  els.teamsWrap.querySelectorAll("[data-member-id]").forEach((card) => {
-    card.addEventListener("click", () => {
-      const member = Object.values(teamMembersByGroup).flat().find((m) => m.id === card.dataset.memberId);
-      if (member) toggleMemberDetail(card, member);
+    header.addEventListener("click", (e) => {
+      if (e.target.closest(".team-group-name.renamable") || e.target.closest(".team-trash-btn")) return;
+      header.parentElement.classList.toggle("open");
     });
   });
+
+  els.teamsWrap.querySelectorAll(".team-group-name.renamable").forEach((nameEl) => {
+    nameEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startRenameTeam(nameEl);
+    });
+  });
+  els.teamsWrap.querySelectorAll(".team-trash-btn[data-team-id]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDeleteTeam(btn.dataset.teamId);
+    });
+  });
+
+  els.teamsWrap.querySelectorAll(".team-member-card").forEach((card) => {
+    const memberId = card.dataset.memberId;
+    card.addEventListener("click", () => {
+      if (memberDragState.suppressClick) {
+        memberDragState.suppressClick = false;
+        return;
+      }
+      // While editMode is on, the card's right side shows a delete-account
+      // trash icon instead of the contact-actions icons — expanding phone/
+      // email here would just have to be immediately collapsed again to see
+      // that icon, so the expand/collapse gesture is disabled for the
+      // duration of edit mode instead.
+      if (editMode) return;
+      const member = allMembers.find((m) => m.id === memberId);
+      if (member) toggleMemberDetail(card, member);
+    });
+    if (isAdmin) wireMemberDrag(card, memberId);
+  });
+
+  els.teamsWrap.querySelectorAll(".position-toggle").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePositionMenu(el);
+    });
+  });
+  els.teamsWrap.querySelectorAll(".position-option").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const menu = btn.closest(".position-menu");
+      moveMemberToGroup(menu.dataset.memberId, btn.dataset.role === "admin" ? ADMINS_KEY : UNASSIGNED_KEY);
+    });
+  });
+  els.teamsWrap.querySelectorAll(".member-trash-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDeleteAccount(btn.dataset.memberId, btn.dataset.memberName);
+    });
+  });
+
   stopContactActionPropagation(els.teamsWrap);
 }
 
 function memberCardHTML(m) {
+  const isMemberAdmin = m.role === "admin";
+  const positionLabel = memberPositionLabel(m);
+  const positionHTML = isAdmin
+    ? `
+    <div class="mc-sub-wrap">
+      <span class="mc-sub position-toggle" data-member-id="${m.id}">${escapeHtml(positionLabel)}</span>
+      <div class="position-menu hidden" data-member-id="${m.id}">
+        <button type="button" class="position-option" data-role="intern">Intern</button>
+        <button type="button" class="position-option" data-role="admin">Admin</button>
+      </div>
+    </div>`
+    : `<div class="mc-sub">${escapeHtml(positionLabel)}</div>`;
+
+  const rightHTML =
+    editMode && !isMemberAdmin
+      ? `<button type="button" class="team-trash-btn member-trash-btn" data-member-id="${m.id}" data-member-name="${escapeHtml(m.full_name)}" title="Remove account">&#128465;</button>`
+      : contactActionIcons({ phone: m.phone, email: m.email });
+
   return `
     <div class="team-member-card-wrap">
       <div class="team-member-card clickable-row" data-member-id="${m.id}">
         <div class="mc-main">
           <div class="mc-name">${escapeHtml(m.full_name)}</div>
-          <div class="mc-sub">${escapeHtml(memberPositionLabel(m))}</div>
+          ${positionHTML}
         </div>
-        ${contactActionIcons({ phone: m.phone, email: m.email })}
+        ${rightHTML}
       </div>
     </div>`;
 }
@@ -197,6 +357,334 @@ function memberDetailRow(label, value, kind) {
       </div>
     </div>`;
 }
+
+// ---------------------------------------------------------------------------
+// Position toggle ("Intern"/"Admin" under a name) — admin-only. Clicking it
+// opens a tiny 2-option dropdown right below (same look/positioning family
+// as the dial-status-menu in js/dials.js); picking one calls
+// moveMemberToGroup with the same logic a drag-drop into the Admins or
+// Unassigned interns box would use.
+// ---------------------------------------------------------------------------
+function closeAllPositionMenus() {
+  els.teamsWrap.querySelectorAll(".position-menu").forEach((m) => m.classList.add("hidden"));
+}
+
+function togglePositionMenu(toggleEl) {
+  const menu = toggleEl.parentElement.querySelector(".position-menu");
+  if (!menu) return;
+  const opening = menu.classList.contains("hidden");
+  closeAllPositionMenus();
+  if (opening) menu.classList.remove("hidden");
+}
+
+document.addEventListener("click", () => closeAllPositionMenus());
+
+// Moves a member into `groupKey` (either ADMINS_KEY, UNASSIGNED_KEY, or a
+// custom team's id) — shared by the position dropdown and the drag-drop
+// gesture below. Moving into Admins always sets role='admin'; moving
+// anywhere else always sets role='intern' (an admin dragged out becomes an
+// intern again, per spec) plus that destination's team_id.
+async function moveMemberToGroup(memberId, groupKey) {
+  const updates =
+    groupKey === ADMINS_KEY
+      ? { role: "admin" }
+      : { role: "intern", team_id: groupKey === UNASSIGNED_KEY ? null : groupKey };
+  const { error } = await supabase.from("profiles").update(updates).eq("id", memberId);
+  if (error) return showError(els.errorBox, error);
+  await loadTeams();
+}
+
+// ---------------------------------------------------------------------------
+// Hold-and-drag a member card into a different team box (admin-only). Same
+// long-press-then-drag shape as the dial-tab reorder gesture in js/dials.js —
+// a timer distinguishes a hold from a normal tap, then a floating "ghost"
+// clone follows the pointer and whichever accordion section it's currently
+// over is highlighted as the drop target.
+// ---------------------------------------------------------------------------
+const LONG_PRESS_MS = 350;
+const DRAG_CANCEL_PX = 10;
+
+const memberDragState = {
+  active: false,
+  memberId: null,
+  startX: 0,
+  startY: 0,
+  timer: null,
+  ghost: null,
+  dropTarget: null,
+  suppressClick: false,
+};
+
+function cancelMemberLongPressTimer() {
+  if (memberDragState.timer) {
+    clearTimeout(memberDragState.timer);
+    memberDragState.timer = null;
+  }
+}
+
+function startMemberDragVisuals(card, e) {
+  memberDragState.active = true;
+  // Force every group open so there's always somewhere visible to drop into,
+  // even if that group was collapsed when the drag started.
+  els.teamsWrap.querySelectorAll(".accordion-section").forEach((sec) => sec.classList.add("open"));
+
+  const rect = card.getBoundingClientRect();
+  const ghost = card.cloneNode(true);
+  ghost.classList.add("team-drag-ghost");
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  document.body.appendChild(ghost);
+  memberDragState.ghost = ghost;
+  memberDragState.offsetX = e.clientX - rect.left;
+  memberDragState.offsetY = e.clientY - rect.top;
+
+  card.closest(".team-member-card-wrap").classList.add("dragging-source");
+}
+
+function moveMemberDragGhost(e) {
+  if (!memberDragState.ghost) return;
+  memberDragState.ghost.style.left = `${e.clientX - memberDragState.offsetX}px`;
+  memberDragState.ghost.style.top = `${e.clientY - memberDragState.offsetY}px`;
+
+  els.teamsWrap.querySelectorAll(".accordion-section.drag-over").forEach((sec) => sec.classList.remove("drag-over"));
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const section = under ? under.closest(".accordion-section") : null;
+  if (section) section.classList.add("drag-over");
+  memberDragState.dropTarget = section ? section.dataset.group : null;
+}
+
+function endMemberDrag(card) {
+  if (memberDragState.ghost) {
+    memberDragState.ghost.remove();
+    memberDragState.ghost = null;
+  }
+  const wrap = card.closest(".team-member-card-wrap");
+  if (wrap) wrap.classList.remove("dragging-source");
+  els.teamsWrap.querySelectorAll(".accordion-section.drag-over").forEach((sec) => sec.classList.remove("drag-over"));
+}
+
+function wireMemberDrag(card, memberId) {
+  card.addEventListener("pointerdown", (e) => {
+    // Ignore drags started from the position toggle, contact-action icons,
+    // or the delete-account trash button — those have their own click
+    // behavior already wired above.
+    if (e.target.closest(".position-toggle") || e.target.closest(".position-menu") || e.target.closest(".contact-action-btn") || e.target.closest(".member-trash-btn")) {
+      return;
+    }
+    memberDragState.memberId = memberId;
+    memberDragState.startX = e.clientX;
+    memberDragState.startY = e.clientY;
+    memberDragState.active = false;
+    cancelMemberLongPressTimer();
+    memberDragState.timer = setTimeout(() => startMemberDragVisuals(card, e), LONG_PRESS_MS);
+  });
+
+  card.addEventListener("pointermove", (e) => {
+    if (memberDragState.memberId !== memberId) return;
+    if (!memberDragState.active) {
+      const dx = e.clientX - memberDragState.startX;
+      const dy = e.clientY - memberDragState.startY;
+      if (Math.sqrt(dx * dx + dy * dy) > DRAG_CANCEL_PX) cancelMemberLongPressTimer();
+      return;
+    }
+    e.preventDefault();
+    moveMemberDragGhost(e);
+  });
+
+  const endDrag = async () => {
+    cancelMemberLongPressTimer();
+    if (memberDragState.memberId !== memberId) return;
+    const wasActive = memberDragState.active;
+    const dropTarget = memberDragState.dropTarget;
+    endMemberDrag(card);
+    memberDragState.memberId = null;
+    memberDragState.active = false;
+    memberDragState.dropTarget = null;
+    if (wasActive) {
+      memberDragState.suppressClick = true;
+      const currentGroup = groupKeyForMember(allMembers.find((m) => m.id === memberId) || {});
+      if (dropTarget && dropTarget !== currentGroup) {
+        await moveMemberToGroup(memberId, dropTarget);
+      } else {
+        renderTeams();
+      }
+    }
+  };
+  card.addEventListener("pointerup", endDrag);
+  card.addEventListener("pointercancel", endDrag);
+}
+
+// ---------------------------------------------------------------------------
+// Rename a custom team — click its name while editMode is on. "Admins" and
+// "Unassigned interns" never get the renamable class (see renderTeams), so
+// this is never reachable for them. Same input-swap pattern as
+// startRenameTab() in js/dials.js.
+// ---------------------------------------------------------------------------
+function startRenameTeam(nameEl) {
+  const teamId = nameEl.dataset.teamId;
+  const team = customTeams.find((t) => t.id === teamId);
+  if (!team) return;
+  const input = document.createElement("input");
+  input.className = "dial-tab-rename-input";
+  input.value = team.name;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let committed = false;
+  const commit = async () => {
+    if (committed) return;
+    committed = true;
+    const newName = input.value.trim();
+    if (newName && newName !== team.name) {
+      const { error } = await supabase.from("teams").update({ name: newName }).eq("id", team.id);
+      if (error) showError(els.errorBox, error);
+    }
+    await loadTeams();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") input.blur();
+    if (e.key === "Escape") {
+      input.value = team.name;
+      input.blur();
+    }
+  });
+}
+
+// Deleting a team just deletes the row — profiles.team_id references
+// teams(id) ON DELETE SET NULL (see supabase/schema.sql), so every member in
+// it automatically falls back to Unassigned interns with no extra query
+// needed here.
+function handleDeleteTeam(teamId) {
+  openConfirmModal(els.confirmDeleteTeamModal, "confirmDeleteTeamYesBtn", "confirmDeleteTeamNoBtn", async () => {
+    const { error } = await supabase.from("teams").delete().eq("id", teamId);
+    if (error) return showError(els.errorBox, error);
+    await loadTeams();
+  });
+}
+
+// Removing an account calls the admin-delete-account Edge Function (needs
+// the service-role key to actually delete the auth user — see
+// supabase/functions/admin-delete-account) which reassigns every client/dial
+// the departing user owned to whichever admin is signed in right now, then
+// deletes their auth user (cascading their profile row).
+function handleDeleteAccount(memberId, memberName) {
+  const textEl = document.querySelector("#confirmDeleteAccountModal .help-text");
+  if (textEl) {
+    textEl.textContent = `${memberName || "Their"} clients and dials will be reassigned to you. This cannot be undone.`;
+  }
+  openConfirmModal(els.confirmDeleteAccountModal, "confirmDeleteAccountYesBtn", "confirmDeleteAccountNoBtn", async () => {
+    const { data, error } = await supabase.functions.invoke("admin-delete-account", {
+      body: { user_id: memberId },
+    });
+    if (error || data?.error) return showError(els.errorBox, error || new Error(data.error));
+    await loadTeams();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// "+" popup (Account / Team) — shown right under the + icon, dismissed by
+// clicking anywhere else (same escape-the-clip fixed-position pattern as
+// js/dials.js's categories submenu).
+// ---------------------------------------------------------------------------
+function positionTeamsAddMenu() {
+  const rect = els.teamsAddBtn.getBoundingClientRect();
+  els.teamsAddMenu.style.left = `${Math.max(8, rect.right - 140)}px`;
+  els.teamsAddMenu.style.top = `${rect.bottom + 6}px`;
+}
+
+els.teamsAddBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const opening = els.teamsAddMenu.classList.contains("hidden");
+  els.teamsAddMenu.classList.toggle("hidden");
+  if (opening) positionTeamsAddMenu();
+});
+document.addEventListener("click", (e) => {
+  if (els.teamsAddMenu.classList.contains("hidden")) return;
+  if (e.target.closest("#teamsAddMenu") || e.target.closest("#teamsAddBtn")) return;
+  els.teamsAddMenu.classList.add("hidden");
+});
+
+els.teamsEditBtn.addEventListener("click", () => {
+  editMode = !editMode;
+  renderTeams();
+});
+
+// ---------------------------------------------------------------------------
+// Add account (admin-only signup, replaces the old public one on login.html)
+// ---------------------------------------------------------------------------
+els.teamsAddAccountBtn.addEventListener("click", () => {
+  els.teamsAddMenu.classList.add("hidden");
+  els.addAccountError.classList.add("hidden");
+  els.newAccountName.value = "";
+  els.newAccountPhone.value = "";
+  els.newAccountEmail.value = "";
+  els.newAccountPassword.value = "";
+  els.addAccountModal.classList.remove("hidden");
+  els.newAccountName.focus();
+});
+els.addAccountCancelBtn.addEventListener("click", () => els.addAccountModal.classList.add("hidden"));
+
+els.addAccountCreateBtn.addEventListener("click", async () => {
+  const full_name = els.newAccountName.value.trim();
+  const phone = els.newAccountPhone.value.trim();
+  const email = els.newAccountEmail.value.trim();
+  const password = els.newAccountPassword.value;
+  if (!full_name || !email || !password) {
+    els.addAccountError.textContent = "Full name, email, and password are required.";
+    els.addAccountError.classList.remove("hidden");
+    return;
+  }
+  els.addAccountCreateBtn.disabled = true;
+  const { data, error } = await supabase.functions.invoke("admin-create-account", {
+    body: { full_name, phone, email, password },
+  });
+  els.addAccountCreateBtn.disabled = false;
+  if (error || data?.error) {
+    els.addAccountError.textContent = (data && data.error) || error?.message || "Could not create the account.";
+    els.addAccountError.classList.remove("hidden");
+    return;
+  }
+  els.addAccountModal.classList.add("hidden");
+  await loadTeams();
+});
+
+// ---------------------------------------------------------------------------
+// Add team — new box lands right before Unassigned interns (see
+// buildGroupDefs(): custom teams are ordered by sort_order, so appending at
+// customTeams.length always lands last among teams, i.e. immediately before
+// the Unassigned interns box which is always rendered last of all).
+// ---------------------------------------------------------------------------
+els.teamsAddTeamBtn.addEventListener("click", () => {
+  els.teamsAddMenu.classList.add("hidden");
+  els.addTeamError.classList.add("hidden");
+  els.newTeamNameInput.value = "";
+  els.addTeamModal.classList.remove("hidden");
+  els.newTeamNameInput.focus();
+});
+els.addTeamCancelBtn.addEventListener("click", () => els.addTeamModal.classList.add("hidden"));
+
+async function createNewTeam() {
+  const name = els.newTeamNameInput.value.trim();
+  if (!name) {
+    els.addTeamError.textContent = "Please enter a name for the team.";
+    els.addTeamError.classList.remove("hidden");
+    return;
+  }
+  const { error } = await supabase.from("teams").insert({ name, sort_order: customTeams.length });
+  if (error) {
+    els.addTeamError.textContent = error.message;
+    els.addTeamError.classList.remove("hidden");
+    return;
+  }
+  els.addTeamModal.classList.add("hidden");
+  await loadTeams();
+}
+els.addTeamCreateBtn.addEventListener("click", createNewTeam);
+els.newTeamNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") createNewTeam();
+});
 
 // ---------------------------------------------------------------------------
 // "X people called this week" + 6-week chart. A row is inserted into
@@ -343,12 +831,14 @@ async function loadCallsChart() {
 loadCallsChart();
 
 els.teamsBtn.addEventListener("click", async () => {
+  editMode = false;
   els.teamsModal.classList.remove("hidden");
   lockPageScroll();
   await loadTeams();
 });
 els.teamsCloseBtn.addEventListener("click", () => {
   els.teamsModal.classList.add("hidden");
+  els.teamsAddMenu.classList.add("hidden");
   unlockPageScroll();
 });
 els.profileSignOutBtn.addEventListener("click", signOut);
