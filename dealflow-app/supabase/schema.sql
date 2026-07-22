@@ -430,6 +430,12 @@ create policy "call_status_changes_select_all" on call_status_changes
   for select using (auth.uid() is not null);
 create policy "call_status_changes_insert_all" on call_status_changes
   for insert with check (auth.uid() is not null);
+-- Needed for the "Did call today" toggle's un-select action (js/dials.js
+-- toggleDidCallToday()), which deletes its own just-inserted row under the
+-- calling user's own JWT — without this, the delete silently no-ops (RLS
+-- defaults to deny) and unselecting never actually removes the row.
+create policy "call_status_changes_delete_own" on call_status_changes
+  for delete using (user_id = auth.uid());
 
 -- ============================================================================
 -- Auto-create a profile row whenever someone signs up.
