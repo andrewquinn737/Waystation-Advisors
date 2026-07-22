@@ -64,7 +64,10 @@
        Progress / Timeline sub-tabs is active. -->
   <div class="fullscreen-modal hidden" id="clientModal">
     <div class="fs-header">
-      <h2 id="clientModalTitle">New client</h2>
+      <div class="fs-header-main">
+        <h2 id="clientModalTitle">New client</h2>
+        <div class="dial-modal-subtitle hidden" id="clientModalSubtitle"></div>
+      </div>
       <div class="fs-header-actions">
         <!-- Hidden except in view mode — toggled/wired in js/clients.js -->
         <button type="button" class="edit-icon-btn hidden" id="editProfileBtn" title="Edit profile">&#9998;</button>
@@ -72,11 +75,6 @@
       </div>
     </div>
     <div class="fs-body" id="clientModalBody"></div>
-    <div class="subtabs hidden" id="clientSubtabs">
-      <button type="button" data-tab="profile">Profile</button>
-      <button type="button" data-tab="progress">Progress</button>
-      <button type="button" data-tab="timeline">Timeline</button>
-    </div>
   </div>
 
   <!-- Small centered popup summarizing missing required fields -->
@@ -86,17 +84,6 @@
       <p id="requiredPopupText"></p>
       <div class="form-actions">
         <button type="button" class="btn" id="requiredPopupOk">OK</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Small centered popup for timeline event details (e.g. Intro Call) -->
-  <div class="modal-backdrop hidden" id="eventPopup">
-    <div class="modal">
-      <h2 id="eventPopupTitle">Event</h2>
-      <div id="eventPopupBody"></div>
-      <div class="form-actions">
-        <button type="button" class="btn secondary" id="eventPopupClose">Close</button>
       </div>
     </div>
   </div>
