@@ -29,22 +29,15 @@
 </head>
 <body>
   <div class="auth-card">
-    <h1 id="formTitle">Sign in</h1>
-    <p class="sub" id="formSub">Access your team's deal pipeline.</p>
+    <h1>Sign in</h1>
+    <p class="sub">Access your team's deal pipeline.</p>
 
     <div id="errorBox" class="error-msg hidden"></div>
 
+    <!-- Self-signup has been removed — only an admin can create new accounts
+         now (Profile > Teams > "+" > Account, see js/profile.js). This form
+         is sign-in only. -->
     <form id="authForm">
-      <div id="nameField" class="hidden">
-        <label for="fullName">Full name</label>
-        <input id="fullName" type="text" autocomplete="name" />
-      </div>
-
-      <div id="phoneField" class="hidden">
-        <label for="phone">Phone number</label>
-        <input id="phone" type="tel" autocomplete="tel" />
-      </div>
-
       <label for="email">Email</label>
       <input id="email" type="email" required autocomplete="email" />
 
@@ -57,51 +50,22 @@
     </form>
 
     <p class="help-text" style="margin-top:16px;">
-      <span id="toggleText">New here?</span>
-      <a href="#" id="toggleMode">Create an account</a>
+      New here? Ask an admin to create your account from Profile &gt; Teams.
     </p>
   </div>
 
   <script type="module">
     import { supabase } from "./js/supabaseClient.js";
 
-    let mode = "signin"; // or "signup"
-
     const form = document.getElementById("authForm");
     const errorBox = document.getElementById("errorBox");
-    const nameField = document.getElementById("nameField");
-    const fullName = document.getElementById("fullName");
-    const phoneField = document.getElementById("phoneField");
-    const phone = document.getElementById("phone");
     const email = document.getElementById("email");
     const password = document.getElementById("password");
     const submitBtn = document.getElementById("submitBtn");
-    const toggleMode = document.getElementById("toggleMode");
-    const toggleText = document.getElementById("toggleText");
-    const formTitle = document.getElementById("formTitle");
-    const formSub = document.getElementById("formSub");
 
     // If already signed in, skip straight to the app.
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) window.location.href = "profile.html";
-    });
-
-    toggleMode.addEventListener("click", (e) => {
-      e.preventDefault();
-      mode = mode === "signin" ? "signup" : "signin";
-      const isSignup = mode === "signup";
-      nameField.classList.toggle("hidden", !isSignup);
-      fullName.required = isSignup;
-      phoneField.classList.toggle("hidden", !isSignup);
-      phone.required = isSignup;
-      submitBtn.textContent = isSignup ? "Create account" : "Sign in";
-      formTitle.textContent = isSignup ? "Create account" : "Sign in";
-      formSub.textContent = isSignup
-        ? "Set up your login for the deal pipeline."
-        : "Access your team's deal pipeline.";
-      toggleText.textContent = isSignup ? "Already have an account?" : "New here?";
-      toggleMode.textContent = isSignup ? "Sign in" : "Create an account";
-      errorBox.classList.add("hidden");
     });
 
     form.addEventListener("submit", async (e) => {
@@ -110,25 +74,12 @@
       submitBtn.disabled = true;
 
       try {
-        if (mode === "signup") {
-          const { error } = await supabase.auth.signUp({
-            email: email.value.trim(),
-            password: password.value,
-            options: { data: { full_name: fullName.value.trim(), phone: phone.value.trim() } },
-          });
-          if (error) throw error;
-          errorBox.classList.remove("hidden");
-          errorBox.style.background = "#e7f8ee";
-          errorBox.style.color = "#1f9d55";
-          errorBox.textContent = "Account created. Check your email to confirm, then sign in.";
-        } else {
-          const { error } = await supabase.auth.signInWithPassword({
-            email: email.value.trim(),
-            password: password.value,
-          });
-          if (error) throw error;
-          window.location.href = "profile.html";
-        }
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.value.trim(),
+          password: password.value,
+        });
+        if (error) throw error;
+        window.location.href = "profile.html";
       } catch (err) {
         errorBox.classList.remove("hidden");
         errorBox.style.background = "#fdecec";

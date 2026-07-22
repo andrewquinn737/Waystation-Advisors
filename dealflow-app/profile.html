@@ -74,10 +74,82 @@
   <div class="fullscreen-modal hidden" id="teamsModal">
     <div class="fs-header">
       <h2>Teams</h2>
-      <button class="fs-close" id="teamsCloseBtn">✕</button>
+      <!-- +/edit are admin-only — hidden via JS unless the signed-in user's
+           role is 'admin' (see js/profile.js renderTeams()/loadTeams()). -->
+      <div class="fs-header-actions">
+        <button type="button" class="edit-icon-btn hidden" id="teamsAddBtn" title="Add">+</button>
+        <button type="button" class="edit-icon-btn hidden" id="teamsEditBtn" title="Edit teams">&#9998;</button>
+        <button class="fs-close" id="teamsCloseBtn">✕</button>
+      </div>
     </div>
     <div class="fs-body">
       <div id="teamsWrap"></div>
+    </div>
+  </div>
+
+  <!-- "+" popup: Account / Team, shown right under the + icon. -->
+  <div class="teams-add-menu hidden" id="teamsAddMenu">
+    <button type="button" class="page-header-menu-item" id="teamsAddAccountBtn">Account</button>
+    <button type="button" class="page-header-menu-item" id="teamsAddTeamBtn">Team</button>
+  </div>
+
+  <!-- Add-account popup (admin-only signup, replaces the old public one on
+       login.html). -->
+  <div class="modal-backdrop hidden" id="addAccountModal">
+    <div class="modal">
+      <h2>Add account</h2>
+      <div id="addAccountError" class="error-msg hidden"></div>
+      <label for="newAccountName">Full name</label>
+      <input id="newAccountName" autocomplete="name" />
+      <label for="newAccountPhone">Phone number</label>
+      <input id="newAccountPhone" type="tel" autocomplete="tel" />
+      <label for="newAccountEmail">Email</label>
+      <input id="newAccountEmail" type="email" autocomplete="email" />
+      <label for="newAccountPassword">Temporary password</label>
+      <input id="newAccountPassword" type="password" minlength="6" autocomplete="new-password" />
+      <div class="form-actions">
+        <button type="button" class="btn" id="addAccountCreateBtn">Create account</button>
+        <button type="button" class="btn secondary" id="addAccountCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add-team popup — new team box appears between the last team and
+       Unassigned interns (see createNewTeam() in js/profile.js). -->
+  <div class="modal-backdrop hidden" id="addTeamModal">
+    <div class="modal">
+      <h2>New team</h2>
+      <div id="addTeamError" class="error-msg hidden"></div>
+      <label for="newTeamNameInput">Team name</label>
+      <input id="newTeamNameInput" placeholder="e.g. Team 2" />
+      <div class="form-actions">
+        <button type="button" class="btn" id="addTeamCreateBtn">Create</button>
+        <button type="button" class="btn secondary" id="addTeamCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete-team confirmation -->
+  <div class="modal-backdrop hidden" id="confirmDeleteTeamModal">
+    <div class="modal">
+      <h2>Delete this team?</h2>
+      <p class="help-text">Anyone in it will move to Unassigned interns. This cannot be undone.</p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="confirmDeleteTeamYesBtn">Delete</button>
+        <button type="button" class="btn secondary" id="confirmDeleteTeamNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Remove-account confirmation -->
+  <div class="modal-backdrop hidden" id="confirmDeleteAccountModal">
+    <div class="modal">
+      <h2>Remove this account?</h2>
+      <p class="help-text">Their clients and dials will be reassigned to you. This cannot be undone.</p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="confirmDeleteAccountYesBtn">Remove</button>
+        <button type="button" class="btn secondary" id="confirmDeleteAccountNoBtn">Cancel</button>
+      </div>
     </div>
   </div>
 
