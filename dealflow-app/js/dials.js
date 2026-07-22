@@ -8,7 +8,6 @@ import {
   wireEditableFormEvents,
   collectFormData,
   getMissingFields,
-  BUYERS_ENABLED,
 } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
@@ -21,7 +20,10 @@ const internEmail = user?.email || "";
 
 let allLists = []; // every dial_lists row (all types/statuses)
 let dials = []; // dials belonging to the currently selected tab
-let currentType = BUYERS_ENABLED ? "buyer" : "seller"; // 'buyer' | 'seller'
+// Buyer support has been removed entirely — the app is sellers-only. The
+// `dial_lists.dial_type` column still exists in the database, so this stays
+// hardcoded to "seller" rather than ripping out that column.
+const currentType = "seller";
 let currentStatus = "current"; // 'current' | 'archived'
 let currentListId = null;
 let currentDialIndex = -1;
@@ -50,7 +52,6 @@ const hiddenStatuses = new Set();
 
 const els = {
   errorBox: document.getElementById("errorBox"),
-  typeSwitch: document.getElementById("typeSwitch"),
   statusSwitch: document.getElementById("statusSwitch"),
   statusToggleMobile: document.getElementById("statusToggleMobile"),
   statusFilter: document.getElementById("statusFilter"),
@@ -217,25 +218,179 @@ function renderTabs() {
   if (!currentListId || !filtered.some((l) => l.id === currentListId)) {
     currentListId = filtered.length ? filtered[0].id : null;
   }
+  if (archiveMenuTabId && !filtered.some((l) => l.id === archiveMenuTabId)) {
+    archiveMenuTabId = null;
+  }
 
   if (filtered.length === 0) {
     els.dialTabs.innerHTML = `<span class="help-text">No lists yet — tap + to create one.</span>`;
   } else {
     els.dialTabs.innerHTML = filtered
-      .map((l) => `<button type="button" class="dial-tab ${l.id === currentListId ? "active" : ""}" data-id="${l.id}">${escapeHtml(l.name)}</button>`)
+      .map((l) => {
+        const isActive = l.id === currentListId;
+        const showArchiveMenu = isMobileViewport() && isActive && archiveMenuTabId === l.id;
+        return `
+        <div class="dial-tab-wrap">
+          <button type="button" class="dial-tab ${isActive ? "active" : ""}" data-id="${l.id}">${escapeHtml(l.name)}</button>
+          ${
+            showArchiveMenu
+              ? `<div class="dial-tab-archive-menu">
+                  <button type="button" class="dial-tab-archive-btn" data-id="${l.id}">${currentStatus === "current" ? "Archive" : "Unarchive"}</button>
+                </div>`
+              : ""
+          }
+        </div>`;
+      })
       .join("");
-    els.dialTabs.querySelectorAll("[data-id]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        currentListId = btn.dataset.id;
-        renderTabs();
-      });
-      btn.addEventListener("dblclick", (e) => {
-        e.stopPropagation();
-        startRenameTab(btn, filtered.find((l) => l.id === btn.dataset.id));
-      });
-    });
+    wireTabInteractions();
   }
   loadDials();
+}
+
+// ---------------------------------------------------------------------------
+// Mobile-only tab interactions:
+//  - Tap the already-selected tab -> reveal an Archive/Unarchive option below it.
+//  - Long-press (hold, not tap) the already-selected tab -> drag it left/right
+//    to reorder among the other tabs (can never end up right of the "+" button,
+//    since that button lives outside the #dialTabs list being reordered).
+// Holding never shows the archive/unarchive option, and a plain tap on the
+// active tab never starts a drag.
+// ---------------------------------------------------------------------------
+
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+let archiveMenuTabId = null;
+const LONG_PRESS_MS = 500;
+const DRAG_CANCEL_PX = 10;
+
+const tabDragState = {
+  active: false,
+  tabId: null,
+  startX: 0,
+  suppressClick: false,
+  timer: null,
+};
+
+function cancelLongPressTimer() {
+  if (tabDragState.timer) {
+    clearTimeout(tabDragState.timer);
+    tabDragState.timer = null;
+  }
+}
+
+function wireTabInteractions() {
+  els.dialTabs.querySelectorAll(".dial-tab").forEach((btn) => {
+    const id = btn.dataset.id;
+
+    btn.addEventListener("click", () => {
+      if (tabDragState.suppressClick) {
+        tabDragState.suppressClick = false;
+        return;
+      }
+      if (isMobileViewport() && id === currentListId) {
+        archiveMenuTabId = archiveMenuTabId === id ? null : id;
+        renderTabs();
+        return;
+      }
+      currentListId = id;
+      archiveMenuTabId = null;
+      renderTabs();
+    });
+
+    btn.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      startRenameTab(btn, filteredLists().find((l) => l.id === id));
+    });
+
+    btn.addEventListener("pointerdown", (e) => {
+      if (!isMobileViewport() || id !== currentListId || e.pointerType === "mouse") return;
+      tabDragState.tabId = id;
+      tabDragState.startX = e.clientX;
+      tabDragState.active = false;
+      cancelLongPressTimer();
+      tabDragState.timer = setTimeout(() => {
+        tabDragState.active = true;
+        archiveMenuTabId = null;
+        btn.classList.add("dragging");
+        try {
+          btn.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore — pointer capture is a nice-to-have, not required
+        }
+      }, LONG_PRESS_MS);
+    });
+
+    btn.addEventListener("pointermove", (e) => {
+      if (tabDragState.tabId !== id) return;
+      const dx = e.clientX - tabDragState.startX;
+      if (!tabDragState.active) {
+        if (Math.abs(dx) > DRAG_CANCEL_PX) cancelLongPressTimer();
+        return;
+      }
+      e.preventDefault();
+      btn.style.transform = `translateX(${dx}px)`;
+      const wrap = btn.closest(".dial-tab-wrap");
+      const siblings = [...els.dialTabs.querySelectorAll(".dial-tab-wrap")];
+      const myRect = wrap.getBoundingClientRect();
+      const myCenter = myRect.left + myRect.width / 2 + dx;
+      for (const sib of siblings) {
+        if (sib === wrap) continue;
+        const r = sib.getBoundingClientRect();
+        const center = r.left + r.width / 2;
+        const sibIsAfter = !!(wrap.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING);
+        if (dx > 0 && sibIsAfter && myCenter > center) {
+          els.dialTabs.insertBefore(wrap, sib.nextSibling);
+          tabDragState.startX = e.clientX;
+          btn.style.transform = "translateX(0)";
+          break;
+        }
+        if (dx < 0 && !sibIsAfter && myCenter < center) {
+          els.dialTabs.insertBefore(wrap, sib);
+          tabDragState.startX = e.clientX;
+          btn.style.transform = "translateX(0)";
+          break;
+        }
+      }
+    });
+
+    const endDrag = async () => {
+      cancelLongPressTimer();
+      if (tabDragState.tabId !== id) return;
+      if (tabDragState.active) {
+        btn.classList.remove("dragging");
+        btn.style.transform = "";
+        tabDragState.suppressClick = true;
+        await persistTabOrder();
+      }
+      tabDragState.active = false;
+      tabDragState.tabId = null;
+    };
+    btn.addEventListener("pointerup", endDrag);
+    btn.addEventListener("pointercancel", endDrag);
+  });
+
+  els.dialTabs.querySelectorAll(".dial-tab-archive-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setListArchived(btn.dataset.id, currentStatus === "current");
+    });
+  });
+}
+
+async function persistTabOrder() {
+  const ids = [...els.dialTabs.querySelectorAll(".dial-tab")].map((b) => b.dataset.id);
+  await Promise.all(ids.map((id, i) => supabase.from("dial_lists").update({ sort_order: i }).eq("id", id)));
+  await loadLists();
+}
+
+async function setListArchived(listId, archived) {
+  const { error } = await supabase.from("dial_lists").update({ status: archived ? "archived" : "current" }).eq("id", listId);
+  if (error) return showError(els.errorBox, error);
+  archiveMenuTabId = null;
+  currentListId = null;
+  await loadLists();
 }
 
 function startRenameTab(btn, list) {
@@ -303,14 +458,6 @@ els.newListNameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") createNewList();
 });
 
-els.typeSwitch.querySelectorAll("button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    currentType = btn.dataset.type;
-    els.typeSwitch.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-    currentListId = null;
-    renderTabs();
-  });
-});
 // Shared by the desktop segmented switch and the mobile single toggle
 // button — both just call this with the status they want.
 function setStatus(status) {
@@ -329,10 +476,6 @@ els.statusSwitch.querySelectorAll("button").forEach((btn) => {
 els.statusToggleMobile.addEventListener("click", () => {
   setStatus(currentStatus === "current" ? "archived" : "current");
 });
-
-// Buyer support is hidden for now — everything is Sellers only. The switch
-// and its click-handling code above stay intact for when this is re-enabled.
-els.typeSwitch.classList.toggle("hidden", !BUYERS_ENABLED);
 
 // "Generate new list" is an intentional no-op placeholder for now, and is
 // hidden (not removed) until it does something.
@@ -363,7 +506,6 @@ function renderDialsTable() {
     els.dialsTableWrap.innerHTML = `<div class="empty-state">No dials in this list yet — tap + to add one.</div>`;
     return;
   }
-  const showCompany = currentType === "seller";
   // Keep each dial's original index (used for openDialModal/prev-next
   // navigation) even though hidden-status dials are filtered out of view.
   const visible = dials.map((d, i) => ({ d, i })).filter(({ d }) => !hiddenStatuses.has(d.contact_status || "uncontacted"));
@@ -378,7 +520,7 @@ function renderDialsTable() {
       <thead>
         <tr>
           <th>Name</th>
-          ${showCompany ? "<th>Company</th>" : ""}
+          <th>Company</th>
           <th>Location</th>
           <th>Phone</th>
           <th>Email</th>
@@ -390,7 +532,7 @@ function renderDialsTable() {
             ({ d, i }) => `
           <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
-            ${showCompany ? `<td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>` : ""}
+            <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
             <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || "—")}</td>
             <td class="muted" data-label="Email">${escapeHtml(d.email || "—")}</td>
@@ -429,12 +571,11 @@ function renderDialsTable() {
 // ---------------------------------------------------------------------------
 
 function buildDialViewHTML(dial) {
-  const isSeller = currentType === "seller";
   return `
     ${rfContact("Email", dial.email, "email")}
     ${buildPhoneNumbersHTML(dial)}
     ${rf("LinkedIn", dial.linkedin)}
-    ${isSeller ? rfWebsite("Website", dial.website) : ""}
+    ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
     ${buildCallNotesLiveHTML(dial)}
@@ -442,13 +583,12 @@ function buildDialViewHTML(dial) {
 }
 
 function buildDialEditHTML(dial) {
-  const isSeller = currentType === "seller";
   return `
     <div class="form-row">
       <div><label for="d_first_name">First name</label><input id="d_first_name" value="${escapeHtml(dial.first_name)}" /></div>
       <div><label for="d_last_name">Last name</label><input id="d_last_name" value="${escapeHtml(dial.last_name)}" /></div>
     </div>
-    ${isSeller ? `<label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />` : ""}
+    <label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />
     <div class="form-row">
       <div><label for="d_city">City</label><input id="d_city" value="${escapeHtml(dial.city)}" /></div>
       <div>
@@ -467,7 +607,7 @@ function buildDialEditHTML(dial) {
     </div>
     <label for="d_linkedin">LinkedIn</label>
     <input id="d_linkedin" value="${escapeHtml(dial.linkedin)}" />
-    ${isSeller ? `<label for="d_website">Website</label><input id="d_website" value="${escapeHtml(dial.website)}" />` : ""}
+    <label for="d_website">Website</label><input id="d_website" value="${escapeHtml(dial.website)}" />
     <label for="d_industry">Industry sector</label>
     <input id="d_industry" value="${escapeHtml(dial.industry)}" />
     <label for="d_summary">Summary</label>
@@ -491,11 +631,9 @@ function collectDialFormData() {
     linkedin: document.getElementById("d_linkedin").value.trim() || null,
     industry: document.getElementById("d_industry").value.trim() || null,
     summary: document.getElementById("d_summary").value.trim() || null,
+    company_name: document.getElementById("d_company_name").value.trim() || null,
+    website: document.getElementById("d_website").value.trim() || null,
   };
-  if (currentType === "seller") {
-    data.company_name = document.getElementById("d_company_name").value.trim() || null;
-    data.website = document.getElementById("d_website").value.trim() || null;
-  }
   return data;
 }
 
@@ -525,8 +663,8 @@ function renderDialModal() {
         isViewingExisting
           ? `
         <div class="dial-status-dropdown">
-          <button type="button" class="dial-status-btn" id="dialStatusBtn" title="${escapeHtml(statusInfo(dial.contact_status).label)}"
-            style="background:${statusInfo(dial.contact_status).dot}; border-color:${statusInfo(dial.contact_status).border};"></button>
+          <button type="button" class="dial-status-btn" id="dialStatusBtn"
+            style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
           <div class="dial-status-menu hidden" id="dialStatusMenu">
             ${CONTACT_STATUSES.map(
               (s) => `
@@ -625,11 +763,20 @@ async function handleEditDialSave() {
 // this is a standalone dropdown in the popup's header row that autosaves
 // immediately, same pattern as the Call notes autosave.
 async function updateDialStatus(newStatus) {
+  const previousStatus = currentDial.contact_status || "uncontacted";
   const { error } = await supabase.from("dials").update({ contact_status: newStatus }).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   currentDial.contact_status = newStatus;
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) dials[idx].contact_status = newStatus;
+
+  // Log "this dial just got its first call" for the Profile page's weekly
+  // call-count chart — only fires the first time a dial moves off the
+  // default "Uncontacted" status, not on every subsequent status change.
+  if (previousStatus === "uncontacted" && newStatus !== "uncontacted") {
+    await supabase.from("call_status_changes").insert({ user_id: profile.id, dial_id: currentDial.id });
+  }
+
   renderDialModal();
   renderDialsTable();
 }
@@ -716,7 +863,6 @@ function openCreateClientFromDial(dial) {
   const prefill = defaultClient(profile, {
     first_name: dial.first_name || "",
     last_name: dial.last_name || "",
-    client_type: currentType,
     city: dial.city || "",
     state: dial.state || "",
     email: dial.email || "",
@@ -724,7 +870,8 @@ function openCreateClientFromDial(dial) {
     // number.
     phone: dial.mobile_phone || "",
     linkedin: dial.linkedin || "",
-    company_name: currentType === "seller" ? dial.company_name || "" : "",
+    company_name: dial.company_name || "",
+    industry: dial.industry || "",
   });
   els.clientModalTitle.textContent = "New client";
   els.clientModalBody.innerHTML = `
@@ -732,7 +879,7 @@ function openCreateClientFromDial(dial) {
     ${buildEditableSections(prefill)}
     <div class="form-actions">
       <button type="button" class="btn" id="saveNewClientBtn">Save</button>
-      <button type="button" class="btn secondary" id="scheduleIntroCallNewClientBtn">Schedule intro call</button>
+      <button type="button" class="btn yellow" id="scheduleIntroCallNewClientBtn">Schedule intro call</button>
       <button type="button" class="btn secondary" id="cancelNewClientBtn">Cancel</button>
     </div>
   `;
@@ -792,13 +939,15 @@ async function handleSaveAndScheduleFromDial() {
   wireIntroCallForm(els.introCallPopupBody, {
     client: inserted,
     internEmail,
-    onScheduled: async ({ date, time, timezone }) => {
-      const eventDate = new Date(`${date}T${time}:00`);
+    onScheduled: async () => {
+      // We don't know the actual booked time here (Calendly handles that in
+      // its own tab), so this just logs that the link was opened, timestamped
+      // to now.
       await supabase.from("client_events").insert({
         client_id: inserted.id,
         event_type: "intro_call",
-        event_date: eventDate.toISOString(),
-        details: { timezone },
+        event_date: new Date().toISOString(),
+        details: { via: "calendly_link" },
         created_by: profile.id,
       });
       setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);

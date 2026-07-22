@@ -66,9 +66,6 @@ function openConfirmDelete(onConfirm) {
   noBtn.addEventListener("click", onNo);
 }
 
-function fmtNum(n) {
-  return n === null || n === undefined || n === "" ? "0" : Number(n).toLocaleString();
-}
 function monthName(m) {
   return MONTH_NAMES[m] || "";
 }
@@ -79,11 +76,7 @@ function clientLocation(c) {
   return [c.city, c.state].filter(Boolean).join(", ") || "—";
 }
 function clientSecondary(c) {
-  if (c.client_type === "seller") return c.company_name || "—";
-  if (c.money_to_spend_min != null || c.money_to_spend_max != null) {
-    return `$${fmtNum(c.money_to_spend_min)} – $${fmtNum(c.money_to_spend_max)}`;
-  }
-  return "—";
+  return c.company_name || "—";
 }
 // "Company name, City, State" (or just location if no company) — used in the
 // mobile card list's subtitle line.
@@ -122,7 +115,7 @@ function renderTable() {
   els.tableWrap.innerHTML = `
     <table>
       <thead>
-        <tr><th>Name</th><th>Type</th><th>Company / Money to spend</th><th>Location</th><th>Intern's name</th></tr>
+        <tr><th>Name</th><th>Company</th><th>Location</th><th>Intern's name</th></tr>
       </thead>
       <tbody>
         ${rows
@@ -130,8 +123,7 @@ function renderTable() {
             (c) => `
           <tr class="clickable-row" data-id="${c.id}">
             <td data-label="Name">${escapeHtml(clientDisplayName(c))}</td>
-            <td data-label="Type"><span class="pill ${c.client_type === "buyer" ? "active" : "new"}">${escapeHtml(c.client_type)}</span></td>
-            <td class="muted" data-label="Company / Money to spend">${escapeHtml(clientSecondary(c))}</td>
+            <td class="muted" data-label="Company">${escapeHtml(clientSecondary(c))}</td>
             <td class="muted" data-label="Location">${escapeHtml(clientLocation(c))}</td>
             <td class="muted" data-label="Intern's name">${escapeHtml(c.intern_name || "—")}</td>
           </tr>`
@@ -141,9 +133,8 @@ function renderTable() {
     </table>
 
     <!-- Mobile-only simplified card list (shown instead of the table below
-         the 720px breakpoint — see css/style.css). No column labels, no
-         buyer/seller pill: just the name, then company + location, then
-         instant-contact icons. -->
+         the 720px breakpoint — see css/style.css). No column labels: just
+         the name, then company + location, then instant-contact icons. -->
     <div class="mobile-list">
       ${rows
         .map(
@@ -178,7 +169,6 @@ function rf(label, value) {
 }
 
 function buildReadonlySections(client) {
-  const type = client.client_type;
   const location = [client.city, client.state].filter(Boolean).join(", ");
   const founded = client.founded_year ? `${monthName(client.founded_month)} ${client.founded_year}` : "";
   return `
@@ -190,7 +180,6 @@ function buildReadonlySections(client) {
       <div class="accordion-body">
         ${rf("First name", client.first_name)}
         ${rf("Last name", client.last_name)}
-        ${rf("Buyer / Seller", type === "seller" ? "Seller" : "Buyer")}
         ${rf("Location", location)}
         ${rf("Intern's name", client.intern_name)}
       </div>
@@ -204,27 +193,19 @@ function buildReadonlySections(client) {
       </div>
     </div>
     <div class="accordion-section" data-section="company">
-      <div class="accordion-header"><span>${type === "seller" ? "Company details" : "Investment details"}</span><span class="chevron">&#9662;</span></div>
+      <div class="accordion-header"><span>Company details</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        ${
-          type === "seller"
-            ? `
-          ${rf("Company name", client.company_name)}
-          ${rf("Industry sector", client.industry)}
-          ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
-          ${rf("Employees", client.employee_count)}
-          ${rf("Founded", founded)}
-        `
-            : `
-          ${rf("Money to spend (range)", client.money_to_spend_min != null || client.money_to_spend_max != null ? `$${fmtNum(client.money_to_spend_min)} – $${fmtNum(client.money_to_spend_max)}` : "")}
-        `
-        }
+        ${rf("Company name", client.company_name)}
+        ${rf("Industry sector", client.industry)}
+        ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
+        ${rf("Employees", client.employee_count)}
+        ${rf("Founded", founded)}
       </div>
     </div>
     <div class="accordion-section" data-section="preferences">
       <div class="accordion-header"><span>Preferences</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        ${rf(lookingForLabel(type), client.looking_for)}
+        ${rf(lookingForLabel(), client.looking_for)}
       </div>
     </div>
     <div class="accordion-section" data-section="notes">
@@ -339,13 +320,15 @@ function wireTimelineEvents() {
     wireIntroCallForm(els.eventPopupBody, {
       client: currentClient,
       internEmail,
-      onScheduled: async ({ date, time, timezone }) => {
-        const eventDate = new Date(`${date}T${time}:00`);
+      onScheduled: async () => {
+        // We don't know the actual booked time here (Calendly handles that in
+        // its own tab), so this just logs that the link was opened,
+        // timestamped to now.
         await supabase.from("client_events").insert({
           client_id: currentClient.id,
           event_type: "intro_call",
-          event_date: eventDate.toISOString(),
-          details: { timezone },
+          event_date: new Date().toISOString(),
+          details: { via: "calendly_link" },
           created_by: profile.id,
         });
         setTimeout(async () => {

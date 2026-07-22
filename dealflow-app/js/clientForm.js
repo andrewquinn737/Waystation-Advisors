@@ -1,11 +1,11 @@
 // Shared "new / edit client" form builder — used by both clients.js (the
 // Clients page itself) and dials.js (the "Create client" shortcut, which
 // pre-fills this same form from a dial's info).
-
-// Buyer support is temporarily hidden (not removed) — everything is treated
-// as a seller for now. Flip this back to true to re-expose the Buyer/Seller
-// choice and buyer-specific fields without touching any other code.
-export const BUYERS_ENABLED = false;
+//
+// Buyer support has been removed (not just hidden) — the app is sellers-only
+// for now. The underlying `clients.client_type` column still exists in the
+// database (always set to "seller" below) since dropping it isn't necessary,
+// but there's no more buyer-facing UI, fields, or branching logic.
 
 export const STATES = [
   "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
@@ -22,17 +22,17 @@ export function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-export function lookingForLabel(type) {
-  return type === "seller" ? "What they're looking for in a buyer" : "What they're looking for in a seller";
+export function lookingForLabel() {
+  return "What they're looking for in a buyer";
 }
 
 export function defaultClient(profile, overrides) {
   return Object.assign(
     {
-      first_name: "", last_name: "", client_type: BUYERS_ENABLED ? "buyer" : "seller", city: "", state: "",
+      first_name: "", last_name: "", client_type: "seller", city: "", state: "",
       email: "", phone: "", linkedin: "", company_name: "", industry: "",
       annual_revenue: null, employee_count: null, founded_year: null, founded_month: null,
-      money_to_spend_min: null, money_to_spend_max: null, looking_for: "", other_notes: "",
+      looking_for: "", other_notes: "",
       intern_name: profile?.full_name || "",
     },
     overrides || {}
@@ -40,7 +40,6 @@ export function defaultClient(profile, overrides) {
 }
 
 export function buildEditableSections(client) {
-  const type = client.client_type || "buyer";
   const founded = client.founded_year ? `${client.founded_year}-${String(client.founded_month || 1).padStart(2, "0")}` : "";
   return `
     <div class="accordion-section open" data-section="personal">
@@ -55,13 +54,6 @@ export function buildEditableSections(client) {
             <div class="field-label-row"><label for="f_last_name">Last name</label><span class="field-required-msg hidden" data-field="last_name">required</span></div>
             <input id="f_last_name" value="${escapeHtml(client.last_name)}" />
           </div>
-        </div>
-        <div class="${BUYERS_ENABLED ? "" : "hidden"}">
-          <div class="field-label-row"><label for="f_client_type">Buyer / Seller</label><span class="field-required-msg hidden" data-field="client_type">required</span></div>
-          <select id="f_client_type">
-            <option value="buyer" ${type === "buyer" ? "selected" : ""}>Buyer</option>
-            <option value="seller" ${type === "seller" ? "selected" : ""}>Seller</option>
-          </select>
         </div>
         <div class="form-row">
           <div>
@@ -94,46 +86,31 @@ export function buildEditableSections(client) {
     </div>
 
     <div class="accordion-section" data-section="company">
-      <div class="accordion-header"><span>Company &amp; investment details</span><span class="chevron">&#9662;</span></div>
+      <div class="accordion-header"><span>Company details</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        <div class="seller-fields ${type === "seller" ? "" : "hidden"}">
-          <div class="field-label-row"><label for="f_company_name">Company name</label><span class="field-required-msg hidden" data-field="company_name">required</span></div>
-          <input id="f_company_name" value="${escapeHtml(client.company_name)}" />
-          <div class="field-label-row"><label for="f_industry">Industry sector</label><span class="field-required-msg hidden" data-field="industry">required</span></div>
-          <input id="f_industry" value="${escapeHtml(client.industry)}" />
-          <div class="form-row">
-            <div>
-              <label for="f_revenue">Annual revenue ($)</label>
-              <input id="f_revenue" type="number" step="0.1" min="0" value="${client.annual_revenue ?? ""}" />
-            </div>
-            <div>
-              <label for="f_employees">Employees</label>
-              <input id="f_employees" type="number" step="1" min="0" value="${client.employee_count ?? ""}" />
-            </div>
+        <div class="field-label-row"><label for="f_company_name">Company name</label><span class="field-required-msg hidden" data-field="company_name">required</span></div>
+        <input id="f_company_name" value="${escapeHtml(client.company_name)}" />
+        <div class="field-label-row"><label for="f_industry">Industry sector</label><span class="field-required-msg hidden" data-field="industry">required</span></div>
+        <input id="f_industry" value="${escapeHtml(client.industry)}" />
+        <div class="form-row">
+          <div>
+            <label for="f_revenue">Annual revenue ($)</label>
+            <input id="f_revenue" type="number" step="0.1" min="0" value="${client.annual_revenue ?? ""}" />
           </div>
-          <label for="f_founded">Founded (year / month)</label>
-          <input id="f_founded" type="month" value="${founded}" />
-        </div>
-        <div class="buyer-fields ${type === "buyer" ? "" : "hidden"}">
-          <div class="section-title" style="margin-top:0;">Money to spend (range)</div>
-          <div class="form-row">
-            <div>
-              <label for="f_money_min">Minimum ($)</label>
-              <input id="f_money_min" type="number" step="0.1" min="0" value="${client.money_to_spend_min ?? ""}" />
-            </div>
-            <div>
-              <label for="f_money_max">Maximum ($)</label>
-              <input id="f_money_max" type="number" step="0.1" min="0" value="${client.money_to_spend_max ?? ""}" />
-            </div>
+          <div>
+            <label for="f_employees">Employees</label>
+            <input id="f_employees" type="number" step="1" min="0" value="${client.employee_count ?? ""}" />
           </div>
         </div>
+        <label for="f_founded">Founded (year / month)</label>
+        <input id="f_founded" type="month" value="${founded}" />
       </div>
     </div>
 
     <div class="accordion-section" data-section="preferences">
       <div class="accordion-header"><span>Preferences</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        <div class="field-label-row"><label for="f_looking_for" id="lookingForLabel">${lookingForLabel(type)}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
+        <div class="field-label-row"><label for="f_looking_for">${lookingForLabel()}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
         <textarea id="f_looking_for">${escapeHtml(client.looking_for || "")}</textarea>
       </div>
     </div>
@@ -153,24 +130,13 @@ export function wireEditableFormEvents(container) {
   container.querySelectorAll(".accordion-header").forEach((header) => {
     header.addEventListener("click", () => header.parentElement.classList.toggle("open"));
   });
-  const typeSel = container.querySelector("#f_client_type");
-  const sellerFields = container.querySelector(".seller-fields");
-  const buyerFields = container.querySelector(".buyer-fields");
-  const lookingLabel = container.querySelector("#lookingForLabel");
-  typeSel.addEventListener("change", () => {
-    const v = typeSel.value;
-    sellerFields.classList.toggle("hidden", v !== "seller");
-    buyerFields.classList.toggle("hidden", v !== "buyer");
-    lookingLabel.textContent = lookingForLabel(v);
-  });
 }
 
 export function collectFormData(container) {
-  const type = container.querySelector("#f_client_type").value;
   const data = {
     first_name: container.querySelector("#f_first_name").value.trim(),
     last_name: container.querySelector("#f_last_name").value.trim(),
-    client_type: type,
+    client_type: "seller",
     city: container.querySelector("#f_city").value.trim(),
     state: container.querySelector("#f_state").value,
     email: container.querySelector("#f_email").value.trim(),
@@ -179,36 +145,21 @@ export function collectFormData(container) {
     looking_for: container.querySelector("#f_looking_for").value.trim(),
     other_notes: container.querySelector("#f_other_notes").value.trim(),
     intern_name: container.querySelector("#f_intern_name").value.trim(),
+    company_name: container.querySelector("#f_company_name").value.trim(),
+    industry: container.querySelector("#f_industry").value.trim(),
   };
-  if (type === "seller") {
-    data.company_name = container.querySelector("#f_company_name").value.trim();
-    data.industry = container.querySelector("#f_industry").value.trim();
-    const rev = container.querySelector("#f_revenue").value;
-    const emp = container.querySelector("#f_employees").value;
-    data.annual_revenue = rev === "" ? null : Number(rev);
-    data.employee_count = emp === "" ? null : Number(emp);
-    const founded = container.querySelector("#f_founded").value;
-    if (founded) {
-      const [y, m] = founded.split("-");
-      data.founded_year = Number(y);
-      data.founded_month = Number(m);
-    } else {
-      data.founded_year = null;
-      data.founded_month = null;
-    }
-    data.money_to_spend_min = null;
-    data.money_to_spend_max = null;
+  const rev = container.querySelector("#f_revenue").value;
+  const emp = container.querySelector("#f_employees").value;
+  data.annual_revenue = rev === "" ? null : Number(rev);
+  data.employee_count = emp === "" ? null : Number(emp);
+  const founded = container.querySelector("#f_founded").value;
+  if (founded) {
+    const [y, m] = founded.split("-");
+    data.founded_year = Number(y);
+    data.founded_month = Number(m);
   } else {
-    data.company_name = null;
-    data.industry = null;
-    data.annual_revenue = null;
-    data.employee_count = null;
     data.founded_year = null;
     data.founded_month = null;
-    const min = container.querySelector("#f_money_min").value;
-    const max = container.querySelector("#f_money_max").value;
-    data.money_to_spend_min = min === "" ? null : Number(min);
-    data.money_to_spend_max = max === "" ? null : Number(max);
   }
   return data;
 }
@@ -222,9 +173,7 @@ export function getMissingFields(data) {
   if (!data.last_name) { missing.push("last_name"); nameMissing = true; }
   if (nameMissing) popupLabels.push("Name");
 
-  if (!data.client_type) { missing.push("client_type"); popupLabels.push("Buyer/Seller"); }
-
-  if (data.client_type === "seller" && !data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
+  if (!data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
 
   if (!data.email && !data.phone) { missing.push("contact"); popupLabels.push("Phone number and/or email"); }
 
@@ -233,7 +182,7 @@ export function getMissingFields(data) {
   if (!data.state) { missing.push("state"); locMissing = true; }
   if (locMissing) popupLabels.push("Location");
 
-  if (data.client_type === "seller" && !data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
+  if (!data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
 
   if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
 
