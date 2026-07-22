@@ -99,12 +99,21 @@
     <div class="modal">
       <h2>Add account</h2>
       <div id="addAccountError" class="error-msg hidden"></div>
-      <label for="newAccountName">Full name</label>
-      <input id="newAccountName" autocomplete="name" />
+      <div class="form-row">
+        <div>
+          <label for="newAccountFirstName">First name</label>
+          <input id="newAccountFirstName" autocomplete="given-name" />
+        </div>
+        <div>
+          <label for="newAccountLastName">Last name</label>
+          <input id="newAccountLastName" autocomplete="family-name" />
+        </div>
+      </div>
       <label for="newAccountPhone">Phone number</label>
       <input id="newAccountPhone" type="tel" autocomplete="tel" />
       <label for="newAccountEmail">Email</label>
       <input id="newAccountEmail" type="email" autocomplete="email" />
+      <div id="newAccountEmailError" class="field-error-text hidden">Email already in use. Please use a different one.</div>
       <label for="newAccountPassword">Temporary password</label>
       <input id="newAccountPassword" type="password" minlength="6" autocomplete="new-password" />
       <div class="form-actions">
