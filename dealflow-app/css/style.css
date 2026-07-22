@@ -120,6 +120,10 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 }
 .page-header h1 { font-size: 20px; line-height: 1; margin: 0; display: flex; align-items: center; }
 .page-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* "X prospects displayed" next to the Dials heading — count of dials visible
+   in the currently selected tab, after the Categories filter is applied (see
+   updateProspectCount() in js/dials.js). */
+.dials-prospect-count { font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
 
 /* Triangle dropdown toggle — replaces the old gold vertical rule. Points up
    by default; flips to point down (via .open) while its menu is showing. */
@@ -239,6 +243,13 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   position: fixed; inset: 0; background: rgba(20,22,28,.4);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 60px 16px; overflow-y: auto; z-index: 50;
+  /* Stops an over-scroll at the top/bottom of the popup's own content from
+     "chaining" into scrolling whatever's behind it (the dials list, etc.) —
+     paired with the body-position-lock done in JS (see openDialModal /
+     closeDialModal in js/dials.js) for full cross-browser coverage, since
+     overscroll-behavior alone doesn't reliably stop background scroll on
+     every mobile browser during the elastic bounce. */
+  overscroll-behavior: contain;
 }
 .modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; overflow-x: hidden; box-sizing: border-box; }
 .modal h2 { margin: 0 0 4px; font-size: 17px; }
@@ -438,6 +449,11 @@ html.is-desktop-device .contact-action-tel { display: none; }
 .dial-tab {
   padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
   font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  /* A long-press-to-drag (mobile) or click-and-drag (desktop) shouldn't ever
+     highlight/select the tab's text, or let the browser start its own native
+     text/element drag — both fought with the custom pointer-based reordering
+     in js/dials.js. */
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-user-drag: none;
 }
 @media (hover: hover) { .dial-tab:hover { background: var(--gold-soft); } }
 .dial-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -459,7 +475,7 @@ html.is-desktop-device .contact-action-tel { display: none; }
    "clunky" reordering. */
 html.is-mobile-device .dial-tab.active { touch-action: none; }
 .dial-tab.pressing { transform: scale(.96); box-shadow: 0 1px 4px rgba(0,0,0,.12); transition: transform .12s ease; }
-.dial-tab.dragging { opacity: .55; box-shadow: 0 2px 10px rgba(0,0,0,.18); position: relative; z-index: 30; }
+.dial-tab.dragging { opacity: .55; box-shadow: 0 2px 10px rgba(0,0,0,.18); position: relative; z-index: 30; cursor: grabbing; }
 /* position:fixed + JS-computed left/top (see js/dials.js) rather than
    absolute-positioned inside .dial-tab-wrap — that wrap lives inside the
    horizontally-scrolling .dials-tabbar, whose overflow-x:auto forces its
@@ -485,12 +501,25 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 .dial-modal-header-main h2 { margin: 0; font-size: 17px; }
 .dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
 .dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-/* Pulled in tighter under the header (was margin:8px 0) so the status/edit
-   row sits close to the Schedule-intro-call/X row above it. */
-.dial-modal-editrow { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; min-height: 8px; margin: 4px 0 10px; }
+/* Pulled in tight under the header — top margin matches .dial-status-col's
+   own gap below (6px) so the gap above the status/edit row reads the same
+   as the gap between that row and "Did call today" underneath it. */
+.dial-modal-editrow { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; min-height: 8px; margin: 6px 0 10px; }
 /* Status dropdown + "Did call today" stacked directly under one another,
    right-aligned, with the edit (pencil) button beside the whole stack. */
 .dial-status-col { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+/* "Schedule intro call" — same height as the status dropdown/Did-call-today
+   buttons beside it (32px), and a softer, muted yellow: just a touch darker
+   than the "Callback, interested" status tint rather than the vivid yellow
+   used for the Calendly button elsewhere (see .btn.yellow), which read as
+   too bold/heavy sitting right next to the softer status colors. */
+.dial-schedule-intro-btn {
+  height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 14px; border-radius: 7px; border: none; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  background: #f2e2a0; color: #6b5410;
+}
+@media (hover: hover) { .dial-schedule-intro-btn:hover { background: #ecd684; } }
 .dial-did-call-btn {
   height: 30px; border-radius: 7px; border: 2px solid var(--border); background: var(--surface);
   color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0 12px; white-space: nowrap;
