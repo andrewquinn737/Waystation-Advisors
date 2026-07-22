@@ -55,6 +55,16 @@
       <button type="button" class="btn secondary small" id="generateListBtn" title="Coming soon">Generate new list</button>
     </div>
 
+    <!-- Mobile-only: the "tap the already-selected tab" Archive/Unarchive
+         popup. Rendered as position:fixed and positioned via JS (see
+         js/dials.js) rather than nested inside .dials-tabbar, since that bar
+         scrolls horizontally (overflow-x:auto), which — per the CSS spec —
+         forces its overflow-y to auto too and would clip a popup nested
+         inside it. -->
+    <div class="dial-tab-archive-menu hidden" id="dialTabArchiveMenu">
+      <button type="button" class="dial-tab-archive-btn" id="dialTabArchiveBtn"></button>
+    </div>
+
     <div id="dialsTableWrap"></div>
   </main>
 
