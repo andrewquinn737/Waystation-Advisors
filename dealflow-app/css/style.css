@@ -104,8 +104,62 @@ a:hover { text-decoration: underline; }
 
 /* ---- Layout ---- */
 main { max-width: 1080px; margin: 0 auto; padding: 24px; }
-.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.page-header h1 { font-size: 20px; line-height: 1; margin: 0; padding-left: 12px; border-left: 3px solid var(--gold); display: flex; align-items: center; }
+
+/* Page header: now a bordered "tab/box" (like the app's other cards) instead
+   of bare text with a gold left rule — sits inset from the screen edges
+   (top/left/right) same as .mobile-card / .auth-card / etc. Contains the
+   dropdown-toggle + title on the left, a settings icon on the right. */
+.page-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 4px 0 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.page-header h1 { font-size: 20px; line-height: 1; margin: 0; display: flex; align-items: center; }
+.page-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+/* Triangle dropdown toggle — replaces the old gold vertical rule. Points up
+   by default; flips to point down (via .open) while its menu is showing. */
+.page-header-toggle {
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.page-header-toggle:hover { background: var(--gold-soft); color: var(--text); }
+.page-header-toggle svg { transition: transform .15s ease; }
+.page-header-toggle.open svg { transform: rotate(180deg); }
+
+/* Settings icon button, right side of the header — same icon/position on
+   Profile/Clients/Dials. Intentionally has no click behavior yet. */
+.page-header-settings {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.page-header-settings:hover { background: var(--gold-soft); color: var(--text); }
+
+/* Dropdown menu revealed under the page header when the triangle is open.
+   Content differs per page (js/profile.js, js/clients.js, js/dials.js). */
+.page-header-menu {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  margin: -8px 0 16px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+}
+.page-header-menu-item {
+  display: block; width: 100%; text-align: left; padding: 10px 12px; border: none; background: none;
+  border-radius: 6px; font-size: 13.5px; font-weight: 600; color: var(--text); cursor: pointer; font-family: inherit;
+}
+.page-header-menu-item:hover { background: var(--bg); }
+.page-header-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-muted); }
+
+/* "Categories" submenu — 6 colored rectangles (with labels) shown to the
+   side of the Categories menu item. Positioned via JS (getBoundingClientRect)
+   as position:fixed, same escape-the-scroll-container pattern used for the
+   dial tab archive menu below. */
+.categories-submenu { position: fixed; z-index: 70; display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 180px; }
+.category-rect-option { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; cursor: pointer; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; font-weight: 600; color: var(--text); background: var(--bg); font-family: inherit; }
+.category-rect-option:hover { background: var(--gold-soft); }
+.category-rect-swatch { width: 24px; height: 16px; border-radius: 4px; border: 2px solid rgba(0,0,0,.1); flex-shrink: 0; }
+.category-rect-option.is-hidden { opacity: .4; }
 
 /* ---- Cards / auth ---- */
 .auth-card {
@@ -281,6 +335,10 @@ tr.clickable-row:hover { background: var(--bg); }
   color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
 }
 .contact-action-btn:hover { background: var(--gold-soft); color: var(--text); }
+/* "Instant call" (tel:) isn't something a desktop computer can actually do,
+   so it's hidden there — text and email quick-actions stay on both. See
+   html.is-desktop-device further down (device-detection block). */
+html.is-desktop-device .contact-action-tel { display: none; }
 
 .edit-icon-btn {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
@@ -390,13 +448,17 @@ tr.clickable-row:hover { background: var(--bg); }
    overflow-y to auto too, which would silently clip an absolutely
    positioned popup that pokes out below it. Fixed positioning escapes that
    entirely. */
-.dial-tab-archive-menu { position: fixed; z-index: 60; }
+.dial-tab-archive-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 .dial-tab-archive-btn {
   padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
   font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0,0,0,.12);
 }
 .dial-tab-archive-btn:hover { background: var(--gold-soft); }
+.dial-tab-delete-btn {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; font-weight: 600; color: var(--danger); cursor: pointer; white-space: nowrap;
+}
+.dial-tab-delete-btn:hover { background: #fdecec; }
 
 /* ---- Dial detail/create popup ---- */
 .dial-modal-stack { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 540px; }
@@ -448,108 +510,119 @@ tr.clickable-row:hover { background: var(--bg); }
 
 /* =============================================================================
    RESPONSIVE / MOBILE LAYOUT
-   The app was originally built desktop-first. Everything below adapts it for
-   phone-width screens without changing desktop behavior (each rule only
-   applies inside the max-width media queries).
+   Originally this section was gated by viewport-width media queries
+   (max-width: 720px / 420px), which meant a phone held sideways (landscape)
+   got the desktop layout, and a narrow-but-real desktop browser window got
+   the mobile layout. Both were wrong — what should decide "mobile vs
+   desktop" is the device itself, not the current window/viewport size.
+
+   js/deviceDetect.js runs inline in <head> (before first paint, before this
+   stylesheet is even parsed) and adds either "is-mobile-device" or
+   "is-desktop-device" to <html> based on the browser's user agent. Every
+   rule below is scoped to html.is-mobile-device instead of living inside a
+   max-width media query, so it now depends on device type, not orientation
+   or window width. The one exception is the small-phone tuning block at the
+   bottom, which legitimately is about physical screen size (a small phone
+   vs a regular one) — it's still nested inside html.is-mobile-device so it
+   never applies on desktop, but keeps its own max-width query for that
+   narrower within-mobile distinction. Rotating a mobile device between
+   portrait/landscape only moves it in and out of that inner breakpoint —
+   it never leaves the mobile layout entirely.
    ============================================================================= */
 
-/* ---- Tablet and down ---- */
-@media (max-width: 720px) {
-  main { padding: 16px 16px 78px; }
-  .page-header h1 { font-size: 18px; }
+/* ---- Mobile devices (phones/tablets), any orientation ---- */
+html.is-mobile-device main { padding: 16px 16px 78px; }
+html.is-mobile-device .page-header h1 { font-size: 18px; }
 
-  /* Top nav is replaced entirely by the fixed bottom tab bar on mobile. */
-  .topnav-bar { display: none; }
-  .bottom-tabbar { display: flex; }
-  .mobile-only { display: block; }
-  .fab { bottom: 98px; }
-  .timeline-add-btn { bottom: 148px; }
-  .timeline-add-menu { bottom: 204px; }
+/* Top nav is replaced entirely by the fixed bottom tab bar on mobile. */
+html.is-mobile-device .topnav-bar { display: none; }
+html.is-mobile-device .bottom-tabbar { display: flex; }
+html.is-mobile-device .mobile-only { display: block; }
+html.is-mobile-device .fab { bottom: 98px; }
+html.is-mobile-device .timeline-add-btn { bottom: 148px; }
+html.is-mobile-device .timeline-add-menu { bottom: 204px; }
 
-  /* Forms: two-column rows (first/last name, city/state, revenue/employees,
-     min/max spend, etc.) stack into one column. */
-  .form-row { flex-direction: column; gap: 0; }
-  .form-actions { flex-wrap: wrap; }
+/* Forms: two-column rows (first/last name, city/state, revenue/employees,
+   min/max spend, etc.) stack into one column. */
+html.is-mobile-device .form-row { flex-direction: column; gap: 0; }
+html.is-mobile-device .form-actions { flex-wrap: wrap; }
 
-  .auth-card { margin: 40px auto; padding: 20px; max-width: calc(100% - 32px); }
-  .profile-card { padding: 20px; max-width: 100%; }
+html.is-mobile-device .auth-card { margin: 40px auto; padding: 20px; max-width: calc(100% - 32px); }
+html.is-mobile-device .profile-card { padding: 20px; max-width: 100%; }
 
-  /* Full-screen client/teams modal body: less side padding, no artificial
-     max-width centering column since the screen itself is already narrow. */
-  .fullscreen-modal .fs-header { padding: 14px 16px; }
-  .fullscreen-modal .fs-body { padding: 16px; max-width: 100%; }
+/* Full-screen client/teams modal body: less side padding, no artificial
+   max-width centering column since the screen itself is already narrow. */
+html.is-mobile-device .fullscreen-modal .fs-header { padding: 14px 16px; }
+html.is-mobile-device .fullscreen-modal .fs-body { padding: 16px; max-width: 100%; }
 
-  /* Centered popups (delete confirm, required-fields, intro call, new list):
-     less top padding so the popup isn't pushed down below the fold. */
-  .modal-backdrop { padding: 24px 12px; }
-  .modal { padding: 18px; }
+/* Centered popups (delete confirm, required-fields, intro call, new list):
+   less top padding so the popup isn't pushed down below the fold. */
+html.is-mobile-device .modal-backdrop { padding: 24px 12px; }
+html.is-mobile-device .modal { padding: 18px; }
 
-  /* Dials toolbar: tighten the gap under the "Dials" heading slightly. */
-  .page-header { margin-bottom: 10px; }
-  .dials-toolbar { gap: 8px; margin-bottom: 8px; }
-  .segmented { width: 100%; justify-content: center; }
+/* Dials toolbar: tighten the gap under the "Dials" heading slightly. */
+html.is-mobile-device .page-header { margin-bottom: 10px; }
+html.is-mobile-device .dials-toolbar { gap: 8px; margin-bottom: 8px; }
+html.is-mobile-device .segmented { width: 100%; justify-content: center; }
 
-  /* Current/Archived: mobile shows the single toggle button instead of the
-     desktop segmented switch. */
-  #statusSwitch { display: none; }
-  .status-toggle-mobile { display: inline-flex; align-items: center; justify-content: center; }
+/* Current/Archived: mobile shows the single toggle button instead of the
+   desktop segmented switch. */
+html.is-mobile-device #statusSwitch { display: none; }
+html.is-mobile-device .status-toggle-mobile { display: inline-flex; align-items: center; justify-content: center; }
 
-  /* Tabs + the "+" add-tab button become one horizontally-scrollable strip
-     (instead of wrapping to new rows), so you scroll right to reach "+". */
-  .dials-tabbar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  .dials-tabbar::-webkit-scrollbar { display: none; }
-  .dials-tabs { flex-wrap: nowrap; }
-  .dial-tab { white-space: nowrap; flex-shrink: 0; }
+/* Tabs + the "+" add-tab button become one horizontally-scrollable strip
+   (instead of wrapping to new rows), so you scroll right to reach "+". */
+html.is-mobile-device .dials-tabbar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+html.is-mobile-device .dials-tabbar::-webkit-scrollbar { display: none; }
+html.is-mobile-device .dials-tabs { flex-wrap: nowrap; }
+html.is-mobile-device .dial-tab { white-space: nowrap; flex-shrink: 0; }
 
-  /* Dial popup nav row (prev/next) gets a little breathing room so both
-     buttons are easy to tap with a thumb. */
-  .dial-nav-row { width: 100%; justify-content: space-between; gap: 8px; }
-  .dial-nav-btn { flex: 1; text-align: center; padding: 10px 8px; }
+/* Dial popup nav row (prev/next) gets a little breathing room so both
+   buttons are easy to tap with a thumb. */
+html.is-mobile-device .dial-nav-row { width: 100%; justify-content: space-between; gap: 8px; }
+html.is-mobile-device .dial-nav-btn { flex: 1; text-align: center; padding: 10px 8px; }
 
-  /* ---- Tables become stacked "cards" instead of side-scrolling grids ----
-     Each <td> is labeled via a data-label attribute (set in clients.js /
-     dials.js / finance.js) so the field name still shows next to its value. */
-  table { border: none; background: none; }
-  thead { display: none; }
-  tbody { display: block; }
-  table tr {
-    display: block; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); margin-bottom: 10px; padding: 4px 12px;
-  }
-  table tr:last-child { margin-bottom: 0; }
-  table td {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    border-bottom: 1px solid var(--border); padding: 8px 0; text-align: right;
-  }
-  table td:last-child { border-bottom: none; }
-  table td.num { text-align: right; }
-  table td::before {
-    content: attr(data-label); font-weight: 600; color: var(--text-muted);
-    font-size: 11px; text-transform: uppercase; letter-spacing: .02em;
-    text-align: left; flex-shrink: 0;
-  }
-  table td:not([data-label])::before { content: none; }
-
-  /* Clients and Dials get their own bespoke mobile card layout (below)
-     instead of the generic labeled-card table transform above, so hide
-     their <table> and show .mobile-list in its place. Finance keeps the
-     generic table-to-card transform since it wasn't redesigned. */
-  #tableWrap table, #dialsTableWrap table { display: none; }
-
-  /* Profile read-view rows (label/value + text/call/email quick-contact
-     icons) wrap instead of squeezing or overflowing on narrow screens. */
-  .rf-value-row { flex-wrap: wrap; }
-  .accordion-header-left { flex-wrap: wrap; }
-  .accordion-header { flex-wrap: wrap; gap: 8px; }
+/* ---- Tables become stacked "cards" instead of side-scrolling grids ----
+   Each <td> is labeled via a data-label attribute (set in clients.js /
+   dials.js / finance.js) so the field name still shows next to its value. */
+html.is-mobile-device table { border: none; background: none; }
+html.is-mobile-device thead { display: none; }
+html.is-mobile-device tbody { display: block; }
+html.is-mobile-device table tr {
+  display: block; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 10px; padding: 4px 12px;
 }
+html.is-mobile-device table tr:last-child { margin-bottom: 0; }
+html.is-mobile-device table td {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-bottom: 1px solid var(--border); padding: 8px 0; text-align: right;
+}
+html.is-mobile-device table td:last-child { border-bottom: none; }
+html.is-mobile-device table td.num { text-align: right; }
+html.is-mobile-device table td::before {
+  content: attr(data-label); font-weight: 600; color: var(--text-muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .02em;
+  text-align: left; flex-shrink: 0;
+}
+html.is-mobile-device table td:not([data-label])::before { content: none; }
+
+/* Clients and Dials get their own bespoke mobile card layout (below)
+   instead of the generic labeled-card table transform above, so hide
+   their <table> and show .mobile-list in its place. Finance keeps the
+   generic table-to-card transform since it wasn't redesigned. */
+html.is-mobile-device #tableWrap table, html.is-mobile-device #dialsTableWrap table { display: none; }
+
+/* Profile read-view rows (label/value + text/call/email quick-contact
+   icons) wrap instead of squeezing or overflowing on narrow screens. */
+html.is-mobile-device .rf-value-row { flex-wrap: wrap; }
+html.is-mobile-device .accordion-header-left { flex-wrap: wrap; }
+html.is-mobile-device .accordion-header { flex-wrap: wrap; gap: 8px; }
 
 /* ---- Mobile card list (Clients + Dials) ----
-   Hidden by default (desktop shows the <table> instead); shown at
-   max-width:720px above. */
+   Hidden by default (desktop shows the <table> instead); shown on mobile
+   devices. */
 .mobile-list { display: none; }
-@media (max-width: 720px) {
-  .mobile-list { display: block; }
-}
+html.is-mobile-device .mobile-list { display: block; }
 .mobile-card {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -561,14 +634,16 @@ tr.clickable-row:hover { background: var(--bg); }
 .mc-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mobile-card .contact-actions { flex-shrink: 0; }
 
-/* ---- Small phones ---- */
+/* ---- Small phones ---- (still device-gated — see comment above; the
+   max-width query here is only for graphics fitting smaller physical
+   screens, not for distinguishing mobile from desktop) */
 @media (max-width: 420px) {
-  main { padding: 12px 12px 78px; }
-  .page-header h1 { font-size: 17px; }
-  .fab { right: 18px; bottom: 88px; width: 52px; height: 52px; font-size: 26px; }
-  .timeline-add-btn { right: 18px; bottom: 142px; }
-  .timeline-add-menu { right: 18px; bottom: 196px; }
-  .modal { padding: 16px; }
-  .accordion-header { padding: 10px 12px; }
-  .accordion-body { padding: 12px; }
+  html.is-mobile-device main { padding: 12px 12px 78px; }
+  html.is-mobile-device .page-header h1 { font-size: 17px; }
+  html.is-mobile-device .fab { right: 18px; bottom: 88px; width: 52px; height: 52px; font-size: 26px; }
+  html.is-mobile-device .timeline-add-btn { right: 18px; bottom: 142px; }
+  html.is-mobile-device .timeline-add-menu { right: 18px; bottom: 196px; }
+  html.is-mobile-device .modal { padding: 16px; }
+  html.is-mobile-device .accordion-header { padding: 10px 12px; }
+  html.is-mobile-device .accordion-body { padding: 12px; }
 }
