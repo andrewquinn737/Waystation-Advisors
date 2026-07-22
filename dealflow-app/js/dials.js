@@ -964,7 +964,7 @@ function renderDialModal() {
                 ).join("")}
               </div>
             </div>
-            <button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Did call today</button>
+            <button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Called today</button>
           </div>
           <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
         </div>
