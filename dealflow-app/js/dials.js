@@ -28,10 +28,34 @@ let currentDialIndex = -1;
 let currentDial = null;
 let dialMode = "view"; // 'view' | 'edit' | 'create'
 
+// Quick call-outcome status, set from a dropdown in the dial popup (not part
+// of the edit form). Colors are light/mild tints matching the app's existing
+// palette (see the .pill.* rules in css/style.css for the same family of
+// colors). "dot" is the more saturated swatch used in the dropdown/filter.
+const CONTACT_STATUSES = [
+  { value: "uncontacted", label: "Uncontacted", bg: "#ffffff", border: "#eae3d3", dot: "#ffffff" },
+  { value: "unable_to_contact", label: "Unable to contact", bg: "#eef0f2", border: "#d8dde2", dot: "#9ca3af" },
+  { value: "not_interested", label: "Not interested", bg: "#fdecec", border: "#f7d2ce", dot: "#e0776d" },
+  { value: "no_response", label: "No response, try again", bg: "#ffeede", border: "#f7d9b8", dot: "#f2a65a" },
+  { value: "callback_interested", label: "Callback, interested", bg: "#fff6e0", border: "#f3e6b8", dot: "#f2d34b" },
+  { value: "intro_call_scheduled", label: "Intro call scheduled", bg: "#e7f8ee", border: "#c9ebd4", dot: "#6fcf8e" },
+];
+function statusInfo(value) {
+  return CONTACT_STATUSES.find((s) => s.value === value) || CONTACT_STATUSES[0];
+}
+
+// Which statuses are currently hidden from every list/tab (toggled via the
+// palette filter button). In-memory only — resets on page reload.
+const hiddenStatuses = new Set();
+
 const els = {
   errorBox: document.getElementById("errorBox"),
   typeSwitch: document.getElementById("typeSwitch"),
   statusSwitch: document.getElementById("statusSwitch"),
+  statusToggleMobile: document.getElementById("statusToggleMobile"),
+  statusFilter: document.getElementById("statusFilter"),
+  statusFilterBtn: document.getElementById("statusFilterBtn"),
+  statusFilterMenu: document.getElementById("statusFilterMenu"),
   dialTabs: document.getElementById("dialTabs"),
   addTabBtn: document.getElementById("addTabBtn"),
   generateListBtn: document.getElementById("generateListBtn"),
@@ -114,7 +138,7 @@ function emptyDial() {
   return {
     first_name: "", last_name: "", city: "", state: "", email: "",
     mobile_phone: "", company_phone: "", linkedin: "", company_name: "",
-    website: "", industry: "", summary: "", call_notes: "",
+    website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted",
   };
 }
 
@@ -287,13 +311,23 @@ els.typeSwitch.querySelectorAll("button").forEach((btn) => {
     renderTabs();
   });
 });
+// Shared by the desktop segmented switch and the mobile single toggle
+// button — both just call this with the status they want.
+function setStatus(status) {
+  currentStatus = status;
+  els.statusSwitch.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.status === status));
+  els.statusToggleMobile.textContent = status === "current" ? "Current" : "Archived";
+  els.statusToggleMobile.dataset.status = status;
+  els.statusToggleMobile.classList.toggle("is-archived", status === "archived");
+  currentListId = null;
+  renderTabs();
+}
+
 els.statusSwitch.querySelectorAll("button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    currentStatus = btn.dataset.status;
-    els.statusSwitch.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-    currentListId = null;
-    renderTabs();
-  });
+  btn.addEventListener("click", () => setStatus(btn.dataset.status));
+});
+els.statusToggleMobile.addEventListener("click", () => {
+  setStatus(currentStatus === "current" ? "archived" : "current");
 });
 
 // Buyer support is hidden for now — everything is Sellers only. The switch
@@ -330,6 +364,15 @@ function renderDialsTable() {
     return;
   }
   const showCompany = currentType === "seller";
+  // Keep each dial's original index (used for openDialModal/prev-next
+  // navigation) even though hidden-status dials are filtered out of view.
+  const visible = dials.map((d, i) => ({ d, i })).filter(({ d }) => !hiddenStatuses.has(d.contact_status || "uncontacted"));
+
+  if (visible.length === 0) {
+    els.dialsTableWrap.innerHTML = `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
+    return;
+  }
+
   els.dialsTableWrap.innerHTML = `
     <table>
       <thead>
@@ -342,10 +385,10 @@ function renderDialsTable() {
         </tr>
       </thead>
       <tbody>
-        ${dials
+        ${visible
           .map(
-            (d, i) => `
-          <tr class="clickable-row" data-index="${i}">
+            ({ d, i }) => `
+          <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
             ${showCompany ? `<td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>` : ""}
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
@@ -361,10 +404,10 @@ function renderDialsTable() {
          top, company + location smaller underneath, and instant-contact
          icons using the mobile number only (never the company number). -->
     <div class="mobile-list">
-      ${dials
+      ${visible
         .map(
-          (d, i) => `
-        <div class="mobile-card clickable-row" data-index="${i}">
+          ({ d, i }) => `
+        <div class="mobile-card clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
           <div class="mc-main">
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
@@ -478,7 +521,25 @@ function renderDialModal() {
       </div>
     </div>
     <div class="dial-modal-editrow">
-      ${isViewingExisting ? `<button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>` : ""}
+      ${
+        isViewingExisting
+          ? `
+        <div class="dial-status-dropdown">
+          <button type="button" class="dial-status-btn" id="dialStatusBtn" title="${escapeHtml(statusInfo(dial.contact_status).label)}"
+            style="background:${statusInfo(dial.contact_status).dot}; border-color:${statusInfo(dial.contact_status).border};"></button>
+          <div class="dial-status-menu hidden" id="dialStatusMenu">
+            ${CONTACT_STATUSES.map(
+              (s) => `
+              <button type="button" class="dial-status-option" data-value="${s.value}">
+                <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+              </button>`
+            ).join("")}
+          </div>
+        </div>
+        <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
+      `
+          : ""
+      }
     </div>
   `;
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
@@ -487,6 +548,16 @@ function renderDialModal() {
     document.getElementById("dialEditBtn").addEventListener("click", () => {
       dialMode = "edit";
       renderDialModal();
+    });
+    const statusBtn = document.getElementById("dialStatusBtn");
+    const statusMenu = document.getElementById("dialStatusMenu");
+    statusBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      statusMenu.classList.toggle("hidden");
+    });
+    document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
+    statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
+      btn.addEventListener("click", () => updateDialStatus(btn.dataset.value));
     });
   }
 
@@ -548,6 +619,19 @@ async function handleEditDialSave() {
   dialMode = "view";
   renderDialModal();
   await loadDials();
+}
+
+// Sets the dial's quick call-outcome status. Not part of the edit form —
+// this is a standalone dropdown in the popup's header row that autosaves
+// immediately, same pattern as the Call notes autosave.
+async function updateDialStatus(newStatus) {
+  const { error } = await supabase.from("dials").update({ contact_status: newStatus }).eq("id", currentDial.id);
+  if (error) return showError(els.dialModalError, error);
+  currentDial.contact_status = newStatus;
+  const idx = dials.findIndex((d) => d.id === currentDial.id);
+  if (idx !== -1) dials[idx].contact_status = newStatus;
+  renderDialModal();
+  renderDialsTable();
 }
 
 function handleDeleteDial() {
@@ -724,5 +808,39 @@ async function handleSaveAndScheduleFromDial() {
 
 els.clientModalClose.addEventListener("click", closeClientModal);
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
+
+// ---------------------------------------------------------------------------
+// Status filter (the "palette" button) — hides/shows dials by status across
+// every list/tab. In-memory only (hiddenStatuses), so it resets on reload.
+// ---------------------------------------------------------------------------
+
+function renderStatusFilterMenu() {
+  els.statusFilterMenu.innerHTML = CONTACT_STATUSES.map(
+    (s) => `
+      <button type="button" class="status-filter-dot ${hiddenStatuses.has(s.value) ? "is-hidden" : ""}"
+        data-value="${s.value}" title="${escapeHtml(s.label)}"
+        style="background:${s.dot}; border-color:${s.border};"></button>`
+  ).join("");
+  els.statusFilterMenu.querySelectorAll(".status-filter-dot").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = btn.dataset.value;
+      if (hiddenStatuses.has(v)) hiddenStatuses.delete(v);
+      else hiddenStatuses.add(v);
+      renderStatusFilterMenu();
+      renderDialsTable();
+    });
+  });
+}
+renderStatusFilterMenu();
+
+els.statusFilterBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const opening = els.statusFilterMenu.classList.contains("hidden");
+  els.statusFilterMenu.classList.toggle("hidden");
+  if (opening) {
+    document.addEventListener("click", () => els.statusFilterMenu.classList.add("hidden"), { once: true });
+  }
+});
 
 await loadLists();

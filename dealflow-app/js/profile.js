@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { requireSession, showError } from "./auth.js";
+import { requireSession, showError, signOut } from "./auth.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -14,6 +14,7 @@ const els = {
   teamsModal: document.getElementById("teamsModal"),
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
   teamsWrap: document.getElementById("teamsWrap"),
+  profileSignOutBtn: document.getElementById("profileSignOutBtn"),
 };
 
 function initials(name) {
@@ -61,3 +62,4 @@ els.teamsBtn.addEventListener("click", async () => {
 els.teamsCloseBtn.addEventListener("click", () => {
   els.teamsModal.classList.add("hidden");
 });
+els.profileSignOutBtn.addEventListener("click", signOut);

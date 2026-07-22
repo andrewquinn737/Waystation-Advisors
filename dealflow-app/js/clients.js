@@ -36,6 +36,7 @@ const els = {
   clientModalTitle: document.getElementById("clientModalTitle"),
   clientModalBody: document.getElementById("clientModalBody"),
   clientModalClose: document.getElementById("clientModalClose"),
+  editProfileBtn: document.getElementById("editProfileBtn"),
   clientSubtabs: document.getElementById("clientSubtabs"),
   requiredPopup: document.getElementById("requiredPopup"),
   requiredPopupText: document.getElementById("requiredPopupText"),
@@ -176,17 +177,14 @@ function rf(label, value) {
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
 }
 
-function buildReadonlySections(client, showEditButton) {
+function buildReadonlySections(client) {
   const type = client.client_type;
   const location = [client.city, client.state].filter(Boolean).join(", ");
   const founded = client.founded_year ? `${monthName(client.founded_month)} ${client.founded_year}` : "";
   return `
     <div class="accordion-section open" data-section="personal">
       <div class="accordion-header">
-        <div class="accordion-header-left">
-          <span>Personal information</span>
-          ${showEditButton ? `<button type="button" class="edit-icon-btn inline" id="editProfileBtn" title="Edit profile">&#9998;</button>` : ""}
-        </div>
+        <span>Personal information</span>
         <span class="chevron">&#9662;</span>
       </div>
       <div class="accordion-body">
@@ -381,6 +379,9 @@ const SUBTABS_ENABLED = false;
 
 function renderModalBody() {
   els.clientSubtabs.classList.toggle("hidden", !SUBTABS_ENABLED || currentMode === "create");
+  // Edit icon lives in the header (left of the x), not beside "Personal
+  // information" — only shown in view mode.
+  els.editProfileBtn.classList.toggle("hidden", currentMode !== "view");
 
   if (currentMode === "create") {
     els.clientModalTitle.textContent = "New client";
@@ -404,7 +405,7 @@ function renderModalBody() {
   if (currentTab === "profile") {
     els.clientModalBody.innerHTML = `
       <div id="clientModalError" class="error-msg hidden"></div>
-      ${currentMode === "edit" ? buildEditableSections(currentClient) : buildReadonlySections(currentClient, true)}
+      ${currentMode === "edit" ? buildEditableSections(currentClient) : buildReadonlySections(currentClient)}
       ${
         currentMode === "edit"
           ? `<div class="form-actions">
@@ -426,11 +427,6 @@ function renderModalBody() {
       if (delBtn) delBtn.addEventListener("click", handleDelete);
     } else {
       wireAccordions();
-      document.getElementById("editProfileBtn").addEventListener("click", (e) => {
-        e.stopPropagation();
-        currentMode = "edit";
-        renderModalBody();
-      });
     }
   } else if (currentTab === "progress") {
     els.clientModalBody.innerHTML = `<div class="empty-state">Progress tracking is coming soon.</div>`;
@@ -494,6 +490,10 @@ function closeModal() {
 
 els.addBtn.addEventListener("click", openCreateModal);
 els.clientModalClose.addEventListener("click", closeModal);
+els.editProfileBtn.addEventListener("click", () => {
+  currentMode = "edit";
+  renderModalBody();
+});
 
 els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
   btn.addEventListener("click", async () => {
