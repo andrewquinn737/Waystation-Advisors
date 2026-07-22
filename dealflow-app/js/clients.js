@@ -16,7 +16,6 @@ import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile, user } = session;
-const isLead = profile.role === "team_lead";
 const internEmail = user?.email || "";
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

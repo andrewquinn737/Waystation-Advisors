@@ -1,6 +1,7 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
 import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
+import { contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -20,6 +21,11 @@ const els = {
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
   teamsWrap: document.getElementById("teamsWrap"),
   profileSignOutBtn: document.getElementById("profileSignOutBtn"),
+  teamMemberPopup: document.getElementById("teamMemberPopup"),
+  teamMemberName: document.getElementById("teamMemberName"),
+  teamMemberRole: document.getElementById("teamMemberRole"),
+  teamMemberBody: document.getElementById("teamMemberBody"),
+  teamMemberPopupClose: document.getElementById("teamMemberPopupClose"),
 };
 
 function initials(name) {
@@ -32,33 +38,145 @@ function initials(name) {
 }
 
 els.profileName.textContent = profile.full_name;
-els.profileRole.textContent = profile.role === "team_lead" ? "Team Lead" : "Intern";
+// Team leads are on hold for now — every account is an intern (see
+// is_team_lead() in supabase/schema.sql for the one place to re-enable it).
+els.profileRole.textContent = "Intern";
 els.avatarInitials.textContent = initials(profile.full_name);
 
-async function loadTeams() {
-  const { data, error } = await supabase.from("teams").select("*").order("name");
-  if (error) return showError(els.errorBox, error);
-  renderTeams(data || []);
-}
-
-function renderTeams(teams) {
-  if (teams.length === 0) {
-    els.teamsWrap.innerHTML = `<div class="empty-state">No teams yet.</div>`;
-    return;
-  }
-  els.teamsWrap.innerHTML = `
-    <table>
-      <thead><tr><th>Team</th></tr></thead>
-      <tbody>
-        ${teams.map((t) => `<tr><td>${escapeHtml(t.name)}</td></tr>`).join("")}
-      </tbody>
-    </table>
-  `;
-}
+// ---------------------------------------------------------------------------
+// Teams popup — 3 fixed, expandable groups (not user-creatable yet). Every
+// intern account lands in "Unassigned interns" by default (see the `team`
+// column's default in supabase/schema.sql / handle_new_user()); re-assigning
+// someone to Admins/Team 1 is a manual DB edit for now, same as promoting a
+// team lead used to be.
+// ---------------------------------------------------------------------------
+const TEAM_GROUPS = ["Admins", "Team 1", "Unassigned interns"];
+let teamMembersByGroup = {};
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+function memberPositionLabel(m) {
+  // Only "Intern" exists as a position today (team leads are on hold — see
+  // is_team_lead() in supabase/schema.sql).
+  return m.role === "team_lead" ? "Team Lead" : "Intern";
+}
+
+async function loadTeams() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, phone, email, team")
+    .order("full_name", { ascending: true });
+  if (error) return showError(els.errorBox, error);
+
+  teamMembersByGroup = { "Admins": [], "Team 1": [], "Unassigned interns": [] };
+  (data || []).forEach((m) => {
+    const group = teamMembersByGroup[m.team] ? m.team : "Unassigned interns";
+    teamMembersByGroup[group].push(m);
+  });
+  renderTeams();
+}
+
+function renderTeams() {
+  els.teamsWrap.innerHTML = TEAM_GROUPS.map((group, i) => {
+    const members = teamMembersByGroup[group] || [];
+    return `
+      <div class="accordion-section team-group ${i === 0 ? "open" : ""}" data-group="${escapeHtml(group)}">
+        <div class="accordion-header">
+          <span>${escapeHtml(group)} <span class="help-text" style="display:inline;">(${members.length})</span></span>
+          <span class="chevron">&#9662;</span>
+        </div>
+        <div class="accordion-body team-group-body">
+          ${
+            members.length
+              ? `<div class="team-member-list">${members.map(memberCardHTML).join("")}</div>`
+              : `<div class="empty-state">No one here yet.</div>`
+          }
+        </div>
+      </div>`;
+  }).join("");
+
+  els.teamsWrap.querySelectorAll(".accordion-header").forEach((header) => {
+    header.addEventListener("click", () => header.parentElement.classList.toggle("open"));
+  });
+  els.teamsWrap.querySelectorAll("[data-member-id]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const member = Object.values(teamMembersByGroup).flat().find((m) => m.id === card.dataset.memberId);
+      if (member) openTeamMemberPopup(member);
+    });
+  });
+  stopContactActionPropagation(els.teamsWrap);
+}
+
+function memberCardHTML(m) {
+  return `
+    <div class="team-member-card clickable-row" data-member-id="${m.id}">
+      <div class="mc-main">
+        <div class="mc-name">${escapeHtml(m.full_name)}</div>
+        <div class="mc-sub">${escapeHtml(memberPositionLabel(m))}</div>
+      </div>
+      ${contactActionIcons({ phone: m.phone, email: m.email })}
+    </div>`;
+}
+
+// Briefly shows "Copied" next to a value after a long-press copies it —
+// same lightweight pattern as the call-notes "Saved" indicator on Dials.
+function wireLongPressCopy(container) {
+  container.querySelectorAll(".copyable").forEach((el) => {
+    let timer = null;
+    const start = () => {
+      timer = setTimeout(async () => {
+        try {
+          await navigator.clipboard.writeText(el.dataset.copy || "");
+          const toast = el.parentElement.querySelector(".copy-toast");
+          if (toast) {
+            toast.classList.remove("hidden");
+            setTimeout(() => toast.classList.add("hidden"), 1200);
+          }
+        } catch {
+          // Clipboard access can fail (permissions, insecure context, etc.)
+          // — silently ignore, nothing to fall back to here.
+        }
+      }, 500);
+    };
+    const cancel = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    el.addEventListener("pointerdown", start);
+    ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => el.addEventListener(ev, cancel));
+  });
+}
+
+function memberDetailRow(label, value, kind) {
+  const v = value ? String(value) : "";
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">${escapeHtml(label)}</div>
+      <div class="rf-value-row">
+        <div class="rf-value-row" style="gap:8px;">
+          <div class="rf-value ${v ? "copyable" : "empty"}" ${v ? `data-copy="${escapeHtml(v)}"` : ""}>${v ? escapeHtml(v) : "Not provided"}</div>
+          <span class="copy-toast hidden">Copied</span>
+        </div>
+        ${v ? contactActionIcons(kind === "phone" ? { phone: v } : { email: v }) : ""}
+      </div>
+    </div>`;
+}
+
+function openTeamMemberPopup(member) {
+  els.teamMemberName.textContent = member.full_name;
+  els.teamMemberRole.textContent = memberPositionLabel(member);
+  els.teamMemberBody.innerHTML = `
+    ${memberDetailRow("Phone number", member.phone, "phone")}
+    ${memberDetailRow("Email", member.email, "email")}
+  `;
+  wireLongPressCopy(els.teamMemberBody);
+  stopContactActionPropagation(els.teamMemberBody);
+  els.teamMemberPopup.classList.remove("hidden");
+}
+
+els.teamMemberPopupClose.addEventListener("click", () => els.teamMemberPopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
 // "X people called this week" + 6-week chart. A row is inserted into
@@ -80,27 +198,76 @@ function fmtShortDate(d) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// Weekly quota — also drives the "(N more calls to reach quota)" /
+// "(Quota met)" text under the calls-this-week heading.
+const WEEKLY_QUOTA = 50;
+
+// Picks a "nice" gridline step (1/2/5 x a power of 10) for a given rough
+// spacing target, same approach most charting libraries use so the
+// gridlines land on round numbers instead of awkward ones.
+function niceStep(roughStep) {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep || 1)));
+  const residual = roughStep / magnitude;
+  let step;
+  if (residual > 5) step = 10;
+  else if (residual > 2) step = 5;
+  else if (residual > 1) step = 2;
+  else step = 1;
+  return step * magnitude;
+}
+
 function renderCallsChart(weekStarts, counts) {
   const w = 300;
-  const h = 90;
-  const padX = 16;
-  const padY = 14;
-  const max = Math.max(1, ...counts);
+  const h = 150;
+  const padX = 18;
+  const padTop = 22; // room for the value label above the tallest dot
+  const padBottom = 16;
+  const plotH = h - padTop - padBottom;
+
+  // The 50-quota line always has to fit on the chart, even in weeks where
+  // nobody's close to it yet, so the axis max is never less than the quota.
+  const rawMax = Math.max(WEEKLY_QUOTA, ...counts);
+  const step = niceStep(rawMax / 4);
+  const axisMax = Math.ceil(rawMax / step) * step;
+
+  const yFor = (v) => padTop + plotH - (v / axisMax) * plotH;
+
   const stepX = counts.length > 1 ? (w - padX * 2) / (counts.length - 1) : 0;
   const points = counts.map((c, i) => ({
     x: padX + i * stepX,
-    y: h - padY - (c / max) * (h - padY * 2),
+    y: yFor(c),
   }));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
   const dots = points.map((p) => `<circle class="profile-chart-dot" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3"></circle>`).join("");
-  const labels = weekStarts
+  const valueLabels = points
+    .map((p, i) => `<text class="profile-chart-value" x="${p.x.toFixed(1)}" y="${(p.y - 7).toFixed(1)}" text-anchor="middle">${counts[i]}</text>`)
+    .join("");
+  const dateLabels = weekStarts
     .map((ws, i) => `<text class="profile-chart-label" x="${points[i].x.toFixed(1)}" y="${h - 2}" text-anchor="middle">${fmtShortDate(ws)}</text>`)
     .join("");
+
+  // Adaptive gridlines (0, step, 2*step, ... up to axisMax), each with a
+  // value label on the left.
+  const gridlines = [];
+  for (let v = 0; v <= axisMax + 0.001; v += step) {
+    const y = yFor(v);
+    gridlines.push(`<line class="profile-chart-grid" x1="${padX}" x2="${(w - padX).toFixed(1)}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"></line>`);
+    gridlines.push(`<text class="profile-chart-grid-label" x="2" y="${(y + 3).toFixed(1)}">${Math.round(v)}</text>`);
+  }
+
+  // Fixed quota line at 50, always green, regardless of the data — drawn
+  // after the regular gridlines so it sits on top of them.
+  const quotaY = yFor(WEEKLY_QUOTA);
+  const quotaLine = `<line class="profile-chart-quota-line" x1="${padX}" x2="${(w - padX).toFixed(1)}" y1="${quotaY.toFixed(1)}" y2="${quotaY.toFixed(1)}"></line>`;
+
   els.callsChart.innerHTML = `
     <svg viewBox="0 0 ${w} ${h}">
+      ${gridlines.join("")}
+      ${quotaLine}
       <path class="profile-chart-line" d="${pathD}"></path>
       ${dots}
-      ${labels}
+      ${valueLabels}
+      ${dateLabels}
     </svg>
   `;
 }
@@ -131,7 +298,12 @@ async function loadCallsChart() {
   });
 
   const thisWeekCount = counts[counts.length - 1];
-  els.callsThisWeekText.textContent = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week`;
+  const remaining = WEEKLY_QUOTA - thisWeekCount;
+  const quotaHTML =
+    remaining <= 0
+      ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
+      : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
+  els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week${quotaHTML}`;
   renderCallsChart(weekStarts, counts);
 }
 

@@ -1,14 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
-import {
-  STATES,
-  escapeHtml,
-  defaultClient,
-  buildEditableSections,
-  wireEditableFormEvents,
-  collectFormData,
-  getMissingFields,
-} from "./clientForm.js";
+import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
@@ -16,7 +8,6 @@ import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } fr
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile, user } = session;
-const isLead = profile.role === "team_lead";
 const internEmail = user?.email || "";
 
 let allLists = []; // every dial_lists row (all types/statuses)
@@ -77,10 +68,6 @@ const els = {
   dialNavRow: document.getElementById("dialNavRow"),
   dialPrevBtn: document.getElementById("dialPrevBtn"),
   dialNextBtn: document.getElementById("dialNextBtn"),
-  clientModal: document.getElementById("clientModal"),
-  clientModalTitle: document.getElementById("clientModalTitle"),
-  clientModalBody: document.getElementById("clientModalBody"),
-  clientModalClose: document.getElementById("clientModalClose"),
   requiredPopup: document.getElementById("requiredPopup"),
   requiredPopupText: document.getElementById("requiredPopupText"),
   requiredPopupOk: document.getElementById("requiredPopupOk"),
@@ -103,7 +90,10 @@ function openConfirmDelete(onConfirm) {
 
 // Generic "are you sure" confirm popup wiring, reused for both deleting a
 // dial (above) and deleting a whole tab/list (see dialTabDeleteBtn below).
-function openConfirmModal(modalEl, yesId, noId, onConfirm) {
+// onClose (optional) always runs once the popup is dismissed, whether by
+// Yes or No — used by the tab-delete flow to restore the archive/delete
+// menu's visibility after a "Cancel".
+function openConfirmModal(modalEl, yesId, noId, onConfirm, onClose) {
   modalEl.classList.remove("hidden");
   const yesBtn = document.getElementById(yesId);
   const noBtn = document.getElementById(noId);
@@ -111,6 +101,7 @@ function openConfirmModal(modalEl, yesId, noId, onConfirm) {
     modalEl.classList.add("hidden");
     yesBtn.removeEventListener("click", onYes);
     noBtn.removeEventListener("click", onNo);
+    if (onClose) onClose();
   };
   const onYes = () => {
     cleanup();
@@ -153,7 +144,16 @@ function emptyDial() {
     first_name: "", last_name: "", city: "", state: "", email: "",
     mobile_phone: "", company_phone: "", linkedin: "", company_name: "",
     website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted",
+    called_today_date: null,
   };
+}
+
+// Local calendar date (not UTC) as YYYY-MM-DD — used for the "Did call
+// today" toggle, which just compares against this rather than needing a
+// scheduled job to reset at midnight.
+function todayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // One row of a phone number with its "(Mobile)"/"(Company)" label + instant
@@ -282,15 +282,24 @@ els.dialTabArchiveBtn.addEventListener("click", () => {
 els.dialTabDeleteBtn.addEventListener("click", () => {
   if (!archiveMenuTabId) return;
   const tabId = archiveMenuTabId;
-  openConfirmModal(els.confirmDeleteTabModal, "confirmDeleteTabYesBtn", "confirmDeleteTabNoBtn", async () => {
-    // dials.list_id is "on delete cascade" (see supabase/schema.sql), so
-    // deleting the list also deletes every dial inside it.
-    const { error } = await supabase.from("dial_lists").delete().eq("id", tabId);
-    if (error) return showError(els.errorBox, error);
-    archiveMenuTabId = null;
-    currentListId = null;
-    await loadLists();
-  });
+  // Hide the Archive/Delete popup while the "are you sure" confirmation is
+  // up, so they're never both visible at once.
+  els.dialTabArchiveMenu.classList.add("hidden");
+  openConfirmModal(
+    els.confirmDeleteTabModal,
+    "confirmDeleteTabYesBtn",
+    "confirmDeleteTabNoBtn",
+    async () => {
+      // dials.list_id is "on delete cascade" (see supabase/schema.sql), so
+      // deleting the list also deletes every dial inside it.
+      const { error } = await supabase.from("dial_lists").delete().eq("id", tabId);
+      if (error) return showError(els.errorBox, error);
+      archiveMenuTabId = null;
+      currentListId = null;
+      await loadLists();
+    },
+    () => updateArchiveMenuPosition()
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -312,7 +321,7 @@ function isMobileViewport() {
 }
 
 let archiveMenuTabId = null;
-const LONG_PRESS_MS = 500;
+const LONG_PRESS_MS = 300;
 const DRAG_CANCEL_PX = 10;
 
 const tabDragState = {
@@ -360,9 +369,14 @@ function wireTabInteractions() {
       tabDragState.startX = e.clientX;
       tabDragState.active = false;
       cancelLongPressTimer();
+      // Immediate subtle feedback that a hold is being registered, so the
+      // long-press doesn't feel like nothing is happening until it suddenly
+      // starts dragging.
+      btn.classList.add("pressing");
       tabDragState.timer = setTimeout(() => {
         tabDragState.active = true;
         archiveMenuTabId = null;
+        btn.classList.remove("pressing");
         btn.classList.add("dragging");
         try {
           btn.setPointerCapture(e.pointerId);
@@ -376,7 +390,10 @@ function wireTabInteractions() {
       if (tabDragState.tabId !== id) return;
       const dx = e.clientX - tabDragState.startX;
       if (!tabDragState.active) {
-        if (Math.abs(dx) > DRAG_CANCEL_PX) cancelLongPressTimer();
+        if (Math.abs(dx) > DRAG_CANCEL_PX) {
+          cancelLongPressTimer();
+          btn.classList.remove("pressing");
+        }
         return;
       }
       e.preventDefault();
@@ -407,6 +424,7 @@ function wireTabInteractions() {
 
     const endDrag = async () => {
       cancelLongPressTimer();
+      btn.classList.remove("pressing");
       if (tabDragState.tabId !== id) return;
       if (tabDragState.active) {
         btn.classList.remove("dragging");
@@ -705,6 +723,7 @@ function renderDialModal() {
   // Header (title/subtitle/Create-client/close) and the edit-button row
   // below it are fully rebuilt every render — they depend on which dial and
   // mode is active — then re-wired, same pattern as the body/actions below.
+  const calledToday = dial.called_today_date === todayDateStr();
   els.dialModalHeader.innerHTML = `
     <div class="dial-modal-header">
       <div class="dial-modal-header-main">
@@ -712,7 +731,7 @@ function renderDialModal() {
         ${subtitle ? `<div class="dial-modal-subtitle">${escapeHtml(subtitle)}</div>` : ""}
       </div>
       <div class="dial-modal-header-actions">
-        ${isViewingExisting ? `<button type="button" class="btn secondary small" id="createClientFromDialBtn">Create client</button>` : ""}
+        ${isViewingExisting ? `<button type="button" class="btn yellow small" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>` : ""}
         <button type="button" class="fs-close" id="dialModalClose">&times;</button>
       </div>
     </div>
@@ -720,17 +739,20 @@ function renderDialModal() {
       ${
         isViewingExisting
           ? `
-        <div class="dial-status-dropdown">
-          <button type="button" class="dial-status-btn" id="dialStatusBtn"
-            style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
-          <div class="dial-status-menu hidden" id="dialStatusMenu">
-            ${CONTACT_STATUSES.map(
-              (s) => `
-              <button type="button" class="dial-status-option" data-value="${s.value}">
-                <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
-              </button>`
-            ).join("")}
+        <div class="dial-status-col">
+          <div class="dial-status-dropdown">
+            <button type="button" class="dial-status-btn" id="dialStatusBtn"
+              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
+            <div class="dial-status-menu hidden" id="dialStatusMenu">
+              ${CONTACT_STATUSES.map(
+                (s) => `
+                <button type="button" class="dial-status-option" data-value="${s.value}">
+                  <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+                </button>`
+              ).join("")}
+            </div>
           </div>
+          <button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Did call today</button>
         </div>
         <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
       `
@@ -740,11 +762,12 @@ function renderDialModal() {
   `;
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
   if (isViewingExisting) {
-    document.getElementById("createClientFromDialBtn").addEventListener("click", () => openCreateClientFromDial(currentDial));
+    document.getElementById("scheduleIntroCallFromDialBtn").addEventListener("click", () => handleScheduleIntroCallFromDial(currentDial));
     document.getElementById("dialEditBtn").addEventListener("click", () => {
       dialMode = "edit";
       renderDialModal();
     });
+    document.getElementById("dialDidCallBtn").addEventListener("click", toggleDidCallToday);
     const statusBtn = document.getElementById("dialStatusBtn");
     const statusMenu = document.getElementById("dialStatusMenu");
     statusBtn.addEventListener("click", (e) => {
@@ -819,24 +842,52 @@ async function handleEditDialSave() {
 
 // Sets the dial's quick call-outcome status. Not part of the edit form —
 // this is a standalone dropdown in the popup's header row that autosaves
-// immediately, same pattern as the Call notes autosave.
+// immediately, same pattern as the Call notes autosave. Changing this no
+// longer affects the weekly call count — that's now the separate "Did call
+// today" toggle below it (see toggleDidCallToday).
 async function updateDialStatus(newStatus) {
-  const previousStatus = currentDial.contact_status || "uncontacted";
   const { error } = await supabase.from("dials").update({ contact_status: newStatus }).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   currentDial.contact_status = newStatus;
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) dials[idx].contact_status = newStatus;
 
-  // Log "this dial just got its first call" for the Profile page's weekly
-  // call-count chart — only fires the first time a dial moves off the
-  // default "Uncontacted" status, not on every subsequent status change.
-  if (previousStatus === "uncontacted" && newStatus !== "uncontacted") {
+  renderDialModal();
+  renderDialsTable();
+}
+
+// "Did call today" — an independent toggle (not tied to contact_status) that
+// adds/removes exactly one call from this week's count on Profile. Selecting
+// it sets called_today_date to today and logs one call_status_changes row;
+// unselecting clears the date and removes that row again. Naturally "resets"
+// at the start of each day since the button's checked state is just
+// (dial.called_today_date === todayDateStr()) — no cron job needed, and it
+// never touches any other day's already-logged calls.
+async function toggleDidCallToday() {
+  const today = todayDateStr();
+  const isCalledToday = currentDial.called_today_date === today;
+
+  if (isCalledToday) {
+    const { error } = await supabase.from("dials").update({ called_today_date: null }).eq("id", currentDial.id);
+    if (error) return showError(els.dialModalError, error);
+    currentDial.called_today_date = null;
+    await supabase
+      .from("call_status_changes")
+      .delete()
+      .eq("dial_id", currentDial.id)
+      .eq("user_id", profile.id)
+      .gte("changed_at", `${today}T00:00:00`)
+      .lt("changed_at", `${today}T23:59:59.999`);
+  } else {
+    const { error } = await supabase.from("dials").update({ called_today_date: today }).eq("id", currentDial.id);
+    if (error) return showError(els.dialModalError, error);
+    currentDial.called_today_date = today;
     await supabase.from("call_status_changes").insert({ user_id: profile.id, dial_id: currentDial.id });
   }
 
+  const idx = dials.findIndex((d) => d.id === currentDial.id);
+  if (idx !== -1) dials[idx].called_today_date = currentDial.called_today_date;
   renderDialModal();
-  renderDialsTable();
 }
 
 function handleDeleteDial() {
@@ -916,83 +967,70 @@ els.dialModalBackdrop.addEventListener("touchend", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// "Create client" from a dial — reuses the shared client form, pre-filled.
+// "Schedule intro call" from a dial — replaces the old "Create client"
+// button entirely. Only the info already on the dial is required (no
+// preferences/looking-for step); once that's present, this creates the
+// client silently (call notes carry over into Other notes) and immediately
+// opens the Intro Call scheduling popup for it — no separate review form.
 // ---------------------------------------------------------------------------
 
-function openCreateClientFromDial(dial) {
-  const prefill = defaultClient(profile, {
+// Only checks fields that actually exist on a dial — "looking_for" (from the
+// full client form) is intentionally not required here, since a dial has no
+// such field.
+function getMissingDialClientFields(dial) {
+  const missing = [];
+  const labels = [];
+
+  let nameMissing = false;
+  if (!dial.first_name) { missing.push("first_name"); nameMissing = true; }
+  if (!dial.last_name) { missing.push("last_name"); nameMissing = true; }
+  if (nameMissing) labels.push("Name");
+
+  if (!dial.company_name) { missing.push("company_name"); labels.push("Company name"); }
+
+  if (!dial.email && !dial.mobile_phone && !dial.company_phone) {
+    missing.push("contact");
+    labels.push("Phone number and/or email");
+  }
+
+  let locMissing = false;
+  if (!dial.city) { missing.push("city"); locMissing = true; }
+  if (!dial.state) { missing.push("state"); locMissing = true; }
+  if (locMissing) labels.push("Location");
+
+  if (!dial.industry) { missing.push("industry"); labels.push("Industry sector"); }
+
+  return { missing, labels };
+}
+
+async function handleScheduleIntroCallFromDial(dial) {
+  const { missing, labels } = getMissingDialClientFields(dial);
+  if (missing.length) {
+    els.requiredPopupText.textContent = `Please fill out the missing information on this dial before scheduling an intro call: ${labels.join(", ")}.`;
+    els.requiredPopup.classList.remove("hidden");
+    return;
+  }
+
+  const data = defaultClient(profile, {
     first_name: dial.first_name || "",
     last_name: dial.last_name || "",
     city: dial.city || "",
     state: dial.state || "",
     email: dial.email || "",
-    // Only the mobile number transfers to a new client — never the company
-    // number.
-    phone: dial.mobile_phone || "",
+    // Mobile number preferred; falls back to the company number if that's
+    // the only one on file.
+    phone: dial.mobile_phone || dial.company_phone || "",
     linkedin: dial.linkedin || "",
     company_name: dial.company_name || "",
     industry: dial.industry || "",
+    // Call notes from the dial transfer straight into the new client's
+    // Other notes field.
+    other_notes: dial.call_notes || "",
   });
-  els.clientModalTitle.textContent = "New client";
-  els.clientModalBody.innerHTML = `
-    <div id="clientModalError" class="error-msg hidden"></div>
-    ${buildEditableSections(prefill)}
-    <div class="form-actions">
-      <button type="button" class="btn" id="saveNewClientBtn">Save</button>
-      <button type="button" class="btn yellow" id="scheduleIntroCallNewClientBtn">Schedule intro call</button>
-      <button type="button" class="btn secondary" id="cancelNewClientBtn">Cancel</button>
-    </div>
-  `;
-  wireEditableFormEvents(els.clientModalBody);
-  document.getElementById("saveNewClientBtn").addEventListener("click", () => handleSaveNewClientFromDial());
-  document.getElementById("scheduleIntroCallNewClientBtn").addEventListener("click", handleSaveAndScheduleFromDial);
-  document.getElementById("cancelNewClientBtn").addEventListener("click", closeClientModal);
-  els.clientModal.classList.remove("hidden");
-}
-
-function closeClientModal() {
-  els.clientModal.classList.add("hidden");
-}
-
-// Validates the New Client form (shared with the Clients page) and, if
-// valid, inserts the row. Returns the inserted client row, or null if
-// validation failed or the insert errored (errors are already surfaced to
-// the user in both cases).
-async function validateAndInsertClientFromDial() {
-  const data = collectFormData(els.clientModalBody);
-  els.clientModalBody.querySelectorAll(".field-required-msg").forEach((el) => el.classList.add("hidden"));
-  const { missing, popupLabels } = getMissingFields(data);
-  if (missing.length) {
-    missing.forEach((key) => {
-      const el = els.clientModalBody.querySelector(`.field-required-msg[data-field="${key}"]`);
-      if (el) el.classList.remove("hidden");
-    });
-    els.requiredPopupText.textContent = `Please fill out the missing information. The following is required: ${popupLabels.join(", ")}.`;
-    els.requiredPopup.classList.remove("hidden");
-    return null;
-  }
   data.assigned_to = profile.id;
+
   const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
-  if (error) {
-    showError(document.getElementById("clientModalError"), error);
-    return null;
-  }
-  return inserted;
-}
-
-async function handleSaveNewClientFromDial() {
-  const inserted = await validateAndInsertClientFromDial();
-  if (!inserted) return;
-  closeClientModal();
-}
-
-// "Schedule intro call" from the Dials "Create client" flow: saves the
-// client first (same validation/insert as Save), then immediately opens the
-// Intro Call scheduling popup for the client that was just created.
-async function handleSaveAndScheduleFromDial() {
-  const inserted = await validateAndInsertClientFromDial();
-  if (!inserted) return;
-  closeClientModal();
+  if (error) return showError(els.dialModalError, error);
 
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
   els.introCallPopup.classList.remove("hidden");
@@ -1015,7 +1053,6 @@ async function handleSaveAndScheduleFromDial() {
   });
 }
 
-els.clientModalClose.addEventListener("click", closeClientModal);
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
