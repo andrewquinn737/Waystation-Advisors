@@ -29,14 +29,19 @@
       <div class="profile-avatar" id="avatarInitials">?</div>
       <h1 id="profileName">—</h1>
       <p class="help-text" id="profileRole"></p>
-      <p class="help-text" style="margin-top:16px;">More profile details are coming soon.</p>
+
+      <div class="profile-calls-section">
+        <p class="profile-calls-text" id="callsThisWeekText">— people called this week</p>
+        <div class="profile-chart" id="callsChart"></div>
+      </div>
 
       <div class="form-actions" style="margin-top:20px;">
         <button class="btn secondary" id="teamsBtn">Teams</button>
+        <a class="btn secondary" id="surveyBtn" href="https://docs.google.com/forms/d/e/1FAIpQLSeAtlyF79wX5Q3u3iQM90p-PbXqFoq6mSpqVu2XB-D1qjZXwA/viewform" target="_blank" rel="noopener">Submit weekly survey</a>
       </div>
-      <!-- Mobile only — desktop's Sign out button lives in the top nav bar. -->
-      <div class="form-actions mobile-only" style="margin-top:10px;">
-        <button class="btn secondary" id="profileSignOutBtn">Sign out</button>
+      <!-- Shown on both mobile and web now. -->
+      <div class="form-actions" style="margin-top:10px;">
+        <button class="btn danger" id="profileSignOutBtn">Log out</button>
       </div>
     </div>
   </main>
