@@ -90,9 +90,14 @@ function openConfirmDelete(onConfirm) {
 
 // Generic "are you sure" confirm popup wiring, reused for both deleting a
 // dial (above) and deleting a whole tab/list (see dialTabDeleteBtn below).
-// onClose (optional) always runs once the popup is dismissed, whether by
-// Yes or No — used by the tab-delete flow to restore the archive/delete
-// menu's visibility after a "Cancel".
+// onClose (optional) only runs when the popup is dismissed via "No/Cancel" —
+// used by the tab-delete flow to restore the archive/delete menu's visibility
+// after a Cancel. It deliberately does NOT run on "Yes": that callback used to
+// fire unconditionally in cleanup(), which re-displayed the archive/delete
+// menu (via updateArchiveMenuPosition()) the instant Delete was confirmed —
+// synchronously, before the async delete request even resolved — making it
+// look like clicking Delete did nothing (the tab really was being deleted,
+// just behind a popup that had incorrectly reappeared).
 function openConfirmModal(modalEl, yesId, noId, onConfirm, onClose) {
   modalEl.classList.remove("hidden");
   const yesBtn = document.getElementById(yesId);
@@ -101,13 +106,15 @@ function openConfirmModal(modalEl, yesId, noId, onConfirm, onClose) {
     modalEl.classList.add("hidden");
     yesBtn.removeEventListener("click", onYes);
     noBtn.removeEventListener("click", onNo);
-    if (onClose) onClose();
   };
   const onYes = () => {
     cleanup();
     onConfirm();
   };
-  const onNo = () => cleanup();
+  const onNo = () => {
+    cleanup();
+    if (onClose) onClose();
+  };
   yesBtn.addEventListener("click", onYes);
   noBtn.addEventListener("click", onNo);
 }
