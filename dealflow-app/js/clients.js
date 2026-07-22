@@ -11,6 +11,7 @@ import {
 } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
+import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -28,6 +29,8 @@ let events = [];
 
 const els = {
   errorBox: document.getElementById("errorBox"),
+  pageMenuToggle: document.getElementById("pageMenuToggle"),
+  pageHeaderMenu: document.getElementById("pageHeaderMenu"),
   tableWrap: document.getElementById("tableWrap"),
   search: document.getElementById("search"),
   countBadge: document.getElementById("countBadge"),
@@ -473,6 +476,7 @@ function closeModal() {
 
 els.addBtn.addEventListener("click", openCreateModal);
 els.clientModalClose.addEventListener("click", closeModal);
+wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
 els.editProfileBtn.addEventListener("click", () => {
   currentMode = "edit";
   renderModalBody();

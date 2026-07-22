@@ -31,7 +31,9 @@ export function contactActionIcons({ phone, email } = {}) {
   const parts = [];
   if (phone) {
     parts.push(`<a class="contact-action-btn" href="sms:${escapeHtml(phone)}" title="Text">${CONTACT_ICONS.sms}</a>`);
-    parts.push(`<a class="contact-action-btn" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);
+    // contact-action-tel: hidden on desktop via CSS (html.is-desktop-device)
+    // since a computer can't actually place a phone call through a tel: link.
+    parts.push(`<a class="contact-action-btn contact-action-tel" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);
   }
   if (email) {
     parts.push(`<a class="contact-action-btn" href="mailto:${escapeHtml(email)}" title="Email">${CONTACT_ICONS.mailto}</a>`);

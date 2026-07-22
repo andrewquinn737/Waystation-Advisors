@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
+import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -7,6 +8,8 @@ const { profile } = session;
 
 const els = {
   errorBox: document.getElementById("errorBox"),
+  pageMenuToggle: document.getElementById("pageMenuToggle"),
+  pageHeaderMenu: document.getElementById("pageHeaderMenu"),
   avatarInitials: document.getElementById("avatarInitials"),
   profileName: document.getElementById("profileName"),
   profileRole: document.getElementById("profileRole"),
@@ -142,3 +145,5 @@ els.teamsCloseBtn.addEventListener("click", () => {
   els.teamsModal.classList.add("hidden");
 });
 els.profileSignOutBtn.addEventListener("click", signOut);
+
+wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });

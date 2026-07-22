@@ -11,6 +11,7 @@ import {
 } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
+import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -52,18 +53,22 @@ const hiddenStatuses = new Set();
 
 const els = {
   errorBox: document.getElementById("errorBox"),
-  statusSwitch: document.getElementById("statusSwitch"),
-  statusToggleMobile: document.getElementById("statusToggleMobile"),
-  statusFilter: document.getElementById("statusFilter"),
-  statusFilterBtn: document.getElementById("statusFilterBtn"),
-  statusFilterMenu: document.getElementById("statusFilterMenu"),
+  pageMenuToggle: document.getElementById("pageMenuToggle"),
+  pageHeaderMenu: document.getElementById("pageHeaderMenu"),
+  pageSettingsBtn: document.getElementById("pageSettingsBtn"),
+  menuAddNewBtn: document.getElementById("menuAddNewBtn"),
+  menuSelectBtn: document.getElementById("menuSelectBtn"),
+  menuStatusBtn: document.getElementById("menuStatusBtn"),
+  menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
+  categoriesSubmenu: document.getElementById("categoriesSubmenu"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
+  dialTabDeleteBtn: document.getElementById("dialTabDeleteBtn"),
+  confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
   addTabBtn: document.getElementById("addTabBtn"),
   generateListBtn: document.getElementById("generateListBtn"),
   dialsTableWrap: document.getElementById("dialsTableWrap"),
-  addDialBtn: document.getElementById("addDialBtn"),
   dialModalBackdrop: document.getElementById("dialModalBackdrop"),
   dialModalHeader: document.getElementById("dialModalHeader"),
   dialModalError: document.getElementById("dialModalError"),
@@ -93,11 +98,17 @@ const els = {
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
 function openConfirmDelete(onConfirm) {
-  els.confirmDeleteModal.classList.remove("hidden");
-  const yesBtn = document.getElementById("confirmDeleteYesBtn");
-  const noBtn = document.getElementById("confirmDeleteNoBtn");
+  openConfirmModal(els.confirmDeleteModal, "confirmDeleteYesBtn", "confirmDeleteNoBtn", onConfirm);
+}
+
+// Generic "are you sure" confirm popup wiring, reused for both deleting a
+// dial (above) and deleting a whole tab/list (see dialTabDeleteBtn below).
+function openConfirmModal(modalEl, yesId, noId, onConfirm) {
+  modalEl.classList.remove("hidden");
+  const yesBtn = document.getElementById(yesId);
+  const noBtn = document.getElementById(noId);
   const cleanup = () => {
-    els.confirmDeleteModal.classList.add("hidden");
+    modalEl.classList.add("hidden");
     yesBtn.removeEventListener("click", onYes);
     noBtn.removeEventListener("click", onNo);
   };
@@ -268,6 +279,20 @@ els.dialTabArchiveBtn.addEventListener("click", () => {
   setListArchived(archiveMenuTabId, currentStatus === "current");
 });
 
+els.dialTabDeleteBtn.addEventListener("click", () => {
+  if (!archiveMenuTabId) return;
+  const tabId = archiveMenuTabId;
+  openConfirmModal(els.confirmDeleteTabModal, "confirmDeleteTabYesBtn", "confirmDeleteTabNoBtn", async () => {
+    // dials.list_id is "on delete cascade" (see supabase/schema.sql), so
+    // deleting the list also deletes every dial inside it.
+    const { error } = await supabase.from("dial_lists").delete().eq("id", tabId);
+    if (error) return showError(els.errorBox, error);
+    archiveMenuTabId = null;
+    currentListId = null;
+    await loadLists();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Mobile-only tab interactions:
 //  - Tap the already-selected tab -> reveal an Archive/Unarchive option below it.
@@ -278,8 +303,12 @@ els.dialTabArchiveBtn.addEventListener("click", () => {
 // active tab never starts a drag.
 // ---------------------------------------------------------------------------
 
+// Device-type check (not viewport width — see js/deviceDetect logic inlined
+// in dials.html <head>, and the big comment in css/style.css above the
+// "RESPONSIVE / MOBILE LAYOUT" section). This keeps tap-to-archive/long-press
+// reorder tied to actually being on a phone/tablet, not to window width.
 function isMobileViewport() {
-  return window.matchMedia("(max-width: 720px)").matches;
+  return document.documentElement.classList.contains("is-mobile-device");
 }
 
 let archiveMenuTabId = null;
@@ -472,28 +501,43 @@ els.newListNameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") createNewList();
 });
 
-// Shared by the desktop segmented switch and the mobile single toggle
-// button — both just call this with the status they want.
+// Toggles between showing Current / Archived lists. Used to be a desktop
+// segmented switch + a separate mobile toggle button — now it's a single
+// text menu item ("Current" / "Archived") under the page-header triangle,
+// same on both platforms.
 function setStatus(status) {
   currentStatus = status;
-  els.statusSwitch.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.status === status));
-  els.statusToggleMobile.textContent = status === "current" ? "Current" : "Archived";
-  els.statusToggleMobile.dataset.status = status;
-  els.statusToggleMobile.classList.toggle("is-archived", status === "archived");
+  els.menuStatusBtn.textContent = status === "current" ? "Current" : "Archived";
+  els.menuStatusBtn.dataset.status = status;
   currentListId = null;
   renderTabs();
 }
 
-els.statusSwitch.querySelectorAll("button").forEach((btn) => {
-  btn.addEventListener("click", () => setStatus(btn.dataset.status));
-});
-els.statusToggleMobile.addEventListener("click", () => {
+els.menuStatusBtn.addEventListener("click", () => {
   setStatus(currentStatus === "current" ? "archived" : "current");
 });
 
 // "Generate new list" is an intentional no-op placeholder for now, and is
 // hidden (not removed) until it does something.
 els.generateListBtn.classList.add("hidden");
+
+// ---------------------------------------------------------------------------
+// Page-header triangle menu (Profile/Clients/Dials all share this pattern —
+// see js/pageHeaderMenu.js). Replaces the old gold vertical rule: tapping the
+// triangle flips it to point down and reveals this page's options.
+// ---------------------------------------------------------------------------
+wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
+
+els.menuAddNewBtn.addEventListener("click", () => {
+  closePageHeaderMenu();
+  openCreateDialModal();
+});
+
+// "Select" is a placeholder for a future bulk-selection mode — added now per
+// request, not wired up to anything yet.
+els.menuSelectBtn.addEventListener("click", () => {
+  closePageHeaderMenu();
+});
 
 // ---------------------------------------------------------------------------
 // Dials list (spreadsheet-like table)
@@ -517,7 +561,7 @@ function renderDialsTable() {
     return;
   }
   if (dials.length === 0) {
-    els.dialsTableWrap.innerHTML = `<div class="empty-state">No dials in this list yet — tap + to add one.</div>`;
+    els.dialsTableWrap.innerHTML = `<div class="empty-state">No dials in this list yet — use the arrow next to "Dials" and tap "Add new".</div>`;
     return;
   }
   // Keep each dial's original index (used for openDialModal/prev-next
@@ -816,7 +860,9 @@ function closeDialModal() {
   els.dialModalBackdrop.classList.add("hidden");
 }
 
-els.addDialBtn.addEventListener("click", () => {
+// Opens the "New dial" popup — used by the "Add new" item in the page-header
+// triangle menu (used to be a bottom-right "+" FAB).
+function openCreateDialModal() {
   if (!currentListId) {
     els.errorBox.textContent = "Create a list first using the + next to the tabs.";
     els.errorBox.classList.remove("hidden");
@@ -828,7 +874,7 @@ els.addDialBtn.addEventListener("click", () => {
   currentDialIndex = -1;
   els.dialModalBackdrop.classList.remove("hidden");
   renderDialModal();
-});
+}
 // Note: the close (x) button is inside #dialModalHeader, which is rebuilt on
 // every renderDialModal() call, so its click listener is wired there instead
 // of once here (see renderDialModal).
@@ -973,37 +1019,51 @@ els.clientModalClose.addEventListener("click", closeClientModal);
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
-// Status filter (the "palette" button) — hides/shows dials by status across
-// every list/tab. In-memory only (hiddenStatuses), so it resets on reload.
+// "Categories" (formerly the palette/dot filter button) — hides/shows dials
+// by status across every list/tab. In-memory only (hiddenStatuses), so it
+// resets on reload. Now a submenu of colored rectangles + labels, opened
+// from the page-header triangle menu's "Categories" item.
 // ---------------------------------------------------------------------------
 
-function renderStatusFilterMenu() {
-  els.statusFilterMenu.innerHTML = CONTACT_STATUSES.map(
+function renderCategoriesSubmenu() {
+  els.categoriesSubmenu.innerHTML = CONTACT_STATUSES.map(
     (s) => `
-      <button type="button" class="status-filter-dot ${hiddenStatuses.has(s.value) ? "is-hidden" : ""}"
-        data-value="${s.value}" title="${escapeHtml(s.label)}"
-        style="background:${s.dot}; border-color:${s.border};"></button>`
+      <button type="button" class="category-rect-option ${hiddenStatuses.has(s.value) ? "is-hidden" : ""}" data-value="${s.value}">
+        <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+      </button>`
   ).join("");
-  els.statusFilterMenu.querySelectorAll(".status-filter-dot").forEach((btn) => {
+  els.categoriesSubmenu.querySelectorAll(".category-rect-option").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const v = btn.dataset.value;
       if (hiddenStatuses.has(v)) hiddenStatuses.delete(v);
       else hiddenStatuses.add(v);
-      renderStatusFilterMenu();
+      renderCategoriesSubmenu();
       renderDialsTable();
     });
   });
 }
-renderStatusFilterMenu();
+renderCategoriesSubmenu();
 
-els.statusFilterBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  const opening = els.statusFilterMenu.classList.contains("hidden");
-  els.statusFilterMenu.classList.toggle("hidden");
-  if (opening) {
-    document.addEventListener("click", () => els.statusFilterMenu.classList.add("hidden"), { once: true });
+// Position as fixed, computed from the button's rect (same escape-the-clip
+// pattern as the dial-tab archive menu) — flips to the left side if it would
+// run off the right edge of the screen.
+function positionCategoriesSubmenu() {
+  const rect = els.menuCategoriesBtn.getBoundingClientRect();
+  const submenuWidth = els.categoriesSubmenu.offsetWidth || 190;
+  let left = rect.right + 8;
+  if (left + submenuWidth > window.innerWidth) {
+    left = rect.left - submenuWidth - 8;
   }
+  els.categoriesSubmenu.style.left = `${Math.max(8, left)}px`;
+  els.categoriesSubmenu.style.top = `${rect.top}px`;
+}
+
+els.menuCategoriesBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const opening = els.categoriesSubmenu.classList.contains("hidden");
+  els.categoriesSubmenu.classList.toggle("hidden");
+  if (opening) positionCategoriesSubmenu();
 });
 
 await loadLists();
