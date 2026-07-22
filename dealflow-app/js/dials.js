@@ -58,6 +58,8 @@ const els = {
   statusFilterBtn: document.getElementById("statusFilterBtn"),
   statusFilterMenu: document.getElementById("statusFilterMenu"),
   dialTabs: document.getElementById("dialTabs"),
+  dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
+  dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
   addTabBtn: document.getElementById("addTabBtn"),
   generateListBtn: document.getElementById("generateListBtn"),
   dialsTableWrap: document.getElementById("dialsTableWrap"),
@@ -228,24 +230,43 @@ function renderTabs() {
     els.dialTabs.innerHTML = filtered
       .map((l) => {
         const isActive = l.id === currentListId;
-        const showArchiveMenu = isMobileViewport() && isActive && archiveMenuTabId === l.id;
         return `
         <div class="dial-tab-wrap">
           <button type="button" class="dial-tab ${isActive ? "active" : ""}" data-id="${l.id}">${escapeHtml(l.name)}</button>
-          ${
-            showArchiveMenu
-              ? `<div class="dial-tab-archive-menu">
-                  <button type="button" class="dial-tab-archive-btn" data-id="${l.id}">${currentStatus === "current" ? "Archive" : "Unarchive"}</button>
-                </div>`
-              : ""
-          }
         </div>`;
       })
       .join("");
     wireTabInteractions();
   }
+  updateArchiveMenuPosition();
   loadDials();
 }
+
+// The Archive/Unarchive popup lives outside .dials-tabbar (see dials.html)
+// and is positioned via JS as position:fixed, right under whichever tab is
+// currently active — see the big comment above wireTabInteractions() for why
+// it can't just be absolutely-positioned inside the tab itself.
+function updateArchiveMenuPosition() {
+  if (!isMobileViewport() || !archiveMenuTabId || archiveMenuTabId !== currentListId) {
+    els.dialTabArchiveMenu.classList.add("hidden");
+    return;
+  }
+  const activeBtn = els.dialTabs.querySelector(".dial-tab.active");
+  if (!activeBtn) {
+    els.dialTabArchiveMenu.classList.add("hidden");
+    return;
+  }
+  const rect = activeBtn.getBoundingClientRect();
+  els.dialTabArchiveBtn.textContent = currentStatus === "current" ? "Archive" : "Unarchive";
+  els.dialTabArchiveMenu.style.left = `${rect.left}px`;
+  els.dialTabArchiveMenu.style.top = `${rect.bottom + 6}px`;
+  els.dialTabArchiveMenu.classList.remove("hidden");
+}
+
+els.dialTabArchiveBtn.addEventListener("click", () => {
+  if (!archiveMenuTabId) return;
+  setListArchived(archiveMenuTabId, currentStatus === "current");
+});
 
 // ---------------------------------------------------------------------------
 // Mobile-only tab interactions:
@@ -369,13 +390,6 @@ function wireTabInteractions() {
     };
     btn.addEventListener("pointerup", endDrag);
     btn.addEventListener("pointercancel", endDrag);
-  });
-
-  els.dialTabs.querySelectorAll(".dial-tab-archive-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      setListArchived(btn.dataset.id, currentStatus === "current");
-    });
   });
 }
 
