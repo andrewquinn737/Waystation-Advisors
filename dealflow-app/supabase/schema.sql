@@ -393,6 +393,25 @@ create policy "teams_select_all" on teams
   for select using (auth.uid() is not null);
 
 -- ============================================================================
+-- CALL STATUS CHANGES (feeds the Profile page's "X people called this week"
+-- stat + 6-week chart). One row is inserted whenever a dial moves off its
+-- default "Uncontacted" status for the first time (see updateDialStatus() in
+-- js/dials.js) — i.e. this counts *dials contacted*, not every status edit.
+-- ============================================================================
+create table call_status_changes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id) on delete cascade,
+  dial_id uuid references dials(id) on delete set null,
+  changed_at timestamptz not null default now()
+);
+
+alter table call_status_changes enable row level security;
+create policy "call_status_changes_select_all" on call_status_changes
+  for select using (auth.uid() is not null);
+create policy "call_status_changes_insert_all" on call_status_changes
+  for insert with check (auth.uid() is not null);
+
+-- ============================================================================
 -- Auto-create a profile row whenever someone signs up.
 -- New users default to 'intern' — a team lead must promote them in the
 -- profiles table (or via the app, if you add an admin screen for it).
