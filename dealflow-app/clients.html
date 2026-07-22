@@ -40,7 +40,11 @@
   <div class="fullscreen-modal hidden" id="clientModal">
     <div class="fs-header">
       <h2 id="clientModalTitle">New client</h2>
-      <button class="fs-close" id="clientModalClose">&times;</button>
+      <div class="fs-header-actions">
+        <!-- Hidden except in view mode — toggled/wired in js/clients.js -->
+        <button type="button" class="edit-icon-btn hidden" id="editProfileBtn" title="Edit profile">&#9998;</button>
+        <button class="fs-close" id="clientModalClose">&times;</button>
+      </div>
     </div>
     <div class="fs-body" id="clientModalBody"></div>
     <div class="subtabs hidden" id="clientSubtabs">
