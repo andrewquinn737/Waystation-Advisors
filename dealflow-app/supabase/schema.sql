@@ -284,17 +284,19 @@ create table clients (
 
 alter table clients enable row level security;
 
--- Any signed-in user (intern or team lead) can view, add, and edit clients.
--- Only team leads can delete. Adjust later if interns should be scoped to
--- only the clients assigned to them.
-create policy "clients_select_all" on clients
-  for select using (auth.uid() is not null);
-create policy "clients_insert_all" on clients
-  for insert with check (auth.uid() is not null);
-create policy "clients_update_all" on clients
-  for update using (auth.uid() is not null);
-create policy "clients_delete_all" on clients
-  for delete using (auth.uid() is not null);
+-- Each intern only sees/edits/deletes the clients THEY created — not each
+-- other's. created_by defaults to auth.uid() at insert time (see the column
+-- default above), so this needs no extra app-side wiring: whoever is signed
+-- in when a client is created automatically becomes the only one who can see
+-- it afterward.
+create policy "clients_select_own" on clients
+  for select using (created_by = auth.uid());
+create policy "clients_insert_own" on clients
+  for insert with check (created_by = auth.uid());
+create policy "clients_update_own" on clients
+  for update using (created_by = auth.uid());
+create policy "clients_delete_own" on clients
+  for delete using (created_by = auth.uid());
 
 -- ============================================================================
 -- CLIENT EVENTS (the Timeline tab on a client's profile). A "created" event
@@ -311,10 +313,16 @@ create table client_events (
 );
 
 alter table client_events enable row level security;
-create policy "client_events_select_all" on client_events
-  for select using (auth.uid() is not null);
-create policy "client_events_insert_all" on client_events
-  for insert with check (auth.uid() is not null);
+-- Scoped through the parent client's ownership, same as clients itself —
+-- you can only see/log events for a client you created.
+create policy "client_events_select_own" on client_events
+  for select using (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  );
+create policy "client_events_insert_own" on client_events
+  for insert with check (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  );
 create policy "client_events_delete_lead_only" on client_events
   for delete using (is_team_lead());
 
@@ -346,14 +354,17 @@ create table dial_lists (
 );
 
 alter table dial_lists enable row level security;
-create policy "dial_lists_select_all" on dial_lists
-  for select using (auth.uid() is not null);
-create policy "dial_lists_insert_all" on dial_lists
-  for insert with check (auth.uid() is not null);
-create policy "dial_lists_update_all" on dial_lists
-  for update using (auth.uid() is not null);
-create policy "dial_lists_delete_lead_only" on dial_lists
-  for delete using (is_team_lead());
+-- Each intern only sees/edits/deletes their own tabs — not each other's.
+-- created_by defaults to auth.uid() at insert time (see column default
+-- above).
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid());
+create policy "dial_lists_insert_own" on dial_lists
+  for insert with check (created_by = auth.uid());
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid());
+create policy "dial_lists_delete_own" on dial_lists
+  for delete using (created_by = auth.uid());
 
 create table dials (
   id uuid primary key default gen_random_uuid(),
@@ -389,14 +400,16 @@ create table dials (
 );
 
 alter table dials enable row level security;
-create policy "dials_select_all" on dials
-  for select using (auth.uid() is not null);
-create policy "dials_insert_all" on dials
-  for insert with check (auth.uid() is not null);
-create policy "dials_update_all" on dials
-  for update using (auth.uid() is not null);
-create policy "dials_delete_all" on dials
-  for delete using (auth.uid() is not null);
+-- Same per-user scoping as dial_lists — each intern only sees/edits/deletes
+-- their own dials.
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid());
+create policy "dials_insert_own" on dials
+  for insert with check (created_by = auth.uid());
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid());
+create policy "dials_delete_own" on dials
+  for delete using (created_by = auth.uid());
 
 -- ============================================================================
 -- TEAMS (shown in the Profile page's "Teams" popup). Empty for now — add
