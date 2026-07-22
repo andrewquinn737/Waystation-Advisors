@@ -27,13 +27,19 @@ let dialMode = "view"; // 'view' | 'edit' | 'create'
 // of the edit form). Colors are light/mild tints matching the app's existing
 // palette (see the .pill.* rules in css/style.css for the same family of
 // colors). "dot" is the more saturated swatch used in the dropdown/filter.
+// Colors reference CSS custom properties (see :root / the dark-mode
+// override in css/style.css) instead of hardcoded hex, so they switch to
+// dark-mode-appropriate shades automatically when the device's color scheme
+// is dark, and back to the light-mode pastels when it isn't — matching
+// var(--accent)/var(--success)/etc. elsewhere in the app rather than staying
+// pinned to one theme's colors regardless of which is active.
 const CONTACT_STATUSES = [
-  { value: "uncontacted", label: "Uncontacted", bg: "#ffffff", border: "#eae3d3", dot: "#ffffff" },
-  { value: "unable_to_contact", label: "Unable to contact", bg: "#eef0f2", border: "#d8dde2", dot: "#9ca3af" },
-  { value: "not_interested", label: "Not interested", bg: "#fdecec", border: "#f7d2ce", dot: "#e0776d" },
-  { value: "no_response", label: "No response, try again", bg: "#ffeede", border: "#f7d9b8", dot: "#f2a65a" },
-  { value: "callback_interested", label: "Callback, interested", bg: "#fff6e0", border: "#f3e6b8", dot: "#f2d34b" },
-  { value: "intro_call_scheduled", label: "Intro call scheduled", bg: "#e7f8ee", border: "#c9ebd4", dot: "#6fcf8e" },
+  { value: "uncontacted", label: "Uncontacted", bg: "var(--status-uncontacted-bg)", border: "var(--status-uncontacted-border)", dot: "var(--status-uncontacted-dot)" },
+  { value: "unable_to_contact", label: "Unable to contact", bg: "var(--status-unable-bg)", border: "var(--status-unable-border)", dot: "var(--status-unable-dot)" },
+  { value: "not_interested", label: "Not interested", bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)", dot: "var(--status-not-interested-dot)" },
+  { value: "no_response", label: "No response, try again", bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)", dot: "var(--status-no-response-dot)" },
+  { value: "callback_interested", label: "Callback, interested", bg: "var(--status-callback-bg)", border: "var(--status-callback-border)", dot: "var(--status-callback-dot)" },
+  { value: "intro_call_scheduled", label: "Intro call scheduled", bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)", dot: "var(--status-scheduled-dot)" },
 ];
 function statusInfo(value) {
   return CONTACT_STATUSES.find((s) => s.value === value) || CONTACT_STATUSES[0];
@@ -111,6 +117,7 @@ const els = {
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
   dialTabDeleteBtn: document.getElementById("dialTabDeleteBtn"),
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
+  addTabBtn: document.getElementById("addTabBtn"),
   dialsTableWrap: document.getElementById("dialsTableWrap"),
   dialModalBackdrop: document.getElementById("dialModalBackdrop"),
   dialModalHeader: document.getElementById("dialModalHeader"),
@@ -192,11 +199,25 @@ function dialDisplayName(d) {
 function dialLocation(d) {
   return [d.city, d.state].filter(Boolean).join(", ") || "—";
 }
-// "Company name, City, State" — shown as the small subtitle under the dial's
-// name in the detail popup header, and in the mobile card list.
+// "Company name, City, State" — used in the mobile card list's subtitle
+// line (plain text, no styling needed there).
 function dialCompanyAndLocation(d) {
   const loc = dialLocation(d);
   return [d.company_name || "", loc === "—" ? "" : loc].filter(Boolean).join(", ");
+}
+// Detail popup header subtitle: company name (slightly more prominent gray)
+// and location (muted gray) as separate spans with no comma between them —
+// just a space (see .subtitle-company/.subtitle-location in css/style.css) —
+// plus the map pin right after the location. Either piece is optional.
+function dialSubtitleHTML(d) {
+  const company = d.company_name || "";
+  const loc = dialLocation(d);
+  const hasLoc = loc !== "—";
+  const parts = [];
+  if (company) parts.push(`<span class="subtitle-company">${escapeHtml(company)}</span>`);
+  if (hasLoc) parts.push(`<span class="subtitle-location">${escapeHtml(loc)}</span>`);
+  if (!parts.length) return "";
+  return parts.join("") + (hasLoc ? locationPinLink(d.city, d.state) : "");
 }
 function emptyDial() {
   return {
@@ -607,11 +628,13 @@ function startRenameTab(btn, list) {
   });
 }
 
-// Note: the "+" button that used to open this "New list" dialog has been
-// removed from the tab bar per request (along with "Generate new list" —
-// see below), so createNewList()/newListModal are currently unreachable from
-// the UI. Left in place rather than ripped out, in case list creation gets a
-// new entry point later.
+els.addTabBtn.addEventListener("click", () => {
+  els.newListError.classList.add("hidden");
+  els.newListNameInput.value = "";
+  els.newListModal.classList.remove("hidden");
+  els.newListNameInput.focus();
+});
+
 els.newListCancelBtn.addEventListener("click", () => els.newListModal.classList.add("hidden"));
 
 async function createNewList() {
@@ -858,8 +881,7 @@ function renderDialModal() {
   const dial = isCreate ? emptyDial() : currentDial;
   const isViewingExisting = !isCreate && dialMode === "view";
 
-  const subtitle = isCreate ? "" : dialCompanyAndLocation(currentDial);
-  const mapsLink = isCreate ? "" : locationPinLink(currentDial.city, currentDial.state);
+  const subtitleHTML = isCreate ? "" : dialSubtitleHTML(currentDial);
 
   // Header (title/subtitle/Create-client/close) and the edit-button row
   // below it are fully rebuilt every render — they depend on which dial and
@@ -880,7 +902,7 @@ function renderDialModal() {
     <div class="dial-modal-header">
       <div class="dial-modal-header-main">
         <h2>${escapeHtml(isCreate ? "New dial" : dialDisplayName(currentDial))}</h2>
-        ${subtitle ? `<div class="dial-modal-subtitle">${escapeHtml(subtitle)}${mapsLink}</div>` : ""}
+        ${subtitleHTML ? `<div class="dial-modal-subtitle">${subtitleHTML}</div>` : ""}
       </div>
       <div class="dial-modal-header-right">
         <div class="dial-modal-header-actions">
@@ -1160,6 +1182,12 @@ function getMissingDialClientFields(dial) {
   return { missing, labels };
 }
 
+// Clicking "Schedule Intro Call" only validates the dial has enough info and
+// opens the Calendly form — it does NOT create the client yet. The client
+// record is only actually inserted once "Open Calendly" is pressed inside
+// that form (see createClient below), so backing out of this popup without
+// opening Calendly never leaves behind an orphaned client with no intro call
+// attached.
 async function handleScheduleIntroCallFromDial(dial) {
   const { missing, labels } = getMissingDialClientFields(dial);
   if (missing.length) {
@@ -1168,38 +1196,39 @@ async function handleScheduleIntroCallFromDial(dial) {
     return;
   }
 
-  const data = defaultClient(profile, {
-    first_name: dial.first_name || "",
-    last_name: dial.last_name || "",
-    city: dial.city || "",
-    state: dial.state || "",
-    email: dial.email || "",
-    // Mobile number preferred; falls back to the company number if that's
-    // the only one on file.
-    phone: dial.mobile_phone || dial.company_phone || "",
-    linkedin: dial.linkedin || "",
-    company_name: dial.company_name || "",
-    industry: dial.industry || "",
-    // Call notes from the dial transfer straight into the new client's
-    // Other notes field.
-    other_notes: dial.call_notes || "",
-  });
-  data.assigned_to = profile.id;
-
-  const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
-  if (error) return showError(els.dialModalError, error);
-
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
-    client: inserted,
     internEmail,
-    onScheduled: async () => {
+    createClient: async () => {
+      const data = defaultClient(profile, {
+        first_name: dial.first_name || "",
+        last_name: dial.last_name || "",
+        city: dial.city || "",
+        state: dial.state || "",
+        email: dial.email || "",
+        // Mobile number preferred; falls back to the company number if that's
+        // the only one on file.
+        phone: dial.mobile_phone || dial.company_phone || "",
+        linkedin: dial.linkedin || "",
+        company_name: dial.company_name || "",
+        industry: dial.industry || "",
+        // Call notes from the dial transfer straight into the new client's
+        // Other notes field.
+        other_notes: dial.call_notes || "",
+      });
+      data.assigned_to = profile.id;
+
+      const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
+      if (error) throw error;
+      return inserted;
+    },
+    onScheduled: async (client) => {
       // We don't know the actual booked time here (Calendly handles that in
       // its own tab), so this just logs that the link was opened, timestamped
       // to now.
       await supabase.from("client_events").insert({
-        client_id: inserted.id,
+        client_id: client.id,
         event_type: "intro_call",
         event_date: new Date().toISOString(),
         details: { via: "calendly_link" },

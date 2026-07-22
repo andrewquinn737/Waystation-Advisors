@@ -76,7 +76,7 @@ export function renderNav(profile) {
       <div class="who">
         <span>${profile.full_name}</span>
         <span class="role-badge">Intern</span>
-        <button class="btn secondary small" id="signOutBtn">Sign out</button>
+        <button class="btn danger small" id="signOutBtn">Log out</button>
       </div>
     </div>
     <div class="bottom-tabbar">

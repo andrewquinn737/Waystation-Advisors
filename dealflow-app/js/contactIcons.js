@@ -11,14 +11,18 @@ export const CONTACT_ICONS = {
   pin: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
 };
 
-// Small pin icon shown to the right of a dial/client's location (in the
-// detail popup's header subtitle) — opens that city/state in Google Maps in
-// a new tab. Returns "" if there's no city/state to map.
-export function locationPinLink(city, state) {
+// Small pin icon shown next to a dial/client's location — opens that
+// city/state in Google Maps in a new tab. Returns "" if there's no city/state
+// to map. `extraClass` (optional) adds a modifier class for contexts that
+// need slightly different positioning than the default (e.g. sitting in a
+// flex row next to a "Location" field, vs. tucked inline after a header
+// subtitle's text) — see .location-pin-link.pin-body-row in css/style.css.
+export function locationPinLink(city, state, extraClass = "") {
   const loc = [city, state].filter(Boolean).join(", ");
   if (!loc) return "";
   const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(loc)}`;
-  return `<a href="${url}" target="_blank" rel="noopener" class="location-pin-link" title="Open in Google Maps" onclick="event.stopPropagation()">${CONTACT_ICONS.pin}</a>`;
+  const cls = extraClass ? `location-pin-link ${extraClass}` : "location-pin-link";
+  return `<a href="${url}" target="_blank" rel="noopener" class="${cls}" title="Open in Google Maps" onclick="event.stopPropagation()">${CONTACT_ICONS.pin}</a>`;
 }
 
 // Full labeled read-only row with quick-action icons (Timeline/Profile-style

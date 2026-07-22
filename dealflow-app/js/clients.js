@@ -163,14 +163,32 @@ function rf(label, value) {
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
 }
 
+// Location as its own readonly row (above Email), with the map pin next to
+// it — same idea as rfContact's icon row, but for the location + pin instead
+// of a phone/email + contact icons.
+function rfLocation(client) {
+  const loc = clientLocation(client);
+  const mapsLink = locationPinLink(client.city, client.state, "pin-body-row");
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">Location</div>
+      <div class="rf-value-row">
+        <div class="rf-value ${loc === "—" ? "empty" : ""}">${loc === "—" ? "Not provided" : escapeHtml(loc)}</div>
+        ${mapsLink}
+      </div>
+    </div>`;
+}
+
 // Flat, non-tabbed read-only view — matches the Dials detail popup's layout
 // (see buildDialViewHTML in js/dials.js) instead of the old
-// accordion-sections-in-tabs design. Name and location/company are only
-// shown once each, up in the header (see renderModalBody), so they're
-// deliberately left out of this list.
+// accordion-sections-in-tabs design. Name is only shown once, up in the
+// header (see renderModalBody) — company name lives in the header subtitle,
+// but location has moved down here (above Email) instead of being in that
+// subtitle too.
 function buildClientViewHTML(client) {
   const founded = client.founded_year ? `${monthName(client.founded_month)} ${client.founded_year}` : "";
   return `
+    ${rfLocation(client)}
     ${rfContact("Email", client.email, "email")}
     ${rfContact("Phone number", client.phone, "phone")}
     ${rf("LinkedIn", client.linkedin)}
@@ -237,12 +255,11 @@ function renderModalBody() {
   }
 
   els.clientModalTitle.textContent = clientDisplayName(currentClient);
-  // Subtitle: "Company, City, State" + a map pin next to the location — same
-  // pattern as the Dials detail popup's header (see dialCompanyAndLocation /
-  // renderDialModal in js/dials.js).
-  const subtitle = clientCompanyAndLocation(currentClient);
-  const mapsLink = locationPinLink(currentClient.city, currentClient.state);
-  els.clientModalSubtitle.innerHTML = `${escapeHtml(subtitle)}${mapsLink}`;
+  // Subtitle is just the company name now — location used to live here too,
+  // but it's moved down into the body as its own field, above Email (see
+  // rfLocation/buildClientViewHTML), with the map pin next to it there.
+  const subtitle = currentClient.company_name || "";
+  els.clientModalSubtitle.textContent = subtitle;
   els.clientModalSubtitle.classList.toggle("hidden", !subtitle);
 
   els.clientModalBody.innerHTML = `

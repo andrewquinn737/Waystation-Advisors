@@ -34,11 +34,19 @@ export function buildIntroCallFormHTML() {
 }
 
 // container: element the form HTML above was injected into.
-// opts: { client: {first_name,last_name,email}, internEmail, onScheduled() }
+// opts: { client, createClient, internEmail, onScheduled(client) }
+//   - client: an already-existing client row ({first_name,last_name,email,id,...}).
+//   - createClient: alternative to `client` — an async function called the
+//     moment "Open Calendly" is clicked, which should create the client
+//     record and return it (or throw/return null on failure, showing its own
+//     error). Used by the Dials "Schedule Intro Call" flow so the client
+//     isn't actually created in the database until Calendly is opened —
+//     clicking "Schedule Intro Call" itself only validates the dial's info
+//     and opens this form, it no longer creates anything.
 // (internEmail is accepted but unused in this simplified version — the
 // booking link isn't per-intern.)
 export function wireIntroCallForm(container, opts) {
-  const { client, onScheduled } = opts;
+  const { client: initialClient, createClient, onScheduled } = opts;
   const btn = container.querySelector("#scheduleCallBtn");
   const errEl = container.querySelector("#introCallError");
   const successEl = container.querySelector("#introCallSuccess");
@@ -46,6 +54,18 @@ export function wireIntroCallForm(container, opts) {
   btn.addEventListener("click", async () => {
     errEl.classList.add("hidden");
     successEl.classList.add("hidden");
+
+    let client = initialClient;
+    if (!client && createClient) {
+      try {
+        client = await createClient();
+      } catch (err) {
+        errEl.textContent = err?.message || "Could not create the client record.";
+        errEl.classList.remove("hidden");
+        return;
+      }
+      if (!client) return; // createClient already showed its own error and bailed
+    }
 
     if (!client?.email) {
       errEl.textContent = "This client doesn't have an email on file, so Calendly can't be pre-filled. Add one first.";
@@ -62,6 +82,6 @@ export function wireIntroCallForm(container, opts) {
     window.open(`${CALENDLY_BOOKING_URL}${separator}${params.toString()}`, "_blank", "noopener");
 
     successEl.classList.remove("hidden");
-    if (onScheduled) await onScheduled();
+    if (onScheduled) await onScheduled(client);
   });
 }

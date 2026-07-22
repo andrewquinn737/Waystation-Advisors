@@ -318,12 +318,25 @@ async function loadCallsChart() {
   });
 
   const thisWeekCount = counts[counts.length - 1];
+
+  // Today's count is just a narrower slice of the same `rows` already
+  // fetched above (which covers everything since the start of this week, so
+  // today is included in there).
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+  const todayCount = rows.filter((r) => {
+    const t = new Date(r.changed_at);
+    return t >= startOfToday && t < startOfTomorrow;
+  }).length;
+
   const remaining = WEEKLY_QUOTA - thisWeekCount;
   const quotaHTML =
     remaining <= 0
       ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
       : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
-  els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week${quotaHTML}`;
+  els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week, ${todayCount} today${quotaHTML}`;
   renderCallsChart(weekStarts, counts);
 }
 
