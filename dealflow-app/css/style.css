@@ -10,6 +10,10 @@
   --border: #eae3d3;
   --text: #15213a;
   --text-muted: #6b7280;
+  /* Between --text and --text-muted — used where something (e.g. a company
+     name next to a location) needs to read as slightly more prominent than
+     plain muted text, without going all the way to full-strength text. */
+  --text-muted-strong: #4b5563;
   --accent: #2f5fed;
   --accent-hover: #2449c4;
   --gold: #c8a45a;
@@ -18,6 +22,31 @@
   --success: #1f9d55;
   --warn: #c98a12;
   --radius: 8px;
+
+  /* Dial "Categories" / contact-status colors (see CONTACT_STATUSES in
+     js/dials.js) — used for the status dropdown, the Categories filter
+     swatches, and the dial list row/card backgrounds. Defined as variables
+     (rather than hardcoded hex in JS) so the dark-mode override below can
+     swap in shades that actually read well on a black background, instead
+     of the light-mode pastels staying pinned regardless of theme. */
+  --status-uncontacted-bg: #ffffff;
+  --status-uncontacted-border: #eae3d3;
+  --status-uncontacted-dot: #ffffff;
+  --status-unable-bg: #eef0f2;
+  --status-unable-border: #d8dde2;
+  --status-unable-dot: #9ca3af;
+  --status-not-interested-bg: #fdecec;
+  --status-not-interested-border: #f7d2ce;
+  --status-not-interested-dot: #e0776d;
+  --status-no-response-bg: #ffeede;
+  --status-no-response-border: #f7d9b8;
+  --status-no-response-dot: #f2a65a;
+  --status-callback-bg: #fff6e0;
+  --status-callback-border: #f3e6b8;
+  --status-callback-dot: #f2d34b;
+  --status-scheduled-bg: #e7f8ee;
+  --status-scheduled-border: #c9ebd4;
+  --status-scheduled-dot: #6fcf8e;
 }
 
 /* Full dark-mode support: every tab's background and every popup/modal
@@ -31,6 +60,7 @@
     --border: #2c2c2c;
     --text: #f2f2f2;
     --text-muted: #a3adba;
+    --text-muted-strong: #c7cdd6;
     --accent: #6d8dff;
     --accent-hover: #8aa4ff;
     --gold: #d9b876;
@@ -38,6 +68,29 @@
     --danger: #ff6b61;
     --success: #34c973;
     --warn: #e0a83e;
+
+    /* Same hue family as the light-mode status colors above, just re-tuned
+       to dark, muted background tints with brighter swatches/dots so they
+       stay legible against black instead of looking washed-out or, in
+       uncontacted's case, glaring white-on-black. */
+    --status-uncontacted-bg: #1a1a1a;
+    --status-uncontacted-border: #333333;
+    --status-uncontacted-dot: #f2f2f2;
+    --status-unable-bg: #23262b;
+    --status-unable-border: #3a3f47;
+    --status-unable-dot: #9ca3af;
+    --status-not-interested-bg: #3a1f1d;
+    --status-not-interested-border: #5c2f2b;
+    --status-not-interested-dot: #f0897d;
+    --status-no-response-bg: #3a2a14;
+    --status-no-response-border: #5c4020;
+    --status-no-response-dot: #f5b673;
+    --status-callback-bg: #332c0f;
+    --status-callback-border: #4d431c;
+    --status-callback-dot: #e8c94a;
+    --status-scheduled-bg: #12301d;
+    --status-scheduled-border: #1f4a2e;
+    --status-scheduled-dot: #7ee0a0;
   }
 }
 
@@ -261,11 +314,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   z-index: 100; display: flex; flex-direction: column;
 }
 .fullscreen-modal .fs-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 24px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 16px 24px; border-bottom: 1px solid var(--border); gap: 12px;
 }
 .fullscreen-modal .fs-header h2 { margin: 0; font-size: 18px; }
-.fs-header-actions { display: flex; align-items: center; gap: 8px; }
+/* Wraps the title + (optional) company/location subtitle underneath it —
+   e.g. the Clients detail popup, styled to match the Dials detail popup's
+   header (see .dial-modal-subtitle). */
+.fs-header-main { min-width: 0; }
+.fs-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-top: 2px; }
 .fullscreen-modal .fs-body { flex: 1; overflow-y: auto; padding: 24px; max-width: 720px; margin: 0 auto; width: 100%; }
 .fs-close {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
@@ -327,7 +384,7 @@ tr.clickable-row { cursor: pointer; }
 .count-badge { color: var(--text-muted); font-size: 13px; }
 
 /* ---- Popups need to sit above the full-screen client modal ---- */
-#requiredPopup, #eventPopup, #confirmDeleteModal, #introCallPopup { z-index: 200; }
+#requiredPopup, #confirmDeleteModal, #introCallPopup { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
@@ -500,11 +557,35 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 .dial-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .dial-modal-header-main h2 { margin: 0; font-size: 17px; }
 .dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+/* Company name reads slightly more prominent than the location next to it
+   (see subtitle-company/subtitle-location in js/dials.js) — no comma between
+   them anymore, just a space. */
+.subtitle-company { color: var(--text-muted-strong); }
+.subtitle-location { color: var(--text-muted); }
+.subtitle-company + .subtitle-location { margin-left: 6px; }
+/* Pin icon that opens the dial/client's city+state in Google Maps, shown
+   right after the location text in the subtitle line. */
+.location-pin-link {
+  display: inline-flex; vertical-align: middle; margin-left: 8px;
+  color: var(--text-muted); position: relative; top: -0.5px;
+}
+@media (hover: hover) { .location-pin-link:hover { color: var(--accent); } }
+/* Client popup's "Location" field (see buildClientViewHTML in js/clients.js)
+   sits in a flex row instead of inline text — nudged right and down a touch
+   further than the default so it reads as centered next to the location
+   text rather than tucked up against it. */
+.location-pin-link.pin-body-row { margin-left: 4px; top: 1px; }
+/* Groups the actions row (Schedule intro call / X) and the status/edit row
+   into one right-aligned column, instead of two independently-flowing flex
+   rows. This is what keeps the gap between them small and CONSTANT (set by
+   this column's own `gap`) rather than being dictated by however tall the
+   name/subtitle block on the left happens to be (which could wrap to two
+   lines) — and what makes "Schedule intro call", the status/"Categories"
+   dropdown, and "Did call today" all line up on their right edges, since all
+   three now live in the same right-aligned column. */
+.dial-modal-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-/* Pulled in tight under the header — top margin matches .dial-status-col's
-   own gap below (6px) so the gap above the status/edit row reads the same
-   as the gap between that row and "Did call today" underneath it. */
-.dial-modal-editrow { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; min-height: 8px; margin: 6px 0 10px; }
+.dial-modal-editrow { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
 /* Status dropdown + "Did call today" stacked directly under one another,
    right-aligned, with the edit (pencil) button beside the whole stack. */
 .dial-status-col { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
@@ -530,8 +611,15 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 /* Quick call-status dropdown, left of the edit button in the popup's
    edit-row. Never colors the popup itself — only the list rows/cards. */
 .dial-status-dropdown { position: relative; }
+/* width:100% matters here: .dial-status-dropdown (this button's parent) is
+   the flex item that stretches to match "Did call today" in .dial-status-col
+   (see align-items:stretch there) — but a stretched block parent doesn't
+   automatically widen an inline-block button inside it. Without this, the
+   button's own right edge fell short of the stretched wrapper's edge (and
+   therefore short of "Did call today" and "Schedule intro call" above it),
+   which is what made it look shifted left / misaligned. */
 .dial-status-btn {
-  height: 32px; min-width: 100px; border-radius: 7px; border: 2px solid var(--border);
+  width: 100%; height: 32px; min-width: 100px; border-radius: 7px; border: 2px solid var(--border);
   cursor: pointer; padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--text);
   white-space: nowrap;
 }
@@ -702,6 +790,17 @@ html.is-mobile-device .mobile-list { display: block; }
 }
 @media (hover: hover) { .team-member-card:hover { background: var(--bg); } }
 .team-member-card .contact-actions { flex-shrink: 0; }
+/* Tapping a member's card expands their phone/email inline right below it
+   (see toggleMemberDetail() in js/profile.js) instead of opening a separate
+   popup. The card's bottom corners square off so it visually merges with
+   the detail block sitting flush underneath. */
+.team-member-card.expanded { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.team-member-detail {
+  background: var(--bg); border: 1px solid var(--border); border-top: none;
+  border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
+  margin-top: -1px; padding: 2px 14px 2px;
+}
+.team-member-detail .readonly-field:first-child { border-top: none; }
 .copy-toast { font-size: 11px; font-weight: 600; color: var(--success); }
 .copyable { cursor: pointer; }
 
