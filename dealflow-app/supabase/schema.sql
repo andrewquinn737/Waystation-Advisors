@@ -574,3 +574,31 @@ create policy "teams_update_admin" on teams
 drop policy if exists "teams_delete_admin" on teams;
 create policy "teams_delete_admin" on teams
   for delete using (is_admin());
+
+-- ============================================================================
+-- ADMIN-ONLY TEMP PASSWORD LOOKUP
+-- Real login passwords are one-way hashed by Supabase Auth and can never be
+-- retrieved once an account exists — there is no way to "show the real
+-- password" for an existing login. Instead, this stores the INITIAL temp
+-- password an admin sets at account-creation time (see
+-- supabase/functions/admin-create-account, which has the plaintext value in
+-- scope at signup and writes it here using the service-role client,
+-- bypassing RLS on insert). Admins can then look it up later from the key
+-- icon on a member's Teams card (see js/profile.js). If someone changes their
+-- own password later, this stored value goes stale — it's a record of the
+-- temp password issued at signup, not a live mirror of the real one.
+-- ============================================================================
+create table if not exists profile_temp_passwords (
+  profile_id uuid primary key references profiles(id) on delete cascade,
+  temp_password text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table profile_temp_passwords enable row level security;
+
+-- Only admins can read this table directly (the anon/authenticated key never
+-- gets insert/update/delete access — only the admin-create-account Edge
+-- Function's service-role client writes to it, which bypasses RLS entirely).
+drop policy if exists "profile_temp_passwords_select_admin" on profile_temp_passwords;
+create policy "profile_temp_passwords_select_admin" on profile_temp_passwords
+  for select using (is_admin());
