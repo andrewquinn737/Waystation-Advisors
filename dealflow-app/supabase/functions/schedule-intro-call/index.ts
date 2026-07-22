@@ -76,6 +76,25 @@ function zonedTimeToUtc(dateStr: string, timeStr: string, timeZone: string): Dat
   return new Date(guessUtcMs - offsetMs);
 }
 
+// Business rule: calls can only be booked Monday-Friday, 8:00 AM - 9:30 PM
+// Mountain Time — enforced here (not just client-side in js/introCall.js)
+// since client-side validation can be bypassed.
+function isWithinBookableHours(utcDate: Date): boolean {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Denver",
+    hourCycle: "h23",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const map: Record<string, string> = {};
+  for (const p of fmt.formatToParts(utcDate)) map[p.type] = p.value;
+  const weekday = map.weekday;
+  const totalMin = Number(map.hour) * 60 + Number(map.minute);
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
+  return isWeekday && totalMin >= 8 * 60 && totalMin <= 21 * 60 + 30;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: CORS_HEADERS });
@@ -117,6 +136,13 @@ Deno.serve(async (req: Request) => {
     startTimeUtc = zonedTimeToUtc(date, time, timezone);
   } catch {
     return jsonResponse({ error: "Could not parse the date/time/time zone provided." }, 400);
+  }
+
+  if (!isWithinBookableHours(startTimeUtc)) {
+    return jsonResponse(
+      { error: "Calls can only be scheduled Monday–Friday, 8:00 AM – 9:30 PM Mountain Time. Please pick a different time." },
+      400
+    );
   }
 
   const calendlyBody: Record<string, unknown> = {
