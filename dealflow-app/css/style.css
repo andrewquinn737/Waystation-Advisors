@@ -555,6 +555,14 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 /* ---- Dial detail/create popup ---- */
 .dial-modal-stack { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 540px; }
 .dial-modal { position: relative; width: 100%; max-width: 540px; }
+/* Swipe/prev-next transition between dials — a real slide+fade rather than
+   an instant content swap (see goToDial in js/dials.js, which toggles
+   transform/opacity inline and these classes around a re-render). The
+   transition applies by default; .dial-modal-jump disables it for one frame
+   so the "jump to the opposite off-screen edge" step right after the content
+   swap isn't itself animated — only the release back to centered is. */
+.dial-modal { transition: transform 0.18s ease, opacity 0.18s ease; }
+.dial-modal.dial-modal-jump { transition: none; }
 .dial-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .dial-modal-header-main h2 { margin: 0; font-size: 17px; }
 .dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
@@ -600,6 +608,13 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
   padding: 0 14px; border-radius: 7px; border: none; cursor: pointer;
   font-size: 12.5px; font-weight: 600; white-space: nowrap;
   background: #f2e2a0; color: #6b5410;
+  /* Its own text is shorter than the status dropdown/"Did call today"
+     buttons in .dial-status-col underneath, which stretch to match each
+     other's natural width — without this, "Schedule intro call" ended up
+     narrower and its LEFT edge sat further right than theirs (right edges
+     already lined up via .dial-modal-header-right's align-items:flex-end).
+     min-width just extends it leftward to roughly match. */
+  min-width: 158px;
 }
 @media (hover: hover) { .dial-schedule-intro-btn:hover { background: #ecd684; } }
 .dial-did-call-btn {
