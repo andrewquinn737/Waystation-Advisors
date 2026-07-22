@@ -2,8 +2,9 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
+import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -110,8 +111,6 @@ const els = {
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
   dialTabDeleteBtn: document.getElementById("dialTabDeleteBtn"),
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
-  addTabBtn: document.getElementById("addTabBtn"),
-  generateListBtn: document.getElementById("generateListBtn"),
   dialsTableWrap: document.getElementById("dialsTableWrap"),
   dialModalBackdrop: document.getElementById("dialModalBackdrop"),
   dialModalHeader: document.getElementById("dialModalHeader"),
@@ -338,6 +337,27 @@ function updateArchiveMenuPosition() {
   els.dialTabArchiveMenu.style.top = `${rect.bottom + 6}px`;
   els.dialTabArchiveMenu.classList.remove("hidden");
 }
+
+function closeArchiveMenu() {
+  if (!archiveMenuTabId) return;
+  archiveMenuTabId = null;
+  updateArchiveMenuPosition();
+}
+
+// Closes the Archive/Delete popup as soon as anything ELSE is interacted
+// with — a dial row, the settings icon, the page-header triangle, the
+// Categories button, etc. Only two things are deliberately exempted:
+//  - clicks inside the popup itself (its own Archive/Unarchive and Delete
+//    buttons handle themselves, via setListArchived()/the confirm-delete flow)
+//  - clicks on any dial tab button, since that's the element whose own click
+//    handler (see wireTabInteractions) already opens/toggles this same popup
+//    for the active tab — closing it here first would fight that logic.
+document.addEventListener("click", (e) => {
+  if (!archiveMenuTabId) return;
+  if (els.dialTabArchiveMenu.contains(e.target)) return;
+  if (e.target.closest(".dial-tab")) return;
+  closeArchiveMenu();
+});
 
 els.dialTabArchiveBtn.addEventListener("click", () => {
   if (!archiveMenuTabId) return;
@@ -587,13 +607,11 @@ function startRenameTab(btn, list) {
   });
 }
 
-els.addTabBtn.addEventListener("click", () => {
-  els.newListError.classList.add("hidden");
-  els.newListNameInput.value = "";
-  els.newListModal.classList.remove("hidden");
-  els.newListNameInput.focus();
-});
-
+// Note: the "+" button that used to open this "New list" dialog has been
+// removed from the tab bar per request (along with "Generate new list" —
+// see below), so createNewList()/newListModal are currently unreachable from
+// the UI. Left in place rather than ripped out, in case list creation gets a
+// new entry point later.
 els.newListCancelBtn.addEventListener("click", () => els.newListModal.classList.add("hidden"));
 
 async function createNewList() {
@@ -648,10 +666,6 @@ els.menuStatusBtn.addEventListener("click", () => {
   setStatus(currentStatus === "current" ? "archived" : "current");
 });
 
-// "Generate new list" is an intentional no-op placeholder for now, and is
-// hidden (not removed) until it does something.
-els.generateListBtn.classList.add("hidden");
-
 // ---------------------------------------------------------------------------
 // Page-header triangle menu (Profile/Clients/Dials all share this pattern —
 // see js/pageHeaderMenu.js). Replaces the old gold vertical rule: tapping the
@@ -680,9 +694,11 @@ async function loadDials() {
     renderDialsTable();
     return;
   }
-  const { data, error } = await supabase.from("dials").select("*").eq("list_id", currentListId).order("created_at", { ascending: true });
+  const { data, error } = await supabase.from("dials").select("*").eq("list_id", currentListId);
   if (error) return showError(els.errorBox, error);
-  dials = data || [];
+  // Alphabetical A-Z by first name (case/locale-insensitive) rather than
+  // import/creation order.
+  dials = (data || []).slice().sort((a, b) => (a.first_name || "").localeCompare(b.first_name || "", undefined, { sensitivity: "base" }));
   renderDialsTable();
 }
 
@@ -843,45 +859,59 @@ function renderDialModal() {
   const isViewingExisting = !isCreate && dialMode === "view";
 
   const subtitle = isCreate ? "" : dialCompanyAndLocation(currentDial);
+  const mapsLink = isCreate ? "" : locationPinLink(currentDial.city, currentDial.state);
 
   // Header (title/subtitle/Create-client/close) and the edit-button row
   // below it are fully rebuilt every render — they depend on which dial and
   // mode is active — then re-wired, same pattern as the body/actions below.
+  // The actions row and the status/edit row are both nested inside a shared
+  // right-aligned column (.dial-modal-header-right) rather than being two
+  // independent flex rows stacked by plain document flow — that's what keeps
+  // the gap between them small and constant (set by the column's own `gap`)
+  // instead of being dictated by whatever height the (often two-line,
+  // wrapping) name/subtitle block on the left happens to need. It also means
+  // "Schedule intro call" (top) / the status dropdown ("Categories" -
+  // Uncontacted/Not interested/etc) / "Did call today" all end up with their
+  // right edges lined up automatically, since they share the same
+  // right-aligned column and the status dropdown + Did-call-today stretch to
+  // match each other's width (see .dial-status-col).
   const calledToday = dial.called_today_date === todayDateStr();
   els.dialModalHeader.innerHTML = `
     <div class="dial-modal-header">
       <div class="dial-modal-header-main">
         <h2>${escapeHtml(isCreate ? "New dial" : dialDisplayName(currentDial))}</h2>
-        ${subtitle ? `<div class="dial-modal-subtitle">${escapeHtml(subtitle)}</div>` : ""}
+        ${subtitle ? `<div class="dial-modal-subtitle">${escapeHtml(subtitle)}${mapsLink}</div>` : ""}
       </div>
-      <div class="dial-modal-header-actions">
-        ${isViewingExisting ? `<button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>` : ""}
-        <button type="button" class="fs-close" id="dialModalClose">&times;</button>
-      </div>
-    </div>
-    <div class="dial-modal-editrow">
-      ${
-        isViewingExisting
-          ? `
-        <div class="dial-status-col">
-          <div class="dial-status-dropdown">
-            <button type="button" class="dial-status-btn" id="dialStatusBtn"
-              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
-            <div class="dial-status-menu hidden" id="dialStatusMenu">
-              ${CONTACT_STATUSES.map(
-                (s) => `
-                <button type="button" class="dial-status-option" data-value="${s.value}">
-                  <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
-                </button>`
-              ).join("")}
-            </div>
-          </div>
-          <button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Did call today</button>
+      <div class="dial-modal-header-right">
+        <div class="dial-modal-header-actions">
+          ${isViewingExisting ? `<button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>` : ""}
+          <button type="button" class="fs-close" id="dialModalClose">&times;</button>
         </div>
-        <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
-      `
-          : ""
-      }
+        ${
+          isViewingExisting
+            ? `
+        <div class="dial-modal-editrow">
+          <div class="dial-status-col">
+            <div class="dial-status-dropdown">
+              <button type="button" class="dial-status-btn" id="dialStatusBtn"
+                style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
+              <div class="dial-status-menu hidden" id="dialStatusMenu">
+                ${CONTACT_STATUSES.map(
+                  (s) => `
+                  <button type="button" class="dial-status-option" data-value="${s.value}">
+                    <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+                  </button>`
+                ).join("")}
+              </div>
+            </div>
+            <button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Did call today</button>
+          </div>
+          <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
+        </div>
+        `
+            : ""
+        }
+      </div>
     </div>
   `;
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
@@ -1023,43 +1053,18 @@ function handleDeleteDial() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Body scroll lock — while the dial popup is open, only the popup's own
-// content should scroll; the dials list behind it must stay put. Toggling
-// overflow:hidden on <body> alone doesn't reliably stop scrolling on iOS
-// Safari (it can still rubber-band the page behind a fixed-position overlay),
-// so this uses the more robust technique of pinning <body> to position:fixed
-// at its current scroll offset while the modal is open, then restoring both
-// the normal positioning and the scroll offset on close.
-// ---------------------------------------------------------------------------
-let savedScrollY = 0;
-function lockBodyScroll() {
-  savedScrollY = window.scrollY || window.pageYOffset || 0;
-  document.body.style.position = "fixed";
-  document.body.style.top = `-${savedScrollY}px`;
-  document.body.style.left = "0";
-  document.body.style.right = "0";
-}
-function unlockBodyScroll() {
-  document.body.style.position = "";
-  document.body.style.top = "";
-  document.body.style.left = "";
-  document.body.style.right = "";
-  window.scrollTo(0, savedScrollY);
-}
-
 function openDialModal(index) {
   currentDialIndex = index;
   currentDial = dials[index];
   dialMode = "view";
   els.dialModalBackdrop.classList.remove("hidden");
-  lockBodyScroll();
+  lockPageScroll();
   renderDialModal();
 }
 
 function closeDialModal() {
   els.dialModalBackdrop.classList.add("hidden");
-  unlockBodyScroll();
+  unlockPageScroll();
 }
 
 // Opens the "New dial" popup — used by the "Add new" item in the page-header
@@ -1075,7 +1080,7 @@ function openCreateDialModal() {
   currentDial = null;
   currentDialIndex = -1;
   els.dialModalBackdrop.classList.remove("hidden");
-  lockBodyScroll();
+  lockPageScroll();
   renderDialModal();
 }
 // Note: the close (x) button is inside #dialModalHeader, which is rebuilt on

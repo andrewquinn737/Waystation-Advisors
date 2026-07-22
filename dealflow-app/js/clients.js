@@ -9,22 +9,19 @@ import {
   collectFormData,
   getMissingFields,
 } from "./clientForm.js";
-import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
 import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
+import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
-const { profile, user } = session;
-const internEmail = user?.email || "";
+const { profile } = session;
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 let clients = [];
 let currentClient = null; // null while creating a new client
 let currentMode = "create"; // 'create' | 'view' | 'edit'
-let currentTab = "profile"; // 'profile' | 'progress' | 'timeline'
-let events = [];
 
 const els = {
   errorBox: document.getElementById("errorBox"),
@@ -36,17 +33,13 @@ const els = {
   addBtn: document.getElementById("addBtn"),
   clientModal: document.getElementById("clientModal"),
   clientModalTitle: document.getElementById("clientModalTitle"),
+  clientModalSubtitle: document.getElementById("clientModalSubtitle"),
   clientModalBody: document.getElementById("clientModalBody"),
   clientModalClose: document.getElementById("clientModalClose"),
   editProfileBtn: document.getElementById("editProfileBtn"),
-  clientSubtabs: document.getElementById("clientSubtabs"),
   requiredPopup: document.getElementById("requiredPopup"),
   requiredPopupText: document.getElementById("requiredPopupText"),
   requiredPopupOk: document.getElementById("requiredPopupOk"),
-  eventPopup: document.getElementById("eventPopup"),
-  eventPopupTitle: document.getElementById("eventPopupTitle"),
-  eventPopupBody: document.getElementById("eventPopupBody"),
-  eventPopupClose: document.getElementById("eventPopupClose"),
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
 };
 
@@ -170,61 +163,25 @@ function rf(label, value) {
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
 }
 
-function buildReadonlySections(client) {
-  const location = [client.city, client.state].filter(Boolean).join(", ");
+// Flat, non-tabbed read-only view — matches the Dials detail popup's layout
+// (see buildDialViewHTML in js/dials.js) instead of the old
+// accordion-sections-in-tabs design. Name and location/company are only
+// shown once each, up in the header (see renderModalBody), so they're
+// deliberately left out of this list.
+function buildClientViewHTML(client) {
   const founded = client.founded_year ? `${monthName(client.founded_month)} ${client.founded_year}` : "";
   return `
-    <div class="accordion-section open" data-section="personal">
-      <div class="accordion-header">
-        <span>Personal information</span>
-        <span class="chevron">&#9662;</span>
-      </div>
-      <div class="accordion-body">
-        ${rf("First name", client.first_name)}
-        ${rf("Last name", client.last_name)}
-        ${rf("Location", location)}
-        ${rf("Intern's name", client.intern_name)}
-      </div>
-    </div>
-    <div class="accordion-section" data-section="contact">
-      <div class="accordion-header"><span>Contact information</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        ${rfContact("Email", client.email, "email")}
-        ${rfContact("Phone number", client.phone, "phone")}
-        ${rf("LinkedIn", client.linkedin)}
-      </div>
-    </div>
-    <div class="accordion-section" data-section="company">
-      <div class="accordion-header"><span>Company details</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        ${rf("Company name", client.company_name)}
-        ${rf("Industry sector", client.industry)}
-        ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
-        ${rf("Employees", client.employee_count)}
-        ${rf("Founded", founded)}
-      </div>
-    </div>
-    <div class="accordion-section" data-section="preferences">
-      <div class="accordion-header"><span>Preferences</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        ${rf(lookingForLabel(), client.looking_for)}
-      </div>
-    </div>
-    <div class="accordion-section" data-section="notes">
-      <div class="accordion-header"><span>Other notes</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        ${rf("Notes", client.other_notes)}
-      </div>
-    </div>
+    ${rfContact("Email", client.email, "email")}
+    ${rfContact("Phone number", client.phone, "phone")}
+    ${rf("LinkedIn", client.linkedin)}
+    ${rf("Intern's name", client.intern_name)}
+    ${rf("Industry sector", client.industry)}
+    ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
+    ${rf("Employees", client.employee_count)}
+    ${rf("Founded", founded)}
+    ${rf(lookingForLabel(), client.looking_for)}
+    ${rf("Notes", client.other_notes)}
   `;
-}
-
-function wireAccordions() {
-  els.clientModalBody.querySelectorAll(".accordion-header").forEach((header) => {
-    header.addEventListener("click", () => {
-      header.parentElement.classList.toggle("open");
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -254,122 +211,17 @@ function validateAndCollect() {
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
-// Timeline tab
-// ---------------------------------------------------------------------------
-
-function eventTypeLabel(t) {
-  if (t === "created") return "Client profile created";
-  if (t === "intro_call") return "Intro Call";
-  return t;
-}
-function formatEventDate(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
-
-async function loadEvents(clientId) {
-  const { data, error } = await supabase
-    .from("client_events")
-    .select("*")
-    .eq("client_id", clientId)
-    .order("event_date", { ascending: false });
-  events = error ? [] : data || [];
-}
-
-function buildTimelineHTML() {
-  const itemsHTML =
-    events.length === 0
-      ? `<div class="empty-state">No events yet.</div>`
-      : events
-          .map(
-            (ev) => `
-        <div class="timeline-item">
-          <div class="timeline-line"></div>
-          <div class="timeline-dot"></div>
-          <div class="timeline-box">
-            <div class="tl-date">${escapeHtml(formatEventDate(ev.event_date))}</div>
-            <div class="tl-type">${escapeHtml(eventTypeLabel(ev.event_type))}</div>
-          </div>
-        </div>`
-          )
-          .join("");
-
-  return `
-    <div class="timeline-list">
-      ${itemsHTML}
-    </div>
-    <button type="button" class="timeline-add-btn" id="timelineAddBtn" title="Add event">+</button>
-    <div class="timeline-add-menu hidden" id="timelineAddMenu">
-      <button type="button" id="addIntroCallBtn">Intro Call</button>
-    </div>
-  `;
-}
-
-function wireTimelineEvents() {
-  const addBtn = document.getElementById("timelineAddBtn");
-  const menu = document.getElementById("timelineAddMenu");
-  if (!addBtn) return;
-  addBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    menu.classList.toggle("hidden");
-  });
-  document.addEventListener("click", () => menu.classList.add("hidden"), { once: true });
-  document.getElementById("addIntroCallBtn").addEventListener("click", () => {
-    menu.classList.add("hidden");
-    els.eventPopupTitle.textContent = "Intro Call";
-    els.eventPopupBody.innerHTML = buildIntroCallFormHTML();
-    els.eventPopup.classList.remove("hidden");
-    wireIntroCallForm(els.eventPopupBody, {
-      client: currentClient,
-      internEmail,
-      onScheduled: async () => {
-        // We don't know the actual booked time here (Calendly handles that in
-        // its own tab), so this just logs that the link was opened,
-        // timestamped to now.
-        await supabase.from("client_events").insert({
-          client_id: currentClient.id,
-          event_type: "intro_call",
-          event_date: new Date().toISOString(),
-          details: { via: "calendly_link" },
-          created_by: profile.id,
-        });
-        setTimeout(async () => {
-          els.eventPopup.classList.add("hidden");
-          if (currentTab === "timeline") {
-            await loadEvents(currentClient.id);
-            renderModalBody();
-          }
-        }, 1200);
-      },
-    });
-  });
-}
-
-els.eventPopupClose.addEventListener("click", () => els.eventPopup.classList.add("hidden"));
-
-// ---------------------------------------------------------------------------
 // Modal rendering / mode switching
 // ---------------------------------------------------------------------------
 
-function updateSubtabActiveState() {
-  els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.tab === currentTab);
-  });
-}
-
-// Progress and Timeline sub-tabs are hidden for now (code kept intact for
-// when they're re-enabled) — the sub-tab bar itself stays hidden always, so
-// Profile is the only view shown.
-const SUBTABS_ENABLED = false;
-
 function renderModalBody() {
-  els.clientSubtabs.classList.toggle("hidden", !SUBTABS_ENABLED || currentMode === "create");
   // Edit icon lives in the header (left of the x), not beside "Personal
   // information" — only shown in view mode.
   els.editProfileBtn.classList.toggle("hidden", currentMode !== "view");
 
   if (currentMode === "create") {
     els.clientModalTitle.textContent = "New client";
+    els.clientModalSubtitle.classList.add("hidden");
     els.clientModalBody.innerHTML = `
       <div id="clientModalError" class="error-msg hidden"></div>
       ${buildEditableSections(defaultClient(profile))}
@@ -385,39 +237,36 @@ function renderModalBody() {
   }
 
   els.clientModalTitle.textContent = clientDisplayName(currentClient);
-  updateSubtabActiveState();
+  // Subtitle: "Company, City, State" + a map pin next to the location — same
+  // pattern as the Dials detail popup's header (see dialCompanyAndLocation /
+  // renderDialModal in js/dials.js).
+  const subtitle = clientCompanyAndLocation(currentClient);
+  const mapsLink = locationPinLink(currentClient.city, currentClient.state);
+  els.clientModalSubtitle.innerHTML = `${escapeHtml(subtitle)}${mapsLink}`;
+  els.clientModalSubtitle.classList.toggle("hidden", !subtitle);
 
-  if (currentTab === "profile") {
-    els.clientModalBody.innerHTML = `
-      <div id="clientModalError" class="error-msg hidden"></div>
-      ${currentMode === "edit" ? buildEditableSections(currentClient) : buildReadonlySections(currentClient)}
-      ${
-        currentMode === "edit"
-          ? `<div class="form-actions">
-          <button type="button" class="btn" id="saveClientBtn">Save</button>
-          <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
-          <button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>
-        </div>`
-          : ""
-      }
-    `;
-    if (currentMode === "edit") {
-      wireEditableFormEvents(els.clientModalBody);
-      document.getElementById("saveClientBtn").addEventListener("click", handleEditSave);
-      document.getElementById("cancelClientBtn").addEventListener("click", () => {
-        currentMode = "view";
-        renderModalBody();
-      });
-      const delBtn = document.getElementById("deleteClientBtn");
-      if (delBtn) delBtn.addEventListener("click", handleDelete);
-    } else {
-      wireAccordions();
+  els.clientModalBody.innerHTML = `
+    <div id="clientModalError" class="error-msg hidden"></div>
+    ${currentMode === "edit" ? buildEditableSections(currentClient) : buildClientViewHTML(currentClient)}
+    ${
+      currentMode === "edit"
+        ? `<div class="form-actions">
+        <button type="button" class="btn" id="saveClientBtn">Save</button>
+        <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
+        <button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>
+      </div>`
+        : ""
     }
-  } else if (currentTab === "progress") {
-    els.clientModalBody.innerHTML = `<div class="empty-state">Progress tracking is coming soon.</div>`;
-  } else if (currentTab === "timeline") {
-    els.clientModalBody.innerHTML = buildTimelineHTML();
-    wireTimelineEvents();
+  `;
+  if (currentMode === "edit") {
+    wireEditableFormEvents(els.clientModalBody);
+    document.getElementById("saveClientBtn").addEventListener("click", handleEditSave);
+    document.getElementById("cancelClientBtn").addEventListener("click", () => {
+      currentMode = "view";
+      renderModalBody();
+    });
+    const delBtn = document.getElementById("deleteClientBtn");
+    if (delBtn) delBtn.addEventListener("click", handleDelete);
   }
 }
 
@@ -454,23 +303,22 @@ function handleDelete() {
 function openCreateModal() {
   currentClient = null;
   currentMode = "create";
-  currentTab = "profile";
-  events = [];
   els.clientModal.classList.remove("hidden");
+  lockPageScroll();
   renderModalBody();
 }
 
 async function openDetailModal(client) {
   currentClient = client;
   currentMode = "view";
-  currentTab = "profile";
-  events = [];
   els.clientModal.classList.remove("hidden");
+  lockPageScroll();
   renderModalBody();
 }
 
 function closeModal() {
   els.clientModal.classList.add("hidden");
+  unlockPageScroll();
 }
 
 els.addBtn.addEventListener("click", openCreateModal);
@@ -479,16 +327,6 @@ wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu }
 els.editProfileBtn.addEventListener("click", () => {
   currentMode = "edit";
   renderModalBody();
-});
-
-els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    if (currentMode === "create" || !currentClient) return;
-    currentTab = btn.dataset.tab;
-    currentMode = "view";
-    if (currentTab === "timeline") await loadEvents(currentClient.id);
-    renderModalBody();
-  });
 });
 
 await loadClients();

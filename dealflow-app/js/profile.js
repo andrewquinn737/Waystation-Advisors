@@ -2,6 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
 import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
 import { contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
+import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -21,11 +22,6 @@ const els = {
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
   teamsWrap: document.getElementById("teamsWrap"),
   profileSignOutBtn: document.getElementById("profileSignOutBtn"),
-  teamMemberPopup: document.getElementById("teamMemberPopup"),
-  teamMemberName: document.getElementById("teamMemberName"),
-  teamMemberRole: document.getElementById("teamMemberRole"),
-  teamMemberBody: document.getElementById("teamMemberBody"),
-  teamMemberPopupClose: document.getElementById("teamMemberPopupClose"),
 };
 
 function initials(name) {
@@ -103,7 +99,7 @@ function renderTeams() {
   els.teamsWrap.querySelectorAll("[data-member-id]").forEach((card) => {
     card.addEventListener("click", () => {
       const member = Object.values(teamMembersByGroup).flat().find((m) => m.id === card.dataset.memberId);
-      if (member) openTeamMemberPopup(member);
+      if (member) toggleMemberDetail(card, member);
     });
   });
   stopContactActionPropagation(els.teamsWrap);
@@ -111,13 +107,51 @@ function renderTeams() {
 
 function memberCardHTML(m) {
   return `
-    <div class="team-member-card clickable-row" data-member-id="${m.id}">
-      <div class="mc-main">
-        <div class="mc-name">${escapeHtml(m.full_name)}</div>
-        <div class="mc-sub">${escapeHtml(memberPositionLabel(m))}</div>
+    <div class="team-member-card-wrap">
+      <div class="team-member-card clickable-row" data-member-id="${m.id}">
+        <div class="mc-main">
+          <div class="mc-name">${escapeHtml(m.full_name)}</div>
+          <div class="mc-sub">${escapeHtml(memberPositionLabel(m))}</div>
+        </div>
+        ${contactActionIcons({ phone: m.phone, email: m.email })}
       </div>
-      ${contactActionIcons({ phone: m.phone, email: m.email })}
     </div>`;
+}
+
+// Tapping a team member's rectangle used to open a separate centered popup
+// for their phone/email — but that popup rendered behind the Teams
+// full-screen modal (a lower z-index than .fullscreen-modal), so it looked
+// like it "pulled up underneath" the Teams view. Replaced with an inline
+// expand: the phone/email rows (each with its own instant-contact icons,
+// aligned with that row) appear directly below the tapped card, pushing the
+// rest of the list down; tapping the same card again collapses them back.
+// This mutates the DOM directly (rather than re-rendering the whole
+// #teamsWrap via renderTeams()) so expanding/collapsing a card never
+// resets which team-group accordions happen to be open.
+function toggleMemberDetail(card, member) {
+  const wrap = card.closest(".team-member-card-wrap");
+  const existingDetail = wrap.querySelector(".team-member-detail");
+  if (existingDetail) {
+    existingDetail.remove();
+    card.classList.remove("expanded");
+    if (!card.querySelector(".contact-actions")) {
+      card.insertAdjacentHTML("beforeend", contactActionIcons({ phone: member.phone, email: member.email }));
+      stopContactActionPropagation(card);
+    }
+    return;
+  }
+  const iconsSlot = card.querySelector(".contact-actions");
+  if (iconsSlot) iconsSlot.remove();
+  card.classList.add("expanded");
+  wrap.insertAdjacentHTML(
+    "beforeend",
+    `<div class="team-member-detail">
+      ${memberDetailRow("Phone number", member.phone, "phone")}
+      ${memberDetailRow("Email", member.email, "email")}
+    </div>`
+  );
+  wireLongPressCopy(wrap);
+  stopContactActionPropagation(wrap);
 }
 
 // Briefly shows "Copied" next to a value after a long-press copies it —
@@ -163,20 +197,6 @@ function memberDetailRow(label, value, kind) {
       </div>
     </div>`;
 }
-
-function openTeamMemberPopup(member) {
-  els.teamMemberName.textContent = member.full_name;
-  els.teamMemberRole.textContent = memberPositionLabel(member);
-  els.teamMemberBody.innerHTML = `
-    ${memberDetailRow("Phone number", member.phone, "phone")}
-    ${memberDetailRow("Email", member.email, "email")}
-  `;
-  wireLongPressCopy(els.teamMemberBody);
-  stopContactActionPropagation(els.teamMemberBody);
-  els.teamMemberPopup.classList.remove("hidden");
-}
-
-els.teamMemberPopupClose.addEventListener("click", () => els.teamMemberPopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
 // "X people called this week" + 6-week chart. A row is inserted into
@@ -311,10 +331,12 @@ loadCallsChart();
 
 els.teamsBtn.addEventListener("click", async () => {
   els.teamsModal.classList.remove("hidden");
+  lockPageScroll();
   await loadTeams();
 });
 els.teamsCloseBtn.addEventListener("click", () => {
   els.teamsModal.classList.add("hidden");
+  unlockPageScroll();
 });
 els.profileSignOutBtn.addEventListener("click", signOut);
 
