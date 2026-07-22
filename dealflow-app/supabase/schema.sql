@@ -11,15 +11,20 @@
 create table profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
-  role text not null check (role in ('intern', 'team_lead')) default 'intern',
+  -- 'admin' was added later (see the ADMIN ROLE / TEAMS section near the
+  -- bottom of this file) — every account starts as 'intern' and an existing
+  -- admin promotes people from the Teams popup.
+  role text not null check (role in ('intern', 'team_lead', 'admin')) default 'intern',
   phone text,                      -- required at signup (see login.html)
   email text,                      -- copied from auth.users at signup so the
                                     -- Teams popup can show it without needing
                                     -- access to the auth schema
-  -- Which Teams-popup group this person shows up under. Only 3 fixed groups
-  -- for now ("expandable" tabs, not user-creatable yet) — new signups land
-  -- in Unassigned interns automatically.
-  team text not null default 'Unassigned interns' check (team in ('Admins', 'Team 1', 'Unassigned interns')),
+  -- Which Teams-popup group this person shows up under. Superseded by the
+  -- nullable `team_id` (references teams(id)) added in the ADMIN ROLE / TEAMS
+  -- section below — admins can now create/rename/delete teams instead of
+  -- picking from 3 fixed names. Left here (commented) only as a historical
+  -- note of the original column; the live migration actually DROPS this
+  -- column and ADDS team_id.
   created_at timestamptz not null default now()
 );
 
@@ -412,8 +417,8 @@ create policy "dials_delete_own" on dials
   for delete using (created_by = auth.uid());
 
 -- ============================================================================
--- TEAMS (shown in the Profile page's "Teams" popup). Empty for now — add
--- rows here whenever you're ready to list your company's teams.
+-- TEAMS (shown in the Profile page's "Teams" popup). Admin-creatable — see
+-- the ADMIN ROLE / TEAMS section further down for sort_order + RLS.
 -- ============================================================================
 create table teams (
   id uuid primary key default gen_random_uuid(),
@@ -422,8 +427,6 @@ create table teams (
 );
 
 alter table teams enable row level security;
-create policy "teams_select_all" on teams
-  for select using (auth.uid() is not null);
 
 -- ============================================================================
 -- CALL STATUS CHANGES (feeds the Profile page's "X people called this week"
@@ -476,3 +479,98 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function handle_new_user();
+
+-- ============================================================================
+-- ADMIN ROLE / TEAMS
+-- Adds a real 'admin' role and admin-manageable teams (replacing the old 3
+-- fixed team names). Run this whole block once against a database that
+-- already has the schema above (it ALTERs profiles/teams rather than
+-- re-creating them).
+--
+--   * Admins box + Unassigned interns box are virtual — not rows in `teams`
+--     — derived purely from role='admin' / team_id is null. Only the custom
+--     team rows an admin creates actually live in the `teams` table.
+--   * profiles.team_id replaces the old fixed-enum `team` text column.
+--     ON DELETE SET NULL means deleting a team automatically drops its
+--     members back into Unassigned interns — no extra trigger needed.
+--   * Only admins may change someone's role or team_id (see
+--     protect_profile_admin_fields below) — otherwise any intern could
+--     promote themselves via a direct API call even though the UI only
+--     exposes this to admins.
+--   * Creating/removing accounts themselves (not just role/team) needs the
+--     Supabase service-role key, which must never reach the browser — see
+--     supabase/functions/admin-create-account and admin-delete-account.
+-- ============================================================================
+
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('intern', 'team_lead', 'admin'));
+
+alter table profiles add column if not exists team_id uuid references teams(id) on delete set null;
+alter table profiles drop constraint if exists profiles_team_check;
+alter table profiles drop column if exists team;
+
+alter table teams add column if not exists sort_order integer not null default 0;
+
+create or replace function is_admin()
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select exists (
+    select 1 from profiles where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+-- One-time: promote the first admin BEFORE the protect_profile_admin_fields
+-- trigger below exists — that trigger requires is_admin() to already be true
+-- for anyone changing a role, which is a chicken-and-egg problem for the very
+-- first admin (nobody is one yet). Running this seed update here, before the
+-- trigger is created, sidesteps that entirely. Re-run (with a different
+-- email/condition, and only after temporarily dropping the trigger — see its
+-- comment below) whenever someone else needs to be seeded as an admin
+-- directly in the database outside the app's own Teams UI.
+update profiles set role = 'admin' where email = 'andrewquinn737@gmail.com';
+
+drop policy if exists "profiles_update_self_or_lead" on profiles;
+drop policy if exists "profiles_update_self_or_admin" on profiles;
+create policy "profiles_update_self_or_admin" on profiles
+  for update using (auth.uid() = id or is_admin())
+  with check (auth.uid() = id or is_admin());
+
+-- Column-level protection: even though the policy above lets someone update
+-- their OWN row, only an admin may change the role/team_id columns on ANY
+-- row (including their own) — stops privilege escalation via a direct API
+-- call to the clients-side anon key. Must be created AFTER the one-time seed
+-- update above, or that seed update would itself get blocked (is_admin() is
+-- false for everyone until it runs).
+create or replace function protect_profile_admin_fields()
+returns trigger language plpgsql as $$
+begin
+  if not is_admin() then
+    if new.role is distinct from old.role or new.team_id is distinct from old.team_id then
+      raise exception 'Only admins can change role or team assignment';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists profiles_protect_admin_fields on profiles;
+create trigger profiles_protect_admin_fields
+  before update on profiles
+  for each row execute function protect_profile_admin_fields();
+
+-- TEAMS: everyone can read (needed to show team names in the Teams popup);
+-- only admins can create/rename/delete a team.
+drop policy if exists "teams_select_all" on teams;
+create policy "teams_select_all" on teams
+  for select using (auth.uid() is not null);
+drop policy if exists "teams_insert_admin" on teams;
+create policy "teams_insert_admin" on teams
+  for insert with check (is_admin());
+drop policy if exists "teams_update_admin" on teams;
+create policy "teams_update_admin" on teams
+  for update using (is_admin());
+drop policy if exists "teams_delete_admin" on teams;
+create policy "teams_delete_admin" on teams
+  for delete using (is_admin());
