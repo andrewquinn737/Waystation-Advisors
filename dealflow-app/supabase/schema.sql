@@ -12,6 +12,14 @@ create table profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
   role text not null check (role in ('intern', 'team_lead')) default 'intern',
+  phone text,                      -- required at signup (see login.html)
+  email text,                      -- copied from auth.users at signup so the
+                                    -- Teams popup can show it without needing
+                                    -- access to the auth schema
+  -- Which Teams-popup group this person shows up under. Only 3 fixed groups
+  -- for now ("expandable" tabs, not user-creatable yet) — new signups land
+  -- in Unassigned interns automatically.
+  team text not null default 'Unassigned interns' check (team in ('Admins', 'Team 1', 'Unassigned interns')),
   created_at timestamptz not null default now()
 );
 
@@ -108,16 +116,22 @@ alter table subscription_payments enable row level security;
 alter table commissions enable row level security;
 
 -- Helper: is the current user a team lead?
+-- TEAM LEADS ARE TEMPORARILY DISABLED — every intern account is treated as
+-- full-access for now (per product decision to keep the roster flat while
+-- the org is small). This is the one place to flip that back on later: swap
+-- the body back to the real role check below (kept here, commented out) once
+-- team leads are reintroduced, no other code needs to change.
+--   select exists (
+--     select 1 from profiles
+--     where id = auth.uid() and role = 'team_lead'
+--   );
 create or replace function is_team_lead()
 returns boolean
 language sql
 security definer
 stable
 as $$
-  select exists (
-    select 1 from profiles
-    where id = auth.uid() and role = 'team_lead'
-  );
+  select true;
 $$;
 
 -- PROFILES: everyone can read all profiles (needed to show "assigned to" names);
@@ -363,6 +377,12 @@ create table dials (
   contact_status text not null default 'uncontacted' check (
     contact_status in ('uncontacted', 'unable_to_contact', 'not_interested', 'no_response', 'callback_interested', 'intro_call_scheduled')
   ),
+  -- "Did call today" toggle on the dial popup — set to today's date when
+  -- checked, cleared when unchecked. Rendering just compares this to the
+  -- current local date, so the button visually "resets" at the start of a
+  -- new day with no cron job needed; it never touches historical
+  -- call_status_changes rows, only the ones it itself inserts/deletes.
+  called_today_date date,
   created_by uuid references profiles(id) default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -422,8 +442,14 @@ language plpgsql
 security definer
 as $$
 begin
-  insert into public.profiles (id, full_name, role)
-  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email), 'intern');
+  insert into public.profiles (id, full_name, role, phone, email)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'full_name', new.email),
+    'intern',
+    new.raw_user_meta_data->>'phone',
+    new.email
+  );
   return new;
 end;
 $$;
