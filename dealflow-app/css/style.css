@@ -45,22 +45,28 @@ a:hover { text-decoration: underline; }
 .topnav-bar .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); }
 
 /* ---- Bottom tab bar (mobile only — shown via the max-width:720px media
-   query further down, which also hides .topnav-bar) ---- */
+   query further down, which also hides .topnav-bar). A floating gray/
+   translucent pill, not flush with the screen edges, with white icons. */
 .bottom-tabbar {
   display: none;
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-  background: var(--surface); border-top: 1px solid var(--border);
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  position: fixed; left: 16px; right: 16px; bottom: 14px; z-index: 40;
+  background: rgba(107, 114, 128, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 20px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
   gap: 2px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
 }
 .bottom-tabbar a, .bottom-tabbar button {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  padding: 10px 2px; font-size: 12px; font-weight: 600; color: var(--text-muted);
-  border: none; background: none; cursor: pointer; border-radius: 8px; text-decoration: none;
+  padding: 10px 2px; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.8);
+  border: none; background: none; cursor: pointer; border-radius: 14px; text-decoration: none;
   font-family: inherit;
 }
-.bottom-tabbar a.active { color: var(--accent); }
-.bottom-tabbar a:active, .bottom-tabbar button:active { background: var(--gold-soft); }
+.bottom-tabbar a svg { display: block; }
+.bottom-tabbar a.active { color: #fff; background: rgba(255,255,255,.18); }
+.bottom-tabbar a:active, .bottom-tabbar button:active { background: rgba(255,255,255,.24); }
 .role-badge {
   font-size: 11px;
   text-transform: uppercase;
@@ -93,6 +99,10 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
 input, select, textarea {
   width: 100%;
+  min-width: 0; /* prevents native date/time inputs' intrinsic content size
+                   from overriding width:100% and overflowing their container
+                   (seen on mobile Safari/Chrome) */
+  max-width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -146,7 +156,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   display: flex; align-items: flex-start; justify-content: center;
   padding: 60px 16px; overflow-y: auto; z-index: 50;
 }
-.modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; }
+.modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; overflow-x: hidden; box-sizing: border-box; }
 .modal h2 { margin: 0 0 4px; font-size: 17px; }
 .modal .close { position: absolute; }
 
@@ -160,6 +170,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   padding: 16px 24px; border-bottom: 1px solid var(--border);
 }
 .fullscreen-modal .fs-header h2 { margin: 0; font-size: 18px; }
+.fs-header-actions { display: flex; align-items: center; gap: 8px; }
 .fullscreen-modal .fs-body { flex: 1; overflow-y: auto; padding: 24px; max-width: 720px; margin: 0 auto; width: 100%; }
 .fs-close {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
@@ -192,6 +203,9 @@ tr.clickable-row { cursor: pointer; }
 tr.clickable-row:hover { background: #faf8f2; }
 
 .hidden { display: none !important; }
+/* Shown only at mobile widths (opposite of .hidden's always-off) — see the
+   max-width:720px media query further down which flips this to visible. */
+.mobile-only { display: none; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
 .error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
 .help-text { color: var(--text-muted); font-size: 12.5px; margin-top: 6px; }
@@ -284,6 +298,35 @@ tr.clickable-row:hover { background: #faf8f2; }
 .segmented button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .segmented.small button { padding: 5px 13px; font-size: 12.5px; }
 
+.dials-header-controls { display: flex; align-items: center; gap: 10px; }
+
+/* Mobile-only single toggle button standing in for the segmented Current/
+   Archived switch (desktop keeps #statusSwitch — see media query below). */
+.status-toggle-mobile {
+  display: none;
+  border: none; border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 600;
+  background: var(--surface); color: var(--text); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.status-toggle-mobile.is-archived { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); box-shadow: none; }
+
+/* Status-filter "palette" button + its popover of toggleable color dots. */
+.status-filter { position: relative; }
+.status-filter-btn { border: none; background: none; cursor: pointer; padding: 2px; display: flex; align-items: center; justify-content: center; border-radius: 999px; }
+.status-filter-btn:hover { background: var(--gold-soft); }
+.status-filter-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+  display: flex; gap: 8px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 8px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.12);
+}
+.status-filter-dot {
+  width: 22px; height: 22px; border-radius: 999px; border: 2px solid rgba(0,0,0,.1); cursor: pointer; padding: 0; position: relative; flex-shrink: 0;
+}
+.status-filter-dot.is-hidden { opacity: .35; }
+.status-filter-dot.is-hidden::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 999px;
+  background: linear-gradient(to top right, transparent 46%, var(--text) 48%, var(--text) 52%, transparent 54%);
+}
+
 .dials-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .dials-tabbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
 .dials-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -307,7 +350,28 @@ tr.clickable-row:hover { background: #faf8f2; }
 .dial-modal-header-main h2 { margin: 0; font-size: 17px; }
 .dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
 .dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.dial-modal-editrow { display: flex; justify-content: flex-end; min-height: 8px; margin: 8px 0; }
+.dial-modal-editrow { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 8px; margin: 8px 0; }
+
+/* Quick call-status dropdown, left of the edit button in the popup's
+   edit-row. Never colors the popup itself — only the list rows/cards. */
+.dial-status-dropdown { position: relative; }
+.dial-status-btn {
+  width: 32px; height: 32px; border-radius: 999px; border: 2px solid var(--border);
+  cursor: pointer; padding: 0;
+}
+.dial-status-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 10;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 190px; overflow: hidden;
+}
+.dial-status-option {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 12px; border: none; background: none; font-size: 13px; color: var(--text); cursor: pointer;
+}
+.dial-status-option:hover { background: var(--bg); }
+.dial-status-dot {
+  width: 14px; height: 14px; border-radius: 999px; border: 2px solid var(--border); flex-shrink: 0;
+}
 
 /* Prev/Next now live inside the modal box itself (bottom), styled to match
    the rest of the box's buttons rather than as plain text links. */
@@ -335,6 +399,7 @@ tr.clickable-row:hover { background: #faf8f2; }
   /* Top nav is replaced entirely by the fixed bottom tab bar on mobile. */
   .topnav-bar { display: none; }
   .bottom-tabbar { display: flex; }
+  .mobile-only { display: block; }
   .fab { bottom: 86px; }
   .timeline-add-btn { bottom: 136px; }
   .timeline-add-menu { bottom: 192px; }
@@ -357,11 +422,22 @@ tr.clickable-row:hover { background: #faf8f2; }
   .modal-backdrop { padding: 24px 12px; }
   .modal { padding: 18px; }
 
-  /* Dials toolbar / tab bar: let controls wrap onto multiple rows instead of
-     overflowing or squeezing. */
-  .dials-toolbar, .dials-tabbar { gap: 8px; }
+  /* Dials toolbar: tighten the gap under the "Dials" heading slightly. */
+  .page-header { margin-bottom: 10px; }
+  .dials-toolbar { gap: 8px; margin-bottom: 8px; }
   .segmented { width: 100%; justify-content: center; }
-  .dials-tabs { width: 100%; }
+
+  /* Current/Archived: mobile shows the single toggle button instead of the
+     desktop segmented switch. */
+  #statusSwitch { display: none; }
+  .status-toggle-mobile { display: inline-flex; align-items: center; justify-content: center; }
+
+  /* Tabs + the "+" add-tab button become one horizontally-scrollable strip
+     (instead of wrapping to new rows), so you scroll right to reach "+". */
+  .dials-tabbar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .dials-tabbar::-webkit-scrollbar { display: none; }
+  .dials-tabs { flex-wrap: nowrap; }
+  .dial-tab { white-space: nowrap; flex-shrink: 0; }
 
   /* Dial popup nav row (prev/next) gets a little breathing room so both
      buttons are easy to tap with a thumb. */
