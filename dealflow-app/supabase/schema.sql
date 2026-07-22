@@ -357,6 +357,12 @@ create table dials (
   industry text,
   summary text,
   call_notes text,
+  -- Quick-access call outcome, set from the dial popup's status dropdown
+  -- (not part of the edit form) — also used to color-code list rows/cards
+  -- and to drive the header's "hide dials by status" filter.
+  contact_status text not null default 'uncontacted' check (
+    contact_status in ('uncontacted', 'unable_to_contact', 'not_interested', 'no_response', 'callback_interested', 'intro_call_scheduled')
+  ),
   created_by uuid references profiles(id) default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
