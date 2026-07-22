@@ -384,7 +384,13 @@ tr.clickable-row:hover { background: var(--bg); }
    during a long-press drag. */
 .dial-tab-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
 .dial-tab.dragging { opacity: .55; box-shadow: 0 2px 10px rgba(0,0,0,.18); position: relative; z-index: 30; }
-.dial-tab-archive-menu { position: absolute; top: 100%; left: 0; margin-top: 6px; z-index: 45; }
+/* position:fixed + JS-computed left/top (see js/dials.js) rather than
+   absolute-positioned inside .dial-tab-wrap — that wrap lives inside the
+   horizontally-scrolling .dials-tabbar, whose overflow-x:auto forces its
+   overflow-y to auto too, which would silently clip an absolutely
+   positioned popup that pokes out below it. Fixed positioning escapes that
+   entirely. */
+.dial-tab-archive-menu { position: fixed; z-index: 60; }
 .dial-tab-archive-btn {
   padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
   font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
