@@ -186,7 +186,10 @@ function rfLocation(client) {
 // but location has moved down here (above Email) instead of being in that
 // subtitle too.
 function buildClientViewHTML(client) {
-  const founded = client.founded_year ? `${monthName(client.founded_month)} ${client.founded_year}` : "";
+  // founded_month can now be blank while founded_year is set (see
+  // clientForm.js's separate month/year selects) — filter(Boolean) avoids a
+  // stray leading space in that case instead of assuming both are present.
+  const founded = client.founded_year ? [monthName(client.founded_month), client.founded_year].filter(Boolean).join(" ") : "";
   return `
     ${rfLocation(client)}
     ${rfContact("Email", client.email, "email")}

@@ -39,8 +39,20 @@ export function defaultClient(profile, overrides) {
   );
 }
 
+// Used only for the two "Founded" <select>s below — separate from month/year
+// selects so a year can be picked without being forced to also pick a month
+// (see buildEditableSections). Index 0 is left blank on purpose (months are
+// 1-12), matching how founded_month is stored in the database.
+const FOUNDED_MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function foundedYearOptions(selectedYear) {
+  const currentYear = new Date().getFullYear();
+  const years = [];
+  for (let y = currentYear; y >= 1900; y--) years.push(y);
+  return years.map((y) => `<option value="${y}" ${selectedYear === y ? "selected" : ""}>${y}</option>`).join("");
+}
+
 export function buildEditableSections(client) {
-  const founded = client.founded_year ? `${client.founded_year}-${String(client.founded_month || 1).padStart(2, "0")}` : "";
   return `
     <div class="accordion-section open" data-section="personal">
       <div class="accordion-header"><span>Personal information</span><span class="chevron">&#9662;</span></div>
@@ -102,8 +114,22 @@ export function buildEditableSections(client) {
             <input id="f_employees" type="number" step="1" min="0" value="${client.employee_count ?? ""}" />
           </div>
         </div>
-        <label for="f_founded">Founded (year / month)</label>
-        <input id="f_founded" type="month" value="${founded}" />
+        <div class="form-row">
+          <div>
+            <label for="f_founded_month">Founded month</label>
+            <select id="f_founded_month">
+              <option value="">—</option>
+              ${FOUNDED_MONTH_NAMES.map((name, i) => (i === 0 ? "" : `<option value="${i}" ${client.founded_month === i ? "selected" : ""}>${name}</option>`)).join("")}
+            </select>
+          </div>
+          <div>
+            <label for="f_founded_year">Founded year</label>
+            <select id="f_founded_year">
+              <option value="">—</option>
+              ${foundedYearOptions(client.founded_year)}
+            </select>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -152,15 +178,13 @@ export function collectFormData(container) {
   const emp = container.querySelector("#f_employees").value;
   data.annual_revenue = rev === "" ? null : Number(rev);
   data.employee_count = emp === "" ? null : Number(emp);
-  const founded = container.querySelector("#f_founded").value;
-  if (founded) {
-    const [y, m] = founded.split("-");
-    data.founded_year = Number(y);
-    data.founded_month = Number(m);
-  } else {
-    data.founded_year = null;
-    data.founded_month = null;
-  }
+  // Month and year are independent selects now (see buildEditableSections) —
+  // a year can be saved on its own with no month chosen, unlike the old
+  // single <input type="month"> which forced both or neither.
+  const foundedMonth = container.querySelector("#f_founded_month").value;
+  const foundedYear = container.querySelector("#f_founded_year").value;
+  data.founded_year = foundedYear ? Number(foundedYear) : null;
+  data.founded_month = foundedMonth ? Number(foundedMonth) : null;
   return data;
 }
 

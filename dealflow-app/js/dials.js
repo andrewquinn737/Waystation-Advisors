@@ -22,6 +22,12 @@ let currentListId = null;
 let currentDialIndex = -1;
 let currentDial = null;
 let dialMode = "view"; // 'view' | 'edit' | 'create'
+// Snapshot of whichever dials were actually on screen (after the Categories
+// filter) at the moment the popup was opened — prev/next/swipe/arrow-key
+// navigation moves through THIS list, not the full `dials` array, so if
+// only one category is displayed you only ever swipe between those, not
+// every dial in the tab (see openDialModal/goToDial).
+let currentDialSet = [];
 
 // Quick call-outcome status, set from a dropdown in the dial popup (not part
 // of the edit form). Colors are light/mild tints matching the app's existing
@@ -270,17 +276,38 @@ function buildCallNotesLiveHTML(dial) {
     </div>`;
 }
 
+// Saves whatever is currently typed in the call-notes textarea (if it's
+// present, i.e. we're on the view screen, and if it actually changed) right
+// now, rather than waiting for a "blur" event to get around to firing.
+// Called from every place that can take the user away from the notes field —
+// blur itself, swiping/prev/next/arrow-keying to a different dial, changing
+// the category, toggling "Did call today", opening edit mode, and closing the
+// popup — so notes are never silently dropped if one of those happens before
+// blur would have fired on its own, and so a status-button click can no
+// longer race a still-in-flight notes save into overwriting the just-typed
+// text with stale data on the next render (see goToDial/updateDialStatus/
+// toggleDidCallToday, all of which now `await` this before doing anything
+// else).
+async function flushCallNotes() {
+  const notesEl = document.getElementById("d_call_notes_live");
+  if (!notesEl || !currentDial) return;
+  const val = notesEl.value.trim() || null;
+  if (val === (currentDial.call_notes || null)) return;
+  const { error } = await supabase.from("dials").update({ call_notes: val }).eq("id", currentDial.id);
+  if (error) {
+    showError(els.dialModalError, error);
+    return;
+  }
+  currentDial.call_notes = val;
+  const idx = dials.findIndex((d) => d.id === currentDial.id);
+  if (idx !== -1) dials[idx].call_notes = val;
+}
+
 function wireCallNotesAutosave() {
   const notesEl = document.getElementById("d_call_notes_live");
   if (!notesEl || !currentDial) return;
   notesEl.addEventListener("blur", async () => {
-    const val = notesEl.value.trim() || null;
-    if (val === (currentDial.call_notes || null)) return;
-    const { error } = await supabase.from("dials").update({ call_notes: val }).eq("id", currentDial.id);
-    if (error) return showError(els.dialModalError, error);
-    currentDial.call_notes = val;
-    const idx = dials.findIndex((d) => d.id === currentDial.id);
-    if (idx !== -1) dials[idx].call_notes = val;
+    await flushCallNotes();
     const msg = document.getElementById("callNotesSavedMsg");
     if (msg) {
       msg.classList.remove("hidden");
@@ -725,6 +752,14 @@ async function loadDials() {
   renderDialsTable();
 }
 
+// Whichever dials in the current tab pass the Categories filter — i.e.
+// exactly what's actually on screen right now. Used both to render the list
+// AND (see openDialModal/goToDial) to scope prev/next/swipe/arrow-key
+// navigation to only those dials, instead of every dial in the tab.
+function visibleDials() {
+  return dials.filter((d) => !hiddenStatuses.has(d.contact_status || "uncontacted"));
+}
+
 // Updates the small "X prospects displayed" text next to the Dials heading —
 // always reflects however many dials are actually visible right now in the
 // selected tab, after the Categories filter (hiddenStatuses) is applied.
@@ -744,9 +779,12 @@ function renderDialsTable() {
     updateProspectCount(0);
     return;
   }
-  // Keep each dial's original index (used for openDialModal/prev-next
-  // navigation) even though hidden-status dials are filtered out of view.
-  const visible = dials.map((d, i) => ({ d, i })).filter(({ d }) => !hiddenStatuses.has(d.contact_status || "uncontacted"));
+  // data-index here is the dial's position within this filtered `visible`
+  // list itself (not its position in the full `dials` array) — openDialModal
+  // takes that same index and snapshots this same filtered list as
+  // currentDialSet, so prev/next/swipe/arrow-key navigation only ever moves
+  // between whatever's actually displayed here.
+  const visible = visibleDials();
   updateProspectCount(visible.length);
 
   if (visible.length === 0) {
@@ -768,7 +806,7 @@ function renderDialsTable() {
       <tbody>
         ${visible
           .map(
-            ({ d, i }) => `
+            (d, i) => `
           <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
             <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>
@@ -787,7 +825,7 @@ function renderDialsTable() {
     <div class="mobile-list">
       ${visible
         .map(
-          ({ d, i }) => `
+          (d, i) => `
         <div class="mobile-card clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
           <div class="mc-main">
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
@@ -939,7 +977,12 @@ function renderDialModal() {
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
   if (isViewingExisting) {
     document.getElementById("scheduleIntroCallFromDialBtn").addEventListener("click", () => handleScheduleIntroCallFromDial(currentDial));
-    document.getElementById("dialEditBtn").addEventListener("click", () => {
+    document.getElementById("dialEditBtn").addEventListener("click", async () => {
+      // Flush any just-typed call notes before the view-mode notes textarea
+      // gets torn down for the edit form — otherwise a race between this
+      // render and an in-flight blur save could show/save stale notes (see
+      // flushCallNotes).
+      await flushCallNotes();
       dialMode = "edit";
       renderDialModal();
     });
@@ -974,11 +1017,14 @@ function renderDialModal() {
   }
 
   // Prev/Next now render inside the modal box itself, at the bottom (only
-  // relevant in display mode).
-  const showNav = !isCreate && dialMode === "view" && dials.length > 1;
+  // relevant in display mode). Bounds are based on currentDialSet — the
+  // filtered/displayed list snapshotted when the popup opened — not the full
+  // `dials` array, so these buttons (and swipe/arrow-keys, see goToDial)
+  // only ever move between whatever's actually on screen.
+  const showNav = !isCreate && dialMode === "view" && currentDialSet.length > 1;
   els.dialNavRow.classList.toggle("hidden", !showNav);
   els.dialPrevBtn.disabled = currentDialIndex <= 0;
-  els.dialNextBtn.disabled = currentDialIndex >= dials.length - 1;
+  els.dialNextBtn.disabled = currentDialIndex >= currentDialSet.length - 1;
 
   if (isCreate) {
     document.getElementById("dialSaveBtn").addEventListener("click", handleCreateDialSave);
@@ -1022,6 +1068,17 @@ async function handleEditDialSave() {
 // longer affects the weekly call count — that's now the separate "Did call
 // today" toggle below it (see toggleDidCallToday).
 async function updateDialStatus(newStatus) {
+  // Flush any pending call-notes edit FIRST and wait for it to finish before
+  // touching contact_status or re-rendering — without this await, the notes
+  // save (started on the textarea's blur when this button was clicked) and
+  // this status update were two independent in-flight requests; whichever
+  // one's re-render happened to land first could rebuild the notes textarea
+  // from stale (pre-edit) data, visually wiping out whatever was just typed
+  // even though it had actually already been saved to the database. This is
+  // also what caused the occasional "type error" on first press — updating
+  // dial.contact_status while currentDial briefly held stale/partial data
+  // from the race.
+  await flushCallNotes();
   const { error } = await supabase.from("dials").update({ contact_status: newStatus }).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   currentDial.contact_status = newStatus;
@@ -1040,6 +1097,9 @@ async function updateDialStatus(newStatus) {
 // (dial.called_today_date === todayDateStr()) — no cron job needed, and it
 // never touches any other day's already-logged calls.
 async function toggleDidCallToday() {
+  // Same reasoning as updateDialStatus — flush any pending notes edit before
+  // this re-renders the popup.
+  await flushCallNotes();
   const today = todayDateStr();
   const isCalledToday = currentDial.called_today_date === today;
 
@@ -1076,15 +1136,22 @@ function handleDeleteDial() {
 }
 
 function openDialModal(index) {
+  // Snapshot whatever's currently displayed (post-Categories-filter) — index
+  // is this dial's position within THAT list (see renderDialsTable), and
+  // prev/next/swipe/arrow-keys navigate within this same snapshot rather than
+  // the full `dials` array (see goToDial).
+  currentDialSet = visibleDials();
   currentDialIndex = index;
-  currentDial = dials[index];
+  currentDial = currentDialSet[index];
   dialMode = "view";
   els.dialModalBackdrop.classList.remove("hidden");
   lockPageScroll();
   renderDialModal();
 }
 
-function closeDialModal() {
+async function closeDialModal() {
+  // Save any notes typed but not yet blurred before the popup disappears.
+  await flushCallNotes();
   els.dialModalBackdrop.classList.add("hidden");
   unlockPageScroll();
 }
@@ -1101,6 +1168,7 @@ function openCreateDialModal() {
   dialMode = "create";
   currentDial = null;
   currentDialIndex = -1;
+  currentDialSet = [];
   els.dialModalBackdrop.classList.remove("hidden");
   lockPageScroll();
   renderDialModal();
@@ -1113,13 +1181,52 @@ function openCreateDialModal() {
 // Prev/next navigation — swipe, on-screen arrows, and keyboard arrows
 // ---------------------------------------------------------------------------
 
-function goToDial(delta) {
+// How long the slide-out/slide-in halves of the transition take — must match
+// the `transition` duration on .dial-modal in css/style.css, since the JS
+// waits this long (via setTimeout) before swapping content partway through.
+const DIAL_SWIPE_MS = 180;
+
+async function goToDial(delta) {
   if (dialMode !== "view") return; // don't discard unsaved edits by navigating away
+  // currentDialSet is the filtered/displayed list snapshotted when the popup
+  // opened (see openDialModal) — bounds-checking against THIS instead of the
+  // full `dials` array is what keeps swipe/prev/next/arrow-keys scoped to
+  // only the dials actually on screen (e.g. just one Categories filter).
   const newIndex = currentDialIndex + delta;
-  if (newIndex < 0 || newIndex >= dials.length) return;
+  if (newIndex < 0 || newIndex >= currentDialSet.length) return;
+
+  // Save any notes typed but not yet blurred BEFORE swapping to the next
+  // dial, and wait for it to finish before rendering — otherwise the render
+  // below could land while that save is still in flight and show/overwrite
+  // stale data for whichever dial is being left (see flushCallNotes).
+  await flushCallNotes();
+
+  const modalBox = els.dialModalBackdrop.querySelector(".dial-modal");
+
+  // Slide + fade the current content out in the direction being swiped away
+  // from, then swap in the new dial, then slide + fade it in from the
+  // opposite side — an actual swipe transition instead of an instant snap
+  // (see .dial-modal's transition in css/style.css).
+  if (modalBox) {
+    modalBox.style.transform = delta > 0 ? "translateX(-28px)" : "translateX(28px)";
+    modalBox.style.opacity = "0";
+    await new Promise((resolve) => setTimeout(resolve, DIAL_SWIPE_MS));
+  }
+
   currentDialIndex = newIndex;
-  currentDial = dials[newIndex];
+  currentDial = currentDialSet[newIndex];
   renderDialModal();
+
+  if (modalBox) {
+    // Jump (no transition) to just off the opposite side, then release back
+    // to centered/opaque — that release is what animates the "slide in".
+    modalBox.classList.add("dial-modal-jump");
+    modalBox.style.transform = delta > 0 ? "translateX(28px)" : "translateX(-28px)";
+    void modalBox.offsetWidth; // force reflow so the jump above isn't itself animated
+    modalBox.classList.remove("dial-modal-jump");
+    modalBox.style.transform = "";
+    modalBox.style.opacity = "";
+  }
 }
 
 els.dialPrevBtn.addEventListener("click", () => goToDial(-1));
