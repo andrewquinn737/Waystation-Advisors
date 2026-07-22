@@ -39,8 +39,60 @@ function statusInfo(value) {
 }
 
 // Which statuses are currently hidden from every list/tab (toggled via the
-// palette filter button). In-memory only — resets on page reload.
+// palette filter button).
 const hiddenStatuses = new Set();
+
+// ---------------------------------------------------------------------------
+// Persisted Dials view state (selected tab + Categories filter) — saved to
+// localStorage so navigating away to Profile/Clients (a full page load, so
+// every module-level variable here resets) or closing the app entirely and
+// coming back still shows the same tab and category filter instead of
+// silently resetting to defaults.
+// ---------------------------------------------------------------------------
+const DIALS_STORAGE_KEYS = {
+  listId: "waystation_dials_list_id",
+  status: "waystation_dials_status",
+  hiddenStatuses: "waystation_dials_hidden_statuses",
+};
+
+function loadPersistedDialsState() {
+  try {
+    const savedListId = localStorage.getItem(DIALS_STORAGE_KEYS.listId);
+    if (savedListId) currentListId = savedListId;
+    const savedStatus = localStorage.getItem(DIALS_STORAGE_KEYS.status);
+    if (savedStatus === "current" || savedStatus === "archived") currentStatus = savedStatus;
+    const savedHidden = localStorage.getItem(DIALS_STORAGE_KEYS.hiddenStatuses);
+    if (savedHidden) {
+      const arr = JSON.parse(savedHidden);
+      if (Array.isArray(arr)) arr.forEach((v) => hiddenStatuses.add(v));
+    }
+  } catch {
+    // Storage may be unavailable (private browsing, etc.) or contain
+    // malformed data — just fall back to defaults rather than throwing.
+  }
+}
+function persistCurrentListId() {
+  try {
+    if (currentListId) localStorage.setItem(DIALS_STORAGE_KEYS.listId, currentListId);
+  } catch {
+    // ignore
+  }
+}
+function persistStatus() {
+  try {
+    localStorage.setItem(DIALS_STORAGE_KEYS.status, currentStatus);
+  } catch {
+    // ignore
+  }
+}
+function persistHiddenStatuses() {
+  try {
+    localStorage.setItem(DIALS_STORAGE_KEYS.hiddenStatuses, JSON.stringify([...hiddenStatuses]));
+  } catch {
+    // ignore
+  }
+}
+loadPersistedDialsState();
 
 const els = {
   errorBox: document.getElementById("errorBox"),
@@ -52,6 +104,7 @@ const els = {
   menuStatusBtn: document.getElementById("menuStatusBtn"),
   menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
   categoriesSubmenu: document.getElementById("categoriesSubmenu"),
+  dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
@@ -238,6 +291,11 @@ function renderTabs() {
   if (!currentListId || !filtered.some((l) => l.id === currentListId)) {
     currentListId = filtered.length ? filtered[0].id : null;
   }
+  // Persisted here (rather than at every individual call site that can
+  // change currentListId — tab clicks, new-list creation, tab deletion's
+  // fallback, the initial restore-from-storage on load) so every path that
+  // lands on a valid tab id ends up saved to localStorage automatically.
+  persistCurrentListId();
   if (archiveMenuTabId && !filtered.some((l) => l.id === archiveMenuTabId)) {
     archiveMenuTabId = null;
   }
@@ -310,13 +368,19 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Mobile-only tab interactions:
-//  - Tap the already-selected tab -> reveal an Archive/Unarchive option below it.
-//  - Long-press (hold, not tap) the already-selected tab -> drag it left/right
-//    to reorder among the other tabs (can never end up right of the "+" button,
-//    since that button lives outside the #dialTabs list being reordered).
-// Holding never shows the archive/unarchive option, and a plain tap on the
-// active tab never starts a drag.
+// Tab interactions:
+//  - Tap the already-selected tab (mobile only) -> reveal an Archive/Unarchive
+//    option below it.
+//  - Mobile: long-press (hold, not tap) the already-selected tab -> drag it
+//    left/right to reorder among the other tabs. Has to be the already-active
+//    tab so a hold can never be confused with the tap-to-archive gesture
+//    above (can never end up right of the "+" button, since that button
+//    lives outside the #dialTabs list being reordered).
+//  - Desktop: click-and-drag ANY tab with the mouse to reorder it — there's
+//    no tap-to-archive gesture on desktop to disambiguate from, so no
+//    pre-selection or hold delay is needed; crossing a small movement
+//    threshold starts the drag immediately, same as dragging browser tabs.
+// A plain tap/click never starts a drag on its own.
 // ---------------------------------------------------------------------------
 
 // Device-type check (not viewport width — see js/deviceDetect logic inlined
@@ -337,12 +401,43 @@ const tabDragState = {
   startX: 0,
   suppressClick: false,
   timer: null,
+  mode: null, // "touch" | "mouse"
 };
 
 function cancelLongPressTimer() {
   if (tabDragState.timer) {
     clearTimeout(tabDragState.timer);
     tabDragState.timer = null;
+  }
+}
+
+// Moves `wrap` to whatever slot in #dialTabs its dragged tab should currently
+// occupy, based on the pointer's raw clientX against every OTHER tab's
+// midpoint — recomputed fresh from each sibling's real (untransformed)
+// position on every call. This is deliberately stateless: it never depends on
+// a running delta/anchor that has to stay in sync across events, so a single
+// fast drag lands in the correct slot even if it skips past several tabs
+// between pointermove events, and the tab always ends up exactly where the
+// pointer is released. (An earlier version tracked a relative delta from a
+// reset anchor and only checked one neighboring tab per event, which could
+// advance at most one slot per pointermove — on a quick drag that covers
+// multiple tabs' worth of distance between event callbacks, that meant the
+// reorder fell behind the finger and the tab didn't end up where it was
+// dropped.)
+function reorderTabToPointer(wrap, clientX) {
+  const others = [...els.dialTabs.querySelectorAll(".dial-tab-wrap")].filter((w) => w !== wrap);
+  let target = null;
+  for (const sib of others) {
+    const r = sib.getBoundingClientRect();
+    if (clientX < r.left + r.width / 2) {
+      target = sib;
+      break;
+    }
+  }
+  if (target) {
+    if (wrap.nextElementSibling !== target) els.dialTabs.insertBefore(wrap, target);
+  } else if (els.dialTabs.lastElementChild !== wrap) {
+    els.dialTabs.appendChild(wrap);
   }
 }
 
@@ -371,14 +466,23 @@ function wireTabInteractions() {
     });
 
     btn.addEventListener("pointerdown", (e) => {
-      if (!isMobileViewport() || id !== currentListId || e.pointerType === "mouse") return;
+      const isMouse = e.pointerType === "mouse";
+      // Touch: only the already-active tab can be picked up (see the big
+      // comment above this section for why). Mouse: any tab can be grabbed
+      // directly.
+      if (!isMouse && (!isMobileViewport() || id !== currentListId)) return;
+
       tabDragState.tabId = id;
       tabDragState.startX = e.clientX;
       tabDragState.active = false;
+      tabDragState.mode = isMouse ? "mouse" : "touch";
       cancelLongPressTimer();
-      // Immediate subtle feedback that a hold is being registered, so the
-      // long-press doesn't feel like nothing is happening until it suddenly
-      // starts dragging.
+
+      if (isMouse) return; // starts on movement threshold instead — see pointermove
+
+      // Mobile: immediate subtle feedback that a hold is being registered,
+      // so the long-press doesn't feel like nothing is happening until it
+      // suddenly starts dragging.
       btn.classList.add("pressing");
       tabDragState.timer = setTimeout(() => {
         tabDragState.active = true;
@@ -396,37 +500,31 @@ function wireTabInteractions() {
     btn.addEventListener("pointermove", (e) => {
       if (tabDragState.tabId !== id) return;
       const dx = e.clientX - tabDragState.startX;
+
       if (!tabDragState.active) {
-        if (Math.abs(dx) > DRAG_CANCEL_PX) {
+        if (Math.abs(dx) <= DRAG_CANCEL_PX) return;
+        if (tabDragState.mode === "mouse") {
+          // Desktop: crossing the threshold starts the drag immediately —
+          // no hold delay needed since there's no competing tap gesture.
+          tabDragState.active = true;
+          btn.classList.add("dragging");
+          try {
+            btn.setPointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
+        } else {
+          // Mobile: moving too far before the long-press timer fires cancels
+          // the hold — this was likely just scrolling the tab bar, not an
+          // attempt to drag.
           cancelLongPressTimer();
           btn.classList.remove("pressing");
+          return;
         }
-        return;
       }
+
       e.preventDefault();
-      btn.style.transform = `translateX(${dx}px)`;
-      const wrap = btn.closest(".dial-tab-wrap");
-      const siblings = [...els.dialTabs.querySelectorAll(".dial-tab-wrap")];
-      const myRect = wrap.getBoundingClientRect();
-      const myCenter = myRect.left + myRect.width / 2 + dx;
-      for (const sib of siblings) {
-        if (sib === wrap) continue;
-        const r = sib.getBoundingClientRect();
-        const center = r.left + r.width / 2;
-        const sibIsAfter = !!(wrap.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING);
-        if (dx > 0 && sibIsAfter && myCenter > center) {
-          els.dialTabs.insertBefore(wrap, sib.nextSibling);
-          tabDragState.startX = e.clientX;
-          btn.style.transform = "translateX(0)";
-          break;
-        }
-        if (dx < 0 && !sibIsAfter && myCenter < center) {
-          els.dialTabs.insertBefore(wrap, sib);
-          tabDragState.startX = e.clientX;
-          btn.style.transform = "translateX(0)";
-          break;
-        }
-      }
+      reorderTabToPointer(btn.closest(".dial-tab-wrap"), e.clientX);
     });
 
     const endDrag = async () => {
@@ -435,12 +533,12 @@ function wireTabInteractions() {
       if (tabDragState.tabId !== id) return;
       if (tabDragState.active) {
         btn.classList.remove("dragging");
-        btn.style.transform = "";
         tabDragState.suppressClick = true;
         await persistTabOrder();
       }
       tabDragState.active = false;
       tabDragState.tabId = null;
+      tabDragState.mode = null;
     };
     btn.addEventListener("pointerup", endDrag);
     btn.addEventListener("pointercancel", endDrag);
@@ -535,8 +633,16 @@ function setStatus(status) {
   els.menuStatusBtn.textContent = status === "current" ? "Current" : "Archived";
   els.menuStatusBtn.dataset.status = status;
   currentListId = null;
+  persistStatus();
   renderTabs();
 }
+
+// Reflect whatever status was restored from localStorage (see
+// loadPersistedDialsState()) in the menu button's label right away, without
+// going through setStatus() itself — that also nulls out currentListId,
+// which would throw away the just-restored tab selection.
+els.menuStatusBtn.textContent = currentStatus === "current" ? "Current" : "Archived";
+els.menuStatusBtn.dataset.status = currentStatus;
 
 els.menuStatusBtn.addEventListener("click", () => {
   setStatus(currentStatus === "current" ? "archived" : "current");
@@ -580,18 +686,29 @@ async function loadDials() {
   renderDialsTable();
 }
 
+// Updates the small "X prospects displayed" text next to the Dials heading —
+// always reflects however many dials are actually visible right now in the
+// selected tab, after the Categories filter (hiddenStatuses) is applied.
+function updateProspectCount(count) {
+  if (!els.dialsProspectCount) return;
+  els.dialsProspectCount.textContent = `${count} prospect${count === 1 ? "" : "s"} displayed`;
+}
+
 function renderDialsTable() {
   if (!currentListId) {
     els.dialsTableWrap.innerHTML = `<div class="empty-state">No lists yet for this category — tap + next to the tabs to create one.</div>`;
+    updateProspectCount(0);
     return;
   }
   if (dials.length === 0) {
     els.dialsTableWrap.innerHTML = `<div class="empty-state">No dials in this list yet — use the arrow next to "Dials" and tap "Add new".</div>`;
+    updateProspectCount(0);
     return;
   }
   // Keep each dial's original index (used for openDialModal/prev-next
   // navigation) even though hidden-status dials are filtered out of view.
   const visible = dials.map((d, i) => ({ d, i })).filter(({ d }) => !hiddenStatuses.has(d.contact_status || "uncontacted"));
+  updateProspectCount(visible.length);
 
   if (visible.length === 0) {
     els.dialsTableWrap.innerHTML = `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
@@ -738,7 +855,7 @@ function renderDialModal() {
         ${subtitle ? `<div class="dial-modal-subtitle">${escapeHtml(subtitle)}</div>` : ""}
       </div>
       <div class="dial-modal-header-actions">
-        ${isViewingExisting ? `<button type="button" class="btn yellow small" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>` : ""}
+        ${isViewingExisting ? `<button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>` : ""}
         <button type="button" class="fs-close" id="dialModalClose">&times;</button>
       </div>
     </div>
@@ -906,16 +1023,43 @@ function handleDeleteDial() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Body scroll lock — while the dial popup is open, only the popup's own
+// content should scroll; the dials list behind it must stay put. Toggling
+// overflow:hidden on <body> alone doesn't reliably stop scrolling on iOS
+// Safari (it can still rubber-band the page behind a fixed-position overlay),
+// so this uses the more robust technique of pinning <body> to position:fixed
+// at its current scroll offset while the modal is open, then restoring both
+// the normal positioning and the scroll offset on close.
+// ---------------------------------------------------------------------------
+let savedScrollY = 0;
+function lockBodyScroll() {
+  savedScrollY = window.scrollY || window.pageYOffset || 0;
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${savedScrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+}
+function unlockBodyScroll() {
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  window.scrollTo(0, savedScrollY);
+}
+
 function openDialModal(index) {
   currentDialIndex = index;
   currentDial = dials[index];
   dialMode = "view";
   els.dialModalBackdrop.classList.remove("hidden");
+  lockBodyScroll();
   renderDialModal();
 }
 
 function closeDialModal() {
   els.dialModalBackdrop.classList.add("hidden");
+  unlockBodyScroll();
 }
 
 // Opens the "New dial" popup — used by the "Add new" item in the page-header
@@ -931,6 +1075,7 @@ function openCreateDialModal() {
   currentDial = null;
   currentDialIndex = -1;
   els.dialModalBackdrop.classList.remove("hidden");
+  lockBodyScroll();
   renderDialModal();
 }
 // Note: the close (x) button is inside #dialModalHeader, which is rebuilt on
@@ -1082,6 +1227,7 @@ function renderCategoriesSubmenu() {
       const v = btn.dataset.value;
       if (hiddenStatuses.has(v)) hiddenStatuses.delete(v);
       else hiddenStatuses.add(v);
+      persistHiddenStatuses();
       renderCategoriesSubmenu();
       renderDialsTable();
     });
