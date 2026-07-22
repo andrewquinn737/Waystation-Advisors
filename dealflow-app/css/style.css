@@ -377,6 +377,10 @@ tr.clickable-row { cursor: pointer; }
 .mobile-only { display: none; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
 .error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+/* Plain inline red text (no background box) shown right under a single
+   field — used for the duplicate-email message on Add account instead of
+   the boxed .error-msg banner. */
+.field-error-text { color: var(--danger); font-size: 12.5px; margin: 4px 0 8px; }
 .help-text { color: var(--text-muted); font-size: 12.5px; margin-top: 6px; }
 .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--gold); font-weight: 700; margin: 28px 0 10px; }
 .toolbar { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; }
@@ -620,6 +624,11 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 .dial-did-call-btn {
   height: 30px; border-radius: 7px; border: 2px solid var(--border); background: var(--surface);
   color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0 12px; white-space: nowrap;
+  /* min-width matches the button's previous rendered width (measured live)
+     from when its label was "Did call today" — shortening the label to
+     "Called today" would otherwise shrink the button since nothing else
+     forces its width. */
+  min-width: 129px;
 }
 @media (hover: hover) { .dial-did-call-btn:hover { background: var(--gold-soft); } }
 .dial-did-call-btn.active { background: var(--success); border-color: var(--success); color: #fff; }
@@ -819,6 +828,23 @@ html.is-mobile-device .mobile-list { display: block; }
 .team-member-detail .readonly-field:first-child { border-top: none; }
 .copy-toast { font-size: 11px; font-weight: 600; color: var(--success); }
 
+/* Wraps the (admin-only) key icon + instant-contact icons together so they
+   sit adjacent to each other as ONE flex child of .team-member-card (which
+   is justify-content: space-between) — see memberCardHTML/toggleMemberDetail
+   in js/profile.js. */
+.mc-right-icons { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Admin-only "reveal temp password" row, appears directly below a member
+   card when its key icon is clicked (see toggleTempPasswordReveal). Same
+   look/indentation family as .team-member-detail. */
+.temp-pw-reveal {
+  background: var(--bg); border: 1px solid var(--border); border-top: none;
+  border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
+  margin-top: -1px; padding: 8px 14px; display: flex; align-items: center; gap: 8px; font-size: 13px;
+}
+.temp-pw-label { color: var(--text-muted); }
+.temp-pw-value { font-weight: 600; font-family: monospace; letter-spacing: 0.02em; }
+
 /* ---- Admin/Teams management (js/profile.js) ---- */
 
 /* + / edit icons next to the Teams popup's X — admin-only, toggled via
@@ -838,6 +864,11 @@ html.is-mobile-device .mobile-list { display: block; }
    left, trash/chevron grouped on the right so justify-content:space-between
    on .accordion-header still only sees two flex children. */
 .team-group-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Member count next to the group name — was previously reusing .help-text,
+   whose margin-top:6px (meant for that class's usual block-level use
+   elsewhere) pushed it visibly below the name text instead of sitting
+   centered on the same line. */
+.team-group-count { color: var(--text-muted); font-size: 12.5px; line-height: 1; }
 .accordion-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .team-group-name.renamable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .team-trash-btn {
@@ -853,7 +884,12 @@ html.is-mobile-device .mobile-list { display: block; }
 .mc-sub-wrap { position: relative; display: inline-block; }
 .mc-sub.position-toggle { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .position-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  /* position: fixed (not absolute) so this escapes .accordion-section's
+     overflow: hidden clipping — an absolutely-positioned version was getting
+     cut off, hiding the "Admin" option. Left/top are set inline via JS
+     (see togglePositionMenu in js/profile.js), same escape-the-clip pattern
+     already used for the dial categories submenu and the Teams "+" menu. */
+  position: fixed; z-index: 20;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 100px; overflow: hidden;
 }
