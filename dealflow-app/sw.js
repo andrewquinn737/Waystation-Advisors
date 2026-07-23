@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v2";
+const CACHE = "waystation-shell-v3";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/finance.html", "/css/style.css",
@@ -35,8 +35,15 @@ self.addEventListener("fetch", (event) => {
   // (Supabase API, jsdelivr CDN) goes straight to the network untouched.
   if (url.origin !== self.location.origin || req.method !== "GET") return;
 
+  // { cache: "no-store" } forces this fetch to skip the browser's own HTTP
+  // disk cache and always hit the network — without it, a plain fetch(req)
+  // can be silently satisfied out of HTTP cache (depending on Vercel's
+  // response cache-control headers) even though this handler LOOKS like
+  // network-first. That's exactly what let real users keep running an old
+  // cached copy of dials.js for hours after a fix had already shipped and
+  // was confirmed live server-side — this closes that gap for good.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: "no-store" })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((cache) => cache.put(req, copy));
