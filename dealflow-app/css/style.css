@@ -471,7 +471,7 @@ tr.clickable-row { cursor: pointer; }
 .count-badge { color: var(--text-muted); font-size: 13px; }
 
 /* ---- Popups need to sit above the full-screen client modal ---- */
-#requiredPopup, #confirmDeleteModal, #introCallPopup,
+#requiredPopup, #confirmDeleteModal, #introCallPopup, #eventDateModal,
 #addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
