@@ -1283,8 +1283,15 @@ function renderDialsTable() {
   els.dialsTableWrap.querySelectorAll("[data-index]").forEach((row) => {
     const idx = Number(row.dataset.index);
     const d = visible[idx];
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (e) => {
       if (selectMode) {
+        // toggleDialSelection() re-renders the whole list, which detaches
+        // this row/its children from the document — if this click were
+        // allowed to keep bubbling after that, the document-level "tap
+        // outside exits select mode" listener would see e.target as no
+        // longer inside els.dialsTableWrap (it's now an orphaned node) and
+        // incorrectly exit select mode on every single selection tap.
+        e.stopPropagation();
         toggleDialSelection(d.id);
         return;
       }
