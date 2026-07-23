@@ -914,3 +914,109 @@ create policy "dial_lists_select_own" on dial_lists
 drop policy if exists "dials_select_own" on dials;
 create policy "dials_select_own" on dials
   for select using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- ADMIN-ONLY "ACCOUNTS VISIBLE" + "UPCOMING EVENTS" ON PROFILE
+-- Profile's settings gear now shows the same shared Sellers/Buyers +
+-- Accounts visible controls as Clients/Dials (see js/accountsVisible.js), and
+-- uses the selected account(s) to show another account's (or several
+-- accounts' summed) outreach/intro-call numbers and upcoming events — see
+-- resolveSelectedAccounts()/loadCallsChart()/loadIntroCallsChart()/
+-- loadUpcomingEvents() in js/profile.js. That requires an admin's session to
+-- actually be able to fetch other accounts' client_events and
+-- intro_call_log rows in the first place, which neither policy allowed yet
+-- (unlike clients/dials/dial_lists above). Widening SELECT only here, same
+-- pattern as everywhere else in this file: UPDATE/DELETE on client_events
+-- stay strictly own-only (client_events_update_own, client_events_delete_lead_only)
+-- so an admin still can't edit/delete another account's Timeline entries just
+-- by viewing their upcoming events.
+-- ============================================================================
+drop policy if exists "client_events_select_own" on client_events;
+create policy "client_events_select_own" on client_events
+  for select using (
+    exists (select 1 from clients c where c.id = client_events.client_id and (c.created_by = auth.uid() or is_admin()))
+  );
+
+drop policy if exists "intro_call_log_select_own" on intro_call_log;
+create policy "intro_call_log_select_own" on intro_call_log
+  for select using (user_id = auth.uid() or is_admin());
+
+-- ============================================================================
+-- TIMELINE REWORK: MEETING / CONTRACT ADVANCEMENT / TASK
+-- Timeline's "+" menu is now a 2-level picker (see js/clients.js) —
+-- Meeting/Contract advancement/Task at the top, then a specific sub-type.
+-- Two new Timeline-only event_type values are introduced here with NO schema
+-- change needed: event_type has always been plain `text not null` with no
+-- check constraint, so 'general_meeting' and 'task' just work like any other
+-- value already did. Everything else (time, task description, and — for
+-- Client meeting — the counterpart client's id/name) rides in the existing
+-- `details jsonb` column, also with no migration.
+--
+-- The one piece that DOES need a schema change: logging a Client meeting has
+-- to write a row on BOTH clients' timelines (per spec — "client meeting with
+-- (buyer name)" on the seller's side, and the reverse on the buyer's side),
+-- and those two clients are frequently owned by two different intern
+-- accounts. client_events_insert_own only ever allowed inserting on a client
+-- you yourself created (never widened with an is_admin() bypass, same as
+-- clients_update_own/clients_delete_own) — so a plain insert from the
+-- counterpart's owner would fail RLS. Rather than loosening that policy
+-- app-wide, this adds one narrowly-scoped `security definer` function (same
+-- trusted-bypass pattern as transfer_dial_list() above): it re-checks that
+-- the CALLER actually owns p_client_id itself before doing anything, then
+-- inserts both sides' rows, so its trust boundary is exactly "you can only
+-- trigger this by way of a client meeting you're actually a participant in and
+-- own one side of" — not a general-purpose cross-account write.
+-- ============================================================================
+create or replace function log_client_meeting(
+  p_client_id uuid,
+  p_counterpart_client_id uuid,
+  p_event_date timestamptz,
+  p_time text,
+  p_created_by uuid
+)
+returns void language plpgsql security definer as $$
+declare
+  v_owns boolean;
+  v_client record;
+  v_counterpart record;
+begin
+  select exists(select 1 from clients where id = p_client_id and created_by = auth.uid()) into v_owns;
+  if not v_owns then
+    raise exception 'You can only log a client meeting on a client you created.';
+  end if;
+
+  select id, first_name, last_name, company_name, client_type into v_client from clients where id = p_client_id;
+  select id, first_name, last_name, company_name, client_type into v_counterpart from clients where id = p_counterpart_client_id;
+  if v_counterpart.id is null then
+    raise exception 'Counterpart client not found.';
+  end if;
+
+  insert into client_events (client_id, event_type, event_date, details, created_by)
+  values (
+    p_client_id, 'client_meeting', p_event_date,
+    jsonb_build_object(
+      'time', p_time,
+      'counterpart_client_id', v_counterpart.id,
+      'counterpart_name', case when v_counterpart.client_type = 'seller' and coalesce(v_counterpart.company_name, '') != ''
+        then v_counterpart.company_name
+        else trim(both ' ' from concat(v_counterpart.first_name, ' ', v_counterpart.last_name)) end
+    ),
+    p_created_by
+  );
+
+  insert into client_events (client_id, event_type, event_date, details, created_by)
+  values (
+    p_counterpart_client_id, 'client_meeting', p_event_date,
+    jsonb_build_object(
+      'time', p_time,
+      'counterpart_client_id', v_client.id,
+      'counterpart_name', case when v_client.client_type = 'seller' and coalesce(v_client.company_name, '') != ''
+        then v_client.company_name
+        else trim(both ' ' from concat(v_client.first_name, ' ', v_client.last_name)) end
+    ),
+    p_created_by
+  );
+end;
+$$;
+
+grant execute on function log_client_meeting(uuid, uuid, timestamptz, text, uuid) to authenticated;
