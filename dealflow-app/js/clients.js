@@ -524,12 +524,14 @@ function buildClientViewHTML(client) {
 
 // ---------------------------------------------------------------------------
 // Progress tab — vertical stepper of the 7 fixed milestones (PROGRESS_STEPS),
-// each checked off green once a client_events row with the matching
-// event_type exists (logged from the Timeline tab's "+" menu — see
-// buildTimelineHTML/wireTimelineTab below).
+// each checked off green only once a client_events row with the matching
+// event_type has actually been confirmed (checked off) on the Timeline tab —
+// see the timeline-confirm-btn / toggleClientEventConfirmed. Merely logging
+// the event via Timeline's "+" menu is NOT enough on its own; it also has to
+// be marked as happened before the Progress dot reflects it.
 // ---------------------------------------------------------------------------
 function buildProgressHTML(events) {
-  const doneTypes = new Set(events.map((e) => e.event_type));
+  const doneTypes = new Set(events.filter((e) => e.confirmed).map((e) => e.event_type));
   return `
     <div class="progress-stepper" id="progressStepper">
       ${PROGRESS_STEPS.map((s) => {
@@ -806,10 +808,11 @@ function openTimelineIntroCall(eventDate) {
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
     userId: profile.id,
-    // A future-dated intro call hasn't happened yet, so it shouldn't count
-    // toward the Profile page's "Intro calls" graph until its date arrives
-    // (see isFutureDate above, and the logToGraph comment in js/introCall.js).
-    logToGraph: !isFutureDate(eventDate),
+    // The Profile page's "Intro calls" graph counts SCHEDULING actions, not
+    // completed/happened calls — so this always credits the graph the moment
+    // "Open Calendly"/"Skip Calendly" is clicked here, regardless of whether
+    // the eventDate picked for the Timeline entry is in the past, today, or
+    // the future (logToGraph defaults to true — see js/introCall.js).
     onScheduled: async (client) => {
       await supabase.from("client_events").insert({
         client_id: client.id,
