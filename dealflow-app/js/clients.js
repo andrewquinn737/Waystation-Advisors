@@ -10,13 +10,14 @@ import {
   getMissingFields,
 } from "./clientForm.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
-import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
+import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
+const isAdmin = profile?.role === "admin";
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -38,8 +39,16 @@ function clientStatusInfo(value) {
 // Which pipeline statuses are currently hidden from the Clients list (toggled
 // via the page-header triangle's Categories submenu) — persisted the same way
 // as dials' hiddenStatuses.
-const CLIENTS_STORAGE_KEYS = { hiddenStatuses: "waystation_clients_hidden_statuses" };
+const CLIENTS_STORAGE_KEYS = {
+  hiddenStatuses: "waystation_clients_hidden_statuses",
+  visibleAccounts: "waystation_clients_visible_accounts",
+};
 const hiddenClientStatuses = new Set();
+// Admin-only "Accounts visible" filter (see menuAccountsVisibleBtn below).
+// null = no filter applied (every account's clients show, i.e. "Select all")
+// — the same as before this feature existed. Once narrowed down to specific
+// accounts, this becomes a Set of the profile ids to show.
+let visibleAccountIds = null;
 function loadPersistedClientsState() {
   try {
     const saved = localStorage.getItem(CLIENTS_STORAGE_KEYS.hiddenStatuses);
@@ -50,10 +59,27 @@ function loadPersistedClientsState() {
   } catch {
     // ignore
   }
+  try {
+    const savedAccounts = localStorage.getItem(CLIENTS_STORAGE_KEYS.visibleAccounts);
+    if (savedAccounts) {
+      const arr = JSON.parse(savedAccounts);
+      if (Array.isArray(arr)) visibleAccountIds = new Set(arr);
+    }
+  } catch {
+    // ignore
+  }
 }
 function persistHiddenClientStatuses() {
   try {
     localStorage.setItem(CLIENTS_STORAGE_KEYS.hiddenStatuses, JSON.stringify([...hiddenClientStatuses]));
+  } catch {
+    // ignore
+  }
+}
+function persistVisibleAccountIds() {
+  try {
+    if (visibleAccountIds === null) localStorage.removeItem(CLIENTS_STORAGE_KEYS.visibleAccounts);
+    else localStorage.setItem(CLIENTS_STORAGE_KEYS.visibleAccounts, JSON.stringify([...visibleAccountIds]));
   } catch {
     // ignore
   }
@@ -105,6 +131,10 @@ const els = {
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
   menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
   categoriesSubmenu: document.getElementById("categoriesSubmenu"),
+  menuAccountsVisibleBtn: document.getElementById("menuAccountsVisibleBtn"),
+  accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
+  accountsVisibleBody: document.getElementById("accountsVisibleBody"),
+  accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   clientSubtabs: document.getElementById("clientSubtabs"),
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
@@ -173,7 +203,11 @@ function renderTable() {
         clientDisplayName(c).toLowerCase().includes(q) ||
         (c.company_name || "").toLowerCase().includes(q) ||
         (c.industry || "").toLowerCase().includes(q)) &&
-      !hiddenClientStatuses.has(c.pipeline_status || "not_in_contact")
+      !hiddenClientStatuses.has(c.pipeline_status || "not_in_contact") &&
+      // Admin-only "Accounts visible" filter — applied before Categories can
+      // hide/show anything further (see renderCategoriesSubmenu). null means
+      // no account filter is active (every account's clients pass through).
+      (!visibleAccountIds || visibleAccountIds.has(c.created_by))
   );
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
 
@@ -273,6 +307,90 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
   els.categoriesSubmenu.classList.toggle("hidden");
   if (opening) positionCategoriesSubmenu();
 });
+
+// ---------------------------------------------------------------------------
+// Admin-only "Accounts visible" filter — a popup (not just a small submenu,
+// since the list of accounts can run long) letting an admin narrow the
+// Clients list down to only clients created by whichever accounts they've
+// selected. Requires clients_select_own to also allow is_admin() (see
+// supabase/schema.sql) — otherwise the admin's own Supabase session could
+// never fetch other accounts' clients in the first place, filter or no
+// filter. The Categories filter above is applied on top of whatever this
+// leaves in (see renderTable).
+// ---------------------------------------------------------------------------
+
+if (isAdmin) els.menuAccountsVisibleBtn.classList.remove("hidden");
+
+let allAccounts = []; // [{id, full_name}] — every account in the company, including the admin's own
+let accountsLoaded = false;
+
+async function loadAccountsIfNeeded() {
+  if (accountsLoaded) return;
+  const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+  if (!error) {
+    allAccounts = data || [];
+    accountsLoaded = true;
+  }
+}
+
+function isAccountVisible(id) {
+  return !visibleAccountIds || visibleAccountIds.has(id);
+}
+
+function renderAccountsVisiblePopup() {
+  const allSelected = !visibleAccountIds;
+  const rowsHTML = allAccounts.length
+    ? allAccounts
+        .map(
+          (a) => `
+        <button type="button" class="accounts-visible-row" data-id="${a.id}">
+          <input type="checkbox" ${isAccountVisible(a.id) ? "checked" : ""} tabindex="-1" />
+          ${escapeHtml(a.full_name)}${a.id === profile.id ? " (you)" : ""}
+        </button>`
+        )
+        .join("")
+    : `<div class="accounts-visible-empty">No accounts found.</div>`;
+
+  els.accountsVisibleBody.innerHTML = `
+    <div class="accounts-visible-list">
+      <button type="button" class="accounts-visible-row select-all" id="accountsSelectAllBtn">
+        <input type="checkbox" ${allSelected ? "checked" : ""} tabindex="-1" />
+        Select all
+      </button>
+      ${rowsHTML}
+    </div>
+  `;
+
+  document.getElementById("accountsSelectAllBtn").addEventListener("click", () => {
+    visibleAccountIds = null;
+    persistVisibleAccountIds();
+    renderAccountsVisiblePopup();
+    renderTable();
+  });
+  els.accountsVisibleBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.id;
+      // Narrowing down from "all" for the first time starts from the full
+      // set of accounts (i.e. everything stays visible except the one just
+      // unchecked), rather than jumping straight to "only this one".
+      if (visibleAccountIds === null) visibleAccountIds = new Set(allAccounts.map((a) => a.id));
+      if (visibleAccountIds.has(id)) visibleAccountIds.delete(id);
+      else visibleAccountIds.add(id);
+      persistVisibleAccountIds();
+      renderAccountsVisiblePopup();
+      renderTable();
+    });
+  });
+}
+
+els.menuAccountsVisibleBtn.addEventListener("click", async () => {
+  closePageHeaderMenu();
+  els.accountsVisiblePopup.classList.remove("hidden");
+  els.accountsVisibleBody.innerHTML = `<div class="accounts-visible-empty">Loading…</div>`;
+  await loadAccountsIfNeeded();
+  renderAccountsVisiblePopup();
+});
+els.accountsVisibleClose.addEventListener("click", () => els.accountsVisiblePopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
 // Field sections — shared between "new client" and the Profile tab
