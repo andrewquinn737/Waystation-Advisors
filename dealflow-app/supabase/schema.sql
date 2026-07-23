@@ -886,3 +886,31 @@ grant execute on function transfer_dial_list(uuid, uuid) to authenticated;
 -- dial_type is just another filterable column on tables whose row-level
 -- security already scopes by created_by/account.
 -- ============================================================================
+
+-- ============================================================================
+-- ADMIN-ONLY "ACCOUNTS VISIBLE" ON DIALS
+-- This is exactly the "future toggle" flagged as not-yet-built in the REWORK
+-- above ("i will make an option probably in the future to allow them to see
+-- other people's tabs, not now though") — now being built. Mirrors the
+-- Clients page's existing admin-only Accounts-visible filter (see
+-- clients_select_own's `or is_admin()` and menuAccountsVisibleBtn in
+-- js/clients.js) exactly: widen SELECT only (not UPDATE/DELETE) on both
+-- dial_lists and dials to also allow is_admin(), so an admin's session can
+-- fetch every account's tabs/dials, while js/dials.js's new
+-- menuAccountsVisibleBtn/accountsVisiblePopup client-side filter narrows what
+-- actually gets shown (defaulting to "select all" = every account, same
+-- default as before this existed). Non-admins are completely unaffected:
+-- is_admin() is false for them, so their visibility stays exactly
+-- `created_by = auth.uid()`, matching the REWORK above. UPDATE/DELETE stay
+-- strictly own-only for everyone including admins (same as clients_update_own
+-- never getting an is_admin() bypass) — Transfer is still the only way an
+-- admin can modify a tab they don't own, via the trusted transfer_dial_list()
+-- security-definer function above, which checks is_admin() itself.
+-- ============================================================================
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid() or is_admin());
