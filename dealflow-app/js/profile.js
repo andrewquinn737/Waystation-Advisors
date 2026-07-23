@@ -1,25 +1,45 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
-import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
+import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
+import { wireDealSideToggle } from "./dealSide.js";
+import { getVisibleAccountIds, wireAccountsVisiblePopup } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
 
+// Synchronous admin check (unlike the Teams popup's own `isAdmin`, further
+// below, which is only known after loadTeams()'s async fetch) — same
+// `profile?.role === "admin"` idiom as js/clients.js and js/dials.js, used to
+// gate the settings gear (Sellers/Buyers + Accounts visible), which now shows
+// on Profile too (see wiring near the bottom of this file).
+const isAdminSync = profile?.role === "admin";
+
 const els = {
   errorBox: document.getElementById("errorBox"),
   pageMenuToggle: document.getElementById("pageMenuToggle"),
   pageHeaderMenu: document.getElementById("pageHeaderMenu"),
+  pageSettingsBtn: document.getElementById("pageSettingsBtn"),
+  settingsMenu: document.getElementById("settingsMenu"),
+  dealSideToggleBtn: document.getElementById("dealSideToggleBtn"),
+  dealSideLabel: document.getElementById("dealSideLabel"),
+  menuAccountsVisibleBtn: document.getElementById("menuAccountsVisibleBtn"),
+  accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
+  accountsVisibleBody: document.getElementById("accountsVisibleBody"),
+  accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   menuEditProfileBtn: document.getElementById("menuEditProfileBtn"),
   menuCallsViewBtn: document.getElementById("menuCallsViewBtn"),
+  upcomingEventsSection: document.getElementById("upcomingEventsSection"),
+  upcomingEventsBox: document.getElementById("upcomingEventsBox"),
   avatarFileInput: document.getElementById("avatarFileInput"),
   avatarInitials: document.getElementById("avatarInitials"),
   profileName: document.getElementById("profileName"),
   profileRole: document.getElementById("profileRole"),
   profilePhone: document.getElementById("profilePhone"),
   profileEmail: document.getElementById("profileEmail"),
+  profileMultiNote: document.getElementById("profileMultiNote"),
   outreachCallsSection: document.getElementById("outreachCallsSection"),
   introCallsSection: document.getElementById("introCallsSection"),
   callsThisWeekText: document.getElementById("callsThisWeekText"),
@@ -88,40 +108,93 @@ function initials(name) {
     .join("") || "?";
 }
 
-// Shows the uploaded photo if there is one (profile.avatar_url), otherwise
+// Shows the uploaded photo if there is one (account.avatar_url), otherwise
 // falls back to the initials circle exactly as before — see
-// handleAvatarFileSelected() below for how avatar_url gets set.
-function renderAvatar() {
-  if (profile.avatar_url) {
-    els.avatarInitials.innerHTML = `<img src="${profile.avatar_url}" alt="" />`;
+// handleAvatarFileSelected() below for how avatar_url gets set. Defaults to
+// the signed-in account; when an admin is viewing a single other account (see
+// resolveSelectedAccounts below), that account's own avatar_url is passed in.
+function renderAvatar(account = profile) {
+  if (account.avatar_url) {
+    els.avatarInitials.innerHTML = `<img src="${account.avatar_url}" alt="" />`;
   } else {
-    els.avatarInitials.textContent = initials(profile.full_name);
+    els.avatarInitials.textContent = initials(account.full_name);
   }
 }
 
-function renderProfileHeader() {
-  els.profileName.textContent = profile.full_name;
-  els.profileRole.textContent = profile.role === "admin" ? "Admin" : "Intern";
-  renderAvatar();
+// ---------------------------------------------------------------------------
+// Admin viewing-other-accounts support (Accounts visible, shared with
+// Clients/Dials via js/accountsVisible.js). This is what the settings gear's
+// Accounts visible button now drives on Profile:
+//   - non-admins always just see their own account — short-circuited below.
+//   - exactly one OTHER account selected -> show THEIR name/role/phone/email,
+//     and (in the calls-view sections below) THEIR numbers/graph/events.
+//   - 0 or 2+ accounts selected (including the default "Select all") -> show
+//     the signed-in admin's own name/phone/email plus a "(Multiple accounts
+//     shown)" note, but SUM the numbers/events across every selected account
+//     (and, for Outreach calls only, multiply the quota by that count).
+// ---------------------------------------------------------------------------
+let allAccountsForSelection = null; // [{id, full_name, role, phone, email, avatar_url}], fetched lazily once
 
-  // Own account's phone + email, right below the listed position (role) and
-  // above the weekly call-count section. Either line is simply omitted if
-  // that field isn't on file (e.g. older accounts created before phone was
-  // required at signup).
-  if (profile.phone) {
-    els.profilePhone.textContent = profile.phone;
+async function loadAllAccountsForSelection() {
+  if (allAccountsForSelection) return allAccountsForSelection;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, phone, email, avatar_url")
+    .order("full_name", { ascending: true });
+  allAccountsForSelection = error ? [] : data || [];
+  return allAccountsForSelection;
+}
+
+// Resolves the shared "Accounts visible" selection into actual account rows.
+// null (the "Select all" default) resolves to every account, same as
+// Clients/Dials. Falls back to "every account" if the selection was somehow
+// narrowed down to nothing (an edge case the shared popup doesn't otherwise
+// prevent), so this can never return an empty list.
+async function resolveSelectedAccounts() {
+  if (!isAdminSync) return [profile];
+  const all = await loadAllAccountsForSelection();
+  const visible = getVisibleAccountIds();
+  if (!visible) return all.length ? all : [profile];
+  const picked = all.filter((a) => visible.has(a.id));
+  return picked.length ? picked : all.length ? all : [profile];
+}
+
+async function renderProfileHeader() {
+  const selected = await resolveSelectedAccounts();
+  const isSingleOther = selected.length === 1 && selected[0].id !== profile.id;
+  const isMultiple = selected.length !== 1;
+  // Multi-select (or the no-op self case) always shows the signed-in admin's
+  // own info — only a single, *other* account selected swaps the header over
+  // to show theirs instead.
+  const showAccount = isSingleOther ? selected[0] : profile;
+
+  els.profileName.textContent = showAccount.full_name;
+  els.profileRole.textContent = showAccount.role === "admin" ? "Admin" : "Intern";
+  renderAvatar(showAccount);
+
+  // Either line is simply omitted if that field isn't on file (e.g. older
+  // accounts created before phone was required at signup).
+  if (showAccount.phone) {
+    els.profilePhone.textContent = showAccount.phone;
     els.profilePhone.classList.remove("hidden");
   } else {
     els.profilePhone.classList.add("hidden");
   }
-  if (profile.email) {
-    els.profileEmail.textContent = profile.email;
+  if (showAccount.email) {
+    els.profileEmail.textContent = showAccount.email;
     els.profileEmail.classList.remove("hidden");
   } else {
     els.profileEmail.classList.add("hidden");
   }
+  if (els.profileMultiNote) els.profileMultiNote.classList.toggle("hidden", !isMultiple);
+
+  // Editing only makes sense for your own account — hide "Edit" entirely
+  // while viewing someone else's info or an aggregated multi-account view.
+  if (els.menuEditProfileBtn) els.menuEditProfileBtn.classList.toggle("hidden", isMultiple || isSingleOther);
+
+  return selected;
 }
-renderProfileHeader();
+await renderProfileHeader();
 
 // ---------------------------------------------------------------------------
 // Profile edit mode — "Edit" in the header triangle dropdown swaps the name/
@@ -200,12 +273,12 @@ async function exitProfileEditMode() {
       profile.email = newEmail;
     }
   }
-  renderProfileHeader();
+  await renderProfileHeader();
 }
 
 els.menuEditProfileBtn.addEventListener("click", (e) => {
   e.stopPropagation();
-  closeAllPageHeaderMenus();
+  closePageHeaderMenu();
   if (profileEditMode) exitProfileEditMode();
   else enterProfileEditMode();
 });
@@ -248,35 +321,42 @@ els.avatarFileInput.addEventListener("change", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Outreach calls / Intro calls toggle — the header menu's second option.
-// Defaults to "Outreach calls" (the existing weekly people-called chart);
-// clicking it switches the label to "Intro calls" and swaps in a separate
-// tracker (loadIntroCallsChart, built the first time it's shown); clicking
-// again switches back. Purely a view toggle — nothing is persisted, so it
-// always starts back on Outreach calls next time the page loads.
+// Outreach calls / Intro calls / Upcoming events toggle — the header menu's
+// second option, now a 3-state cycle. Purely a view toggle — nothing is
+// persisted, so it always starts back on Outreach calls next time the page
+// loads. Whichever view is showing always reflects whatever account(s) are
+// currently selected in Accounts visible (see resolveSelectedAccounts above,
+// and the settings-gear wiring near the bottom of this file), so switching
+// accounts re-fetches rather than relying on a stale first-load cache.
 // ---------------------------------------------------------------------------
-let introCallsChartLoaded = false;
+const CALLS_VIEW_CYCLE = ["outreach", "intro", "upcoming"];
+const CALLS_VIEW_LABELS = { outreach: "Outreach calls", intro: "Intro calls", upcoming: "Upcoming events" };
+
+function showCallsView(view) {
+  els.menuCallsViewBtn.dataset.view = view;
+  const label = els.menuCallsViewBtn.querySelector(".menu-item-label");
+  label.textContent = CALLS_VIEW_LABELS[view];
+  els.outreachCallsSection.classList.toggle("hidden", view !== "outreach");
+  els.introCallsSection.classList.toggle("hidden", view !== "intro");
+  els.upcomingEventsSection.classList.toggle("hidden", view !== "upcoming");
+  if (view === "outreach") loadCallsChart();
+  else if (view === "intro") loadIntroCallsChart();
+  else loadUpcomingEvents();
+}
+
+// Re-runs whichever calls-view is currently on screen — called after the
+// Accounts visible selection changes, so the numbers/graph/events update
+// immediately instead of only on next toggle or reload.
+function refreshActiveCallsView() {
+  showCallsView(els.menuCallsViewBtn.dataset.view || "outreach");
+}
 
 els.menuCallsViewBtn.addEventListener("click", (e) => {
   e.stopPropagation();
-  closeAllPageHeaderMenus();
-  const showingOutreach = els.menuCallsViewBtn.dataset.view === "outreach";
-  const label = els.menuCallsViewBtn.querySelector(".menu-item-label");
-  if (showingOutreach) {
-    els.menuCallsViewBtn.dataset.view = "intro";
-    label.textContent = "Intro calls";
-    els.outreachCallsSection.classList.add("hidden");
-    els.introCallsSection.classList.remove("hidden");
-    if (!introCallsChartLoaded) {
-      introCallsChartLoaded = true;
-      loadIntroCallsChart();
-    }
-  } else {
-    els.menuCallsViewBtn.dataset.view = "outreach";
-    label.textContent = "Outreach calls";
-    els.introCallsSection.classList.add("hidden");
-    els.outreachCallsSection.classList.remove("hidden");
-  }
+  closePageHeaderMenu();
+  const current = els.menuCallsViewBtn.dataset.view || "outreach";
+  const next = CALLS_VIEW_CYCLE[(CALLS_VIEW_CYCLE.indexOf(current) + 1) % CALLS_VIEW_CYCLE.length];
+  showCallsView(next);
 });
 
 // ---------------------------------------------------------------------------
@@ -1169,7 +1249,15 @@ function renderCallsChart(targetEl, weekStarts, counts, quota) {
   `;
 }
 
+// ids: account id(s) currently in view (see resolveSelectedAccounts).
+// quota: 50 for a single account (self or another), or 50 * ids.length when
+// viewing multiple accounts at once — see the "50 x number of accounts
+// selected" spec for Outreach calls only.
 async function loadCallsChart() {
+  const selected = await resolveSelectedAccounts();
+  const ids = selected.map((a) => a.id);
+  const quota = WEEKLY_QUOTA * (selected.length > 1 ? selected.length : 1);
+
   const thisWeekStart = startOfWeek(new Date());
   const weekStarts = [];
   for (let i = 5; i >= 0; i--) {
@@ -1180,7 +1268,7 @@ async function loadCallsChart() {
   const { data, error } = await supabase
     .from("call_status_changes")
     .select("changed_at")
-    .eq("user_id", profile.id)
+    .in("user_id", ids)
     .gte("changed_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1208,25 +1296,26 @@ async function loadCallsChart() {
     return t >= startOfToday && t < startOfTomorrow;
   }).length;
 
-  const remaining = WEEKLY_QUOTA - thisWeekCount;
+  const remaining = quota - thisWeekCount;
   const quotaHTML =
     remaining <= 0
       ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
       : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
   els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week, ${todayCount} today${quotaHTML}`;
-  renderCallsChart(els.callsChart, weekStarts, counts, WEEKLY_QUOTA);
+  renderCallsChart(els.callsChart, weekStarts, counts, quota);
 }
-
-loadCallsChart();
 
 // ---------------------------------------------------------------------------
 // Intro calls scheduled per week — the toggled alternative view (see the
-// Outreach/Intro toggle above). No quota line; just counts rows in
-// intro_call_log (one inserted every time the shared Schedule Intro Call flow
-// is used — see js/introCall.js) bucketed into the same Monday-Sunday weeks.
-// Loaded lazily, the first time the Intro calls view is shown.
+// calls-view cycle above). No quota line; just counts rows in intro_call_log
+// (one inserted every time the shared Schedule Intro Call flow is used — see
+// js/introCall.js) bucketed into the same Monday-Sunday weeks, across
+// whichever account(s) are currently selected.
 // ---------------------------------------------------------------------------
 async function loadIntroCallsChart() {
+  const selected = await resolveSelectedAccounts();
+  const ids = selected.map((a) => a.id);
+
   const thisWeekStart = startOfWeek(new Date());
   const weekStarts = [];
   for (let i = 5; i >= 0; i--) {
@@ -1237,7 +1326,7 @@ async function loadIntroCallsChart() {
   const { data, error } = await supabase
     .from("intro_call_log")
     .select("scheduled_at")
-    .eq("user_id", profile.id)
+    .in("user_id", ids)
     .gte("scheduled_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1256,6 +1345,78 @@ async function loadIntroCallsChart() {
   renderCallsChart(els.introCallsChart, weekStarts, counts, null);
 }
 
+// ---------------------------------------------------------------------------
+// Upcoming events — the 3rd calls-view option. Lists every today-or-future
+// client_events row belonging to a client owned by whichever account(s) are
+// currently selected (own account only, for non-admins). Requires
+// client_events_select_own (and the clients embed it rides on) to allow an
+// admin to read other accounts' rows — see the is_admin() bypass added to
+// client_events_select_own in supabase/schema.sql. Clicking a row deep-links
+// into that client with Timeline selected (see js/clients.js's ?client=
+// support).
+// ---------------------------------------------------------------------------
+const UPCOMING_EVENT_TYPE_LABELS = {
+  intro_call: "Intro call",
+  nda_financials: "NDA + financials",
+  client_approval: "Client approval",
+  client_meeting: "Client meeting",
+  loi: "LOI",
+  due_diligence: "Due diligence",
+  close: "Close",
+  general_meeting: "Meeting",
+  task: "Task",
+};
+
+function fmtEventDateTime(iso, hasTime) {
+  const d = new Date(iso);
+  const dateStr = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  if (!hasTime) return dateStr;
+  const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${dateStr}, ${timeStr}`;
+}
+
+async function loadUpcomingEvents() {
+  const selected = await resolveSelectedAccounts();
+  const ids = selected.map((a) => a.id);
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabase
+    .from("client_events")
+    .select("id, event_type, event_date, details, client_id, clients!inner(id, first_name, last_name, company_name, client_type, created_by)")
+    .gte("event_date", startOfToday.toISOString())
+    .in("clients.created_by", ids)
+    .order("event_date", { ascending: true });
+  if (error) return showError(els.errorBox, error);
+
+  const rows = data || [];
+  if (!rows.length) {
+    els.upcomingEventsBox.innerHTML = `<div class="empty-state">No upcoming events.</div>`;
+    return;
+  }
+
+  els.upcomingEventsBox.innerHTML = rows
+    .map((r) => {
+      const c = r.clients;
+      const name = c.client_type === "seller" && c.company_name ? c.company_name : `${c.first_name} ${c.last_name}`.trim();
+      const typeLabel = UPCOMING_EVENT_TYPE_LABELS[r.event_type] || r.event_type;
+      const hasTime = !!r.details?.time;
+      return `
+      <button type="button" class="upcoming-event-row" data-client-id="${r.client_id}">
+        <div class="upcoming-event-name">${escapeHtml(name)}</div>
+        <div class="upcoming-event-meta">${escapeHtml(typeLabel)} · ${fmtEventDateTime(r.event_date, hasTime)}</div>
+      </button>`;
+    })
+    .join("");
+
+  els.upcomingEventsBox.querySelectorAll(".upcoming-event-row[data-client-id]").forEach((row) => {
+    row.addEventListener("click", () => {
+      window.location.href = `clients.html?client=${encodeURIComponent(row.dataset.clientId)}&tab=timeline`;
+    });
+  });
+}
+
 els.teamsBtn.addEventListener("click", async () => {
   editMode = false;
   closedGroupKeys.clear(); // every section starts open each time the popup is (re)opened
@@ -1271,3 +1432,38 @@ els.teamsCloseBtn.addEventListener("click", () => {
 els.profileSignOutBtn.addEventListener("click", signOut);
 
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
+
+// Settings gear popover — admin-only Sellers/Buyers toggle + Accounts visible
+// (see js/dealSide.js, js/accountsVisible.js), same shared components and
+// markup pattern as Clients/Dials. Changing either one here changes the same
+// underlying setting used on Clients and Dials too (single shared
+// localStorage key each) — on Profile specifically, changing Accounts
+// visible also drives which account(s)' info/numbers/events are shown (see
+// resolveSelectedAccounts, renderProfileHeader, refreshActiveCallsView).
+if (isAdminSync) {
+  wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+  wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, () => {
+    els.settingsMenu.classList.add("hidden");
+    els.pageSettingsBtn.classList.remove("open");
+  });
+  els.menuAccountsVisibleBtn.classList.remove("hidden");
+  wireAccountsVisiblePopup({
+    menuBtn: els.menuAccountsVisibleBtn,
+    popupEl: els.accountsVisiblePopup,
+    bodyEl: els.accountsVisibleBody,
+    closeBtn: els.accountsVisibleClose,
+    closePageHeaderMenu: closePageHeaderMenu,
+    myProfileId: profile.id,
+    getAllAccounts: async () => {
+      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      return error ? [] : data || [];
+    },
+    onChange: async () => {
+      await renderProfileHeader();
+      refreshActiveCallsView();
+    },
+    escapeHtml,
+  });
+}
+
+showCallsView("outreach");

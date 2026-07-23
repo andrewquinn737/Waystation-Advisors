@@ -14,6 +14,7 @@ import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } fr
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
+import { getVisibleAccountIds, wireAccountsVisiblePopup } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -37,19 +38,23 @@ function clientStatusInfo(value) {
   return CLIENT_STATUSES.find((s) => s.value === value) || CLIENT_STATUSES[3];
 }
 
+// The green "connected_to_buyer" category reads as "In cahoots" while
+// viewing Buyer-side clients (a buyer isn't "connected to a buyer" — it's
+// connected to a seller they're in cahoots with) — every other status/mode
+// keeps its normal label. Used everywhere a status label is displayed
+// instead of reading `s.label`/`info.label` directly.
+function statusLabel(s) {
+  if (s.value === "connected_to_buyer" && getDealSide() === "buyer") return "In cahoots";
+  return s.label;
+}
+
 // Which pipeline statuses are currently hidden from the Clients list (toggled
 // via the page-header triangle's Categories submenu) — persisted the same way
 // as dials' hiddenStatuses.
 const CLIENTS_STORAGE_KEYS = {
   hiddenStatuses: "waystation_clients_hidden_statuses",
-  visibleAccounts: "waystation_clients_visible_accounts",
 };
 const hiddenClientStatuses = new Set();
-// Admin-only "Accounts visible" filter (see menuAccountsVisibleBtn below).
-// null = no filter applied (every account's clients show, i.e. "Select all")
-// — the same as before this feature existed. Once narrowed down to specific
-// accounts, this becomes a Set of the profile ids to show.
-let visibleAccountIds = null;
 function loadPersistedClientsState() {
   try {
     const saved = localStorage.getItem(CLIENTS_STORAGE_KEYS.hiddenStatuses);
@@ -60,27 +65,10 @@ function loadPersistedClientsState() {
   } catch {
     // ignore
   }
-  try {
-    const savedAccounts = localStorage.getItem(CLIENTS_STORAGE_KEYS.visibleAccounts);
-    if (savedAccounts) {
-      const arr = JSON.parse(savedAccounts);
-      if (Array.isArray(arr)) visibleAccountIds = new Set(arr);
-    }
-  } catch {
-    // ignore
-  }
 }
 function persistHiddenClientStatuses() {
   try {
     localStorage.setItem(CLIENTS_STORAGE_KEYS.hiddenStatuses, JSON.stringify([...hiddenClientStatuses]));
-  } catch {
-    // ignore
-  }
-}
-function persistVisibleAccountIds() {
-  try {
-    if (visibleAccountIds === null) localStorage.removeItem(CLIENTS_STORAGE_KEYS.visibleAccounts);
-    else localStorage.setItem(CLIENTS_STORAGE_KEYS.visibleAccounts, JSON.stringify([...visibleAccountIds]));
   } catch {
     // ignore
   }
@@ -100,11 +88,56 @@ const PROGRESS_STEPS = [
   { type: "due_diligence", label: "Due diligence" },
   { type: "close", label: "Close" },
 ];
+// "general_meeting" and "task" are Timeline-only — they're logged the same
+// way as the 7 PROGRESS_STEPS types, but deliberately excluded from that list
+// so they never affect the Progress tab's checkmarks.
 const EVENT_TYPE_LABELS = {
   created: "Client created",
+  general_meeting: "Meeting",
+  task: "Task",
   ...Object.fromEntries(PROGRESS_STEPS.map((s) => [s.type, s.label])),
 };
 const CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+
+// Timeline's "+" menu is a 2-level picker: a top-level category, then (for
+// Meeting/Contract advancement) a specific sub-type shown as a dropdown in
+// the same date/time details popup — see openEventDetailsModal. Contract
+// advancement's sub-types are 5 of the 7 PROGRESS_STEPS (everything except
+// Intro call and Client meeting, which live under Meeting instead — Intro
+// call keeps the existing Calendly hand-off, Client meeting additionally
+// requires picking a counterpart client, see openCounterpartPicker).
+const TIMELINE_CATEGORIES = [
+  { value: "meeting", label: "Meeting" },
+  { value: "contract_advancement", label: "Contract advancement" },
+  { value: "task", label: "Task" },
+];
+const MEETING_SUBTYPES = [
+  { value: "general_meeting", label: "General" },
+  { value: "intro_call", label: "Intro call" },
+  { value: "client_meeting", label: "Client meeting" },
+];
+const CONTRACT_SUBTYPES = PROGRESS_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "client_meeting");
+
+// Every half hour, midnight to 11:30pm — the "choose a time (optional)"
+// dropdown shared by every Timeline "+" category (see openEventDetailsModal).
+function timeOptionsHTML() {
+  const opts = ['<option value="">No time</option>'];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const label = new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      opts.push(`<option value="${value}">${label}</option>`);
+    }
+  }
+  return opts.join("");
+}
+
+// Formats a "HH:MM" 24-hour value (see timeOptionsHTML) back into a
+// locale-formatted time string, for display on a logged Timeline event.
+function formatTimeValue(value) {
+  const [hh, mm] = value.split(":").map(Number);
+  return new Date(2000, 0, 1, hh, mm).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
 
 let clients = [];
 let currentClient = null; // null while creating a new client
@@ -145,9 +178,20 @@ const els = {
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
   eventDateModal: document.getElementById("eventDateModal"),
+  eventDateModalTitle: document.getElementById("eventDateModalTitle"),
   eventDateInput: document.getElementById("eventDateInput"),
+  eventTimeInput: document.getElementById("eventTimeInput"),
+  eventSubtypeWrap: document.getElementById("eventSubtypeWrap"),
+  eventSubtypeSelect: document.getElementById("eventSubtypeSelect"),
+  eventTaskWrap: document.getElementById("eventTaskWrap"),
+  eventTaskInput: document.getElementById("eventTaskInput"),
   eventDateConfirmBtn: document.getElementById("eventDateConfirmBtn"),
   eventDateCancelBtn: document.getElementById("eventDateCancelBtn"),
+  counterpartModal: document.getElementById("counterpartModal"),
+  counterpartSearchInput: document.getElementById("counterpartSearchInput"),
+  counterpartList: document.getElementById("counterpartList"),
+  counterpartConfirmBtn: document.getElementById("counterpartConfirmBtn"),
+  counterpartCancelBtn: document.getElementById("counterpartCancelBtn"),
 };
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
@@ -206,6 +250,7 @@ async function loadClients() {
 
 function renderTable() {
   const q = els.search.value.trim().toLowerCase();
+  const visibleAccountIds = getVisibleAccountIds();
   const rows = clients.filter(
     (c) =>
       (!q ||
@@ -213,9 +258,11 @@ function renderTable() {
         (c.company_name || "").toLowerCase().includes(q) ||
         (c.industry || "").toLowerCase().includes(q)) &&
       !hiddenClientStatuses.has(c.pipeline_status || "not_in_contact") &&
-      // Admin-only "Accounts visible" filter — applied before Categories can
-      // hide/show anything further (see renderCategoriesSubmenu). null means
-      // no account filter is active (every account's clients pass through).
+      // Admin-only "Accounts visible" filter (now shared across Clients,
+      // Dials, and Profile — see js/accountsVisible.js), applied before
+      // Categories can hide/show anything further (see
+      // renderCategoriesSubmenu). null means no account filter is active
+      // (every account's clients pass through).
       (!visibleAccountIds || visibleAccountIds.has(c.created_by))
   );
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
@@ -282,7 +329,7 @@ function renderCategoriesSubmenu() {
   els.categoriesSubmenu.innerHTML = CLIENT_STATUSES.map(
     (s) => `
       <button type="button" class="category-rect-option ${hiddenClientStatuses.has(s.value) ? "is-hidden" : ""}" data-value="${s.value}">
-        <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+        <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(statusLabel(s))}
       </button>`
   ).join("");
   els.categoriesSubmenu.querySelectorAll(".category-rect-option").forEach((btn) => {
@@ -318,88 +365,33 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Admin-only "Accounts visible" filter — a popup (not just a small submenu,
-// since the list of accounts can run long) letting an admin narrow the
-// Clients list down to only clients created by whichever accounts they've
-// selected. Requires clients_select_own to also allow is_admin() (see
-// supabase/schema.sql) — otherwise the admin's own Supabase session could
-// never fetch other accounts' clients in the first place, filter or no
-// filter. The Categories filter above is applied on top of whatever this
-// leaves in (see renderTable).
+// Admin-only "Accounts visible" filter — now a single shared setting across
+// Clients, Dials, and Profile (see js/accountsVisible.js). Requires
+// clients_select_own to also allow is_admin() (see supabase/schema.sql) —
+// otherwise the admin's own Supabase session could never fetch other
+// accounts' clients in the first place, filter or no filter. The Categories
+// filter above is applied on top of whatever this leaves in (see
+// renderTable).
 // ---------------------------------------------------------------------------
 
 if (isAdmin) els.menuAccountsVisibleBtn.classList.remove("hidden");
 
-let allAccounts = []; // [{id, full_name}] — every account in the company, including the admin's own
-let accountsLoaded = false;
-
-async function loadAccountsIfNeeded() {
-  if (accountsLoaded) return;
-  const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
-  if (!error) {
-    allAccounts = data || [];
-    accountsLoaded = true;
-  }
-}
-
-function isAccountVisible(id) {
-  return !visibleAccountIds || visibleAccountIds.has(id);
-}
-
-function renderAccountsVisiblePopup() {
-  const allSelected = !visibleAccountIds;
-  const rowsHTML = allAccounts.length
-    ? allAccounts
-        .map(
-          (a) => `
-        <button type="button" class="accounts-visible-row" data-id="${a.id}">
-          <input type="checkbox" ${isAccountVisible(a.id) ? "checked" : ""} tabindex="-1" />
-          ${escapeHtml(a.full_name)}${a.id === profile.id ? " (you)" : ""}
-        </button>`
-        )
-        .join("")
-    : `<div class="accounts-visible-empty">No accounts found.</div>`;
-
-  els.accountsVisibleBody.innerHTML = `
-    <div class="accounts-visible-list">
-      <button type="button" class="accounts-visible-row select-all" id="accountsSelectAllBtn">
-        <input type="checkbox" ${allSelected ? "checked" : ""} tabindex="-1" />
-        Select all
-      </button>
-      ${rowsHTML}
-    </div>
-  `;
-
-  document.getElementById("accountsSelectAllBtn").addEventListener("click", () => {
-    visibleAccountIds = null;
-    persistVisibleAccountIds();
-    renderAccountsVisiblePopup();
-    renderTable();
-  });
-  els.accountsVisibleBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
-    row.addEventListener("click", () => {
-      const id = row.dataset.id;
-      // Narrowing down from "all" for the first time starts from the full
-      // set of accounts (i.e. everything stays visible except the one just
-      // unchecked), rather than jumping straight to "only this one".
-      if (visibleAccountIds === null) visibleAccountIds = new Set(allAccounts.map((a) => a.id));
-      if (visibleAccountIds.has(id)) visibleAccountIds.delete(id);
-      else visibleAccountIds.add(id);
-      persistVisibleAccountIds();
-      renderAccountsVisiblePopup();
-      renderTable();
-    });
+if (isAdmin) {
+  wireAccountsVisiblePopup({
+    menuBtn: els.menuAccountsVisibleBtn,
+    popupEl: els.accountsVisiblePopup,
+    bodyEl: els.accountsVisibleBody,
+    closeBtn: els.accountsVisibleClose,
+    closePageHeaderMenu: closePageHeaderMenu,
+    myProfileId: profile.id,
+    getAllAccounts: async () => {
+      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      return error ? [] : data || [];
+    },
+    onChange: renderTable,
+    escapeHtml,
   });
 }
-
-els.menuAccountsVisibleBtn.addEventListener("click", async () => {
-  closePageHeaderMenu();
-  els.accountsVisiblePopup.classList.remove("hidden");
-  els.accountsVisibleBody.innerHTML = `<div class="accounts-visible-empty">Loading…</div>`;
-  await loadAccountsIfNeeded();
-  renderAccountsVisiblePopup();
-});
-els.accountsVisibleClose.addEventListener("click", () => els.accountsVisiblePopup.classList.add("hidden"));
 
 // ---------------------------------------------------------------------------
 // Field sections — shared between "new client" and the Profile tab
@@ -457,12 +449,12 @@ function categoryDropdownHTML(client) {
   return `
     <div class="dial-status-dropdown client-status-dropdown">
       <button type="button" class="dial-status-btn" id="clientStatusBtn"
-        style="background:${info.bg}; border-color:${info.border};">${escapeHtml(info.label)}</button>
+        style="background:${info.bg}; border-color:${info.border};">${escapeHtml(statusLabel(info))}</button>
       <div class="dial-status-menu hidden" id="clientStatusMenu">
         ${CLIENT_STATUSES.map(
           (s) => `
           <button type="button" class="dial-status-option" data-value="${s.value}">
-            <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+            <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(statusLabel(s))}
           </button>`
         ).join("")}
       </div>
@@ -532,6 +524,28 @@ function buildClientViewHTML(client) {
 // ---------------------------------------------------------------------------
 function buildProgressHTML(events) {
   const doneTypes = new Set(events.filter((e) => e.confirmed).map((e) => e.event_type));
+
+  // "Buyers/Sellers met with" — the counterpart names from every CONFIRMED,
+  // not-in-the-future Client meeting (see logClientMeeting/openCounterpartPicker
+  // in the Timeline section above), filling the empty space below the
+  // stepper. A seller's clients met with buyers, so its label/list names
+  // buyers, and vice versa — each name deep-links straight into that
+  // counterpart's own Timeline (see wireProgressMetWith below).
+  const metWithLabel = currentClient?.client_type === "seller" ? "Buyers met with" : "Sellers met with";
+  const metWithEvents = events.filter(
+    (e) => e.event_type === "client_meeting" && e.confirmed && !isFutureDate(e.event_date) && e.details?.counterpart_name && e.details?.counterpart_client_id
+  );
+  const metWithListHTML = metWithEvents.length
+    ? metWithEvents
+        .map(
+          (e) => `
+        <button type="button" class="progress-met-with-chip" data-client-id="${e.details.counterpart_client_id}">
+          ${escapeHtml(e.details.counterpart_name)}
+        </button>`
+        )
+        .join("")
+    : `<div class="empty-state">None yet.</div>`;
+
   return `
     <div class="progress-stepper" id="progressStepper">
       ${PROGRESS_STEPS.map((s) => {
@@ -543,7 +557,24 @@ function buildProgressHTML(events) {
           </div>`;
       }).join("")}
     </div>
+    <div class="progress-met-with">
+      <h3 class="progress-met-with-title">${escapeHtml(metWithLabel)}</h3>
+      <div class="progress-met-with-list">${metWithListHTML}</div>
+    </div>
   `;
+}
+
+// Deep-links a "Buyers/Sellers met with" chip straight into that counterpart
+// client's own Timeline tab (fetched directly, same as the ?client= deep-link
+// support near the end of this file, since the counterpart may belong to a
+// different account or be the opposite buyer/seller side).
+function wireProgressMetWith() {
+  document.querySelectorAll(".progress-met-with-chip[data-client-id]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const { data } = await supabase.from("clients").select("*").eq("id", btn.dataset.clientId).maybeSingle();
+      if (data) await openDetailModal(data, "timeline");
+    });
+  });
 }
 
 // Replaces the old single full-height rail with short connector segments
@@ -585,7 +616,26 @@ function positionProgressConnectors() {
 // ---------------------------------------------------------------------------
 function timelineEventDateStr(e) {
   const d = new Date(e.event_date);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const dateStr = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  // The optional 30-min-increment time chosen in openEventDetailsModal is
+  // stored as a "HH:MM" string in details.time (separate from event_date's
+  // own noon-anchored timestamp — see openEventDetailsModal) — appended here
+  // when present.
+  return e.details?.time ? `${dateStr}, ${formatTimeValue(e.details.time)}` : dateStr;
+}
+
+// What shows on the Timeline row's 2nd line — normally just the type label,
+// but a Client meeting names its counterpart (see openCounterpartPicker /
+// logClientMeeting) and a Task shows its own description instead of the
+// generic "Task" label.
+function eventTypeDisplay(e) {
+  if (e.event_type === "client_meeting" && e.details?.counterpart_name) {
+    return `Client meeting with ${e.details.counterpart_name}`;
+  }
+  if (e.event_type === "task" && e.details?.task_description) {
+    return e.details.task_description;
+  }
+  return EVENT_TYPE_LABELS[e.event_type] || e.event_type;
 }
 
 // True if the event's calendar date (in the viewer's local timezone) is
@@ -644,7 +694,7 @@ function buildTimelineHTML(events) {
             <div class="timeline-box">
               <div>
                 <div class="tl-date">${escapeHtml(timelineEventDateStr(e))}</div>
-                <div class="tl-type">${escapeHtml(EVENT_TYPE_LABELS[e.event_type] || e.event_type)}</div>
+                <div class="tl-type">${escapeHtml(eventTypeDisplay(e))}</div>
               </div>
               ${actionsHTML}
             </div>
@@ -659,7 +709,7 @@ function buildTimelineHTML(events) {
     ${listHTML}
     <button type="button" class="timeline-add-btn" id="timelineAddBtn" title="Add event">+</button>
     <div class="timeline-add-menu hidden" id="timelineAddMenu">
-      ${PROGRESS_STEPS.map((s) => `<button type="button" data-type="${s.type}">${escapeHtml(s.label)}</button>`).join("")}
+      ${TIMELINE_CATEGORIES.map((c) => `<button type="button" data-category="${c.value}">${escapeHtml(c.label)}</button>`).join("")}
     </div>
   `;
 }
@@ -695,20 +745,10 @@ function wireTimelineTab() {
       closeMenu();
     }
   });
-  addMenu.querySelectorAll("button[data-type]").forEach((btn) => {
+  addMenu.querySelectorAll("button[data-category]").forEach((btn) => {
     btn.addEventListener("click", () => {
       closeMenu();
-      const type = btn.dataset.type;
-      // Every event added via "+" asks for the date it actually happened
-      // first (defaults to today) — see openEventDateModal — rather than
-      // always stamping it with "right now".
-      openEventDateModal((eventDate) => {
-        if (type === "intro_call") {
-          openTimelineIntroCall(eventDate);
-          return;
-        }
-        logClientEvent(type, eventDate);
-      });
+      openTimelineAddFlow(btn.dataset.category);
     });
   });
 
@@ -727,21 +767,69 @@ function wireTimelineTab() {
 }
 
 // ---------------------------------------------------------------------------
-// "Choose the date this happened" step shown before any Timeline "+" event is
-// actually logged — a plain <input type="date"> defaulting to today, reused
-// (rather than duplicated) for every event type including Intro call. Same
-// show/confirm/cancel/cleanup shape as openConfirmModal-style helpers
-// elsewhere in the app.
+// Timeline "+" flow — after picking a top-level category (Meeting/Contract
+// advancement/Task) this shows the date/time/sub-type details popup, then
+// branches by category+sub-type: Intro call keeps the existing Calendly
+// hand-off; Client meeting additionally requires picking a counterpart
+// client before it's logged (on BOTH sides — see logClientMeeting); every
+// other combination just logs the one client_events row directly.
 // ---------------------------------------------------------------------------
-function openEventDateModal(onConfirm) {
+function openTimelineAddFlow(category) {
+  openEventDetailsModal(category, ({ eventDate, time, subtype, taskDescription }) => {
+    const details = time ? { time } : null;
+    if (category === "meeting") {
+      if (subtype === "intro_call") {
+        openTimelineIntroCall(eventDate, time);
+      } else if (subtype === "client_meeting") {
+        openCounterpartPicker((counterpart) => logClientMeeting(eventDate, time, counterpart));
+      } else {
+        logClientEvent("general_meeting", eventDate, details);
+      }
+    } else if (category === "contract_advancement") {
+      logClientEvent(subtype, eventDate, details);
+    } else if (category === "task") {
+      logClientEvent("task", eventDate, { ...(details || {}), task_description: taskDescription });
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Timeline "+" details step — date (required), time (optional, 30-min
+// increments), plus whichever extra control the category needs: Meeting/
+// Contract advancement get a sub-type dropdown, Task gets a required
+// description field. Same show/confirm/cancel/cleanup shape as
+// openConfirmModal-style helpers elsewhere in the app.
+// ---------------------------------------------------------------------------
+function openEventDetailsModal(category, onConfirm) {
   const modal = els.eventDateModal;
   const input = els.eventDateInput;
+  const timeSelect = els.eventTimeInput;
+  const subtypeWrap = els.eventSubtypeWrap;
+  const subtypeSelect = els.eventSubtypeSelect;
+  const taskWrap = els.eventTaskWrap;
+  const taskInput = els.eventTaskInput;
   const confirmBtn = els.eventDateConfirmBtn;
   const cancelBtn = els.eventDateCancelBtn;
+
+  els.eventDateModalTitle.textContent = category === "task" ? "New task" : "When did this happen?";
 
   const today = new Date();
   today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
   input.value = today.toISOString().slice(0, 10);
+  timeSelect.innerHTML = timeOptionsHTML();
+  timeSelect.value = "";
+
+  const showSubtype = category === "meeting" || category === "contract_advancement";
+  subtypeWrap.classList.toggle("hidden", !showSubtype);
+  const subtypeOptions = category === "meeting" ? MEETING_SUBTYPES : CONTRACT_SUBTYPES;
+  if (showSubtype) {
+    subtypeSelect.innerHTML = subtypeOptions.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join("");
+    subtypeSelect.value = subtypeOptions[0].value;
+  }
+  const isTask = category === "task";
+  taskWrap.classList.toggle("hidden", !isTask);
+  taskInput.value = "";
+
   modal.classList.remove("hidden");
 
   const cleanup = () => {
@@ -751,13 +839,99 @@ function openEventDateModal(onConfirm) {
   };
   const onConfirmClick = () => {
     const val = input.value;
-    cleanup();
     if (!val) return;
+    if (isTask && !taskInput.value.trim()) {
+      els.requiredPopupText.textContent = "Please enter a description for the task.";
+      els.requiredPopup.classList.remove("hidden");
+      return;
+    }
+    const time = timeSelect.value || null;
+    const subtype = showSubtype ? subtypeSelect.value : null;
+    const taskDescription = isTask ? taskInput.value.trim() : null;
+    cleanup();
     // Noon UTC-relative to the chosen calendar day (not midnight) so the
     // date can never accidentally roll back a day in a timezone behind UTC.
-    onConfirm(new Date(`${val}T12:00:00`).toISOString());
+    const eventDate = new Date(`${val}T12:00:00`).toISOString();
+    onConfirm({ eventDate, time, subtype, taskDescription });
   };
   const onCancelClick = () => cleanup();
+  confirmBtn.addEventListener("click", onConfirmClick);
+  cancelBtn.addEventListener("click", onCancelClick);
+}
+
+// ---------------------------------------------------------------------------
+// "Who's the meeting with?" step — only for Meeting > Client meeting. Lists
+// every opposite-side ("in cahoots"/connected_to_buyer) client this account
+// can currently see (same Sellers/Buyers + Accounts visible scoping used
+// everywhere else — see js/dealSide.js, js/accountsVisible.js), searchable,
+// and requires picking exactly one before Continue is enabled.
+// ---------------------------------------------------------------------------
+function counterpartDisplayName(c) {
+  return c.client_type === "seller" && c.company_name ? c.company_name : clientDisplayName(c);
+}
+
+async function openCounterpartPicker(onSelect) {
+  const counterpartType = currentClient.client_type === "seller" ? "buyer" : "seller";
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, first_name, last_name, company_name, client_type, created_by")
+    .eq("client_type", counterpartType)
+    .eq("pipeline_status", "connected_to_buyer")
+    .order("first_name", { ascending: true });
+  let options = error ? [] : data || [];
+  const visibleAccountIds = getVisibleAccountIds();
+  if (visibleAccountIds) options = options.filter((c) => visibleAccountIds.has(c.created_by));
+
+  const modal = els.counterpartModal;
+  const searchInput = els.counterpartSearchInput;
+  const listEl = els.counterpartList;
+  const confirmBtn = els.counterpartConfirmBtn;
+  const cancelBtn = els.counterpartCancelBtn;
+
+  let selectedId = null;
+
+  function render() {
+    const q = searchInput.value.trim().toLowerCase();
+    const filtered = options.filter((c) => counterpartDisplayName(c).toLowerCase().includes(q));
+    listEl.innerHTML = filtered.length
+      ? filtered
+          .map(
+            (c) => `
+        <button type="button" class="accounts-visible-row ${c.id === selectedId ? "selected" : ""}" data-id="${c.id}">
+          ${escapeHtml(counterpartDisplayName(c))}
+        </button>`
+          )
+          .join("")
+      : `<div class="accounts-visible-empty">No matches.</div>`;
+    listEl.querySelectorAll("[data-id]").forEach((row) => {
+      row.addEventListener("click", () => {
+        selectedId = row.dataset.id;
+        confirmBtn.disabled = false;
+        render();
+      });
+    });
+  }
+
+  searchInput.value = "";
+  selectedId = null;
+  confirmBtn.disabled = true;
+  render();
+  modal.classList.remove("hidden");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    searchInput.removeEventListener("input", onSearchInput);
+    confirmBtn.removeEventListener("click", onConfirmClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onSearchInput = () => render();
+  const onConfirmClick = () => {
+    const chosen = options.find((c) => c.id === selectedId);
+    cleanup();
+    if (chosen) onSelect(chosen);
+  };
+  const onCancelClick = () => cleanup();
+  searchInput.addEventListener("input", onSearchInput);
   confirmBtn.addEventListener("click", onConfirmClick);
   cancelBtn.addEventListener("click", onCancelClick);
 }
@@ -771,10 +945,33 @@ async function loadClientEvents() {
   currentClientEvents = error ? [] : data || [];
 }
 
-async function logClientEvent(eventType, eventDate) {
+async function logClientEvent(eventType, eventDate, details = null) {
   const payload = { client_id: currentClient.id, event_type: eventType, created_by: profile.id };
   if (eventDate) payload.event_date = eventDate;
+  if (details) payload.details = details;
   const { error } = await supabase.from("client_events").insert(payload);
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  await loadClientEvents();
+  renderModalBody();
+}
+
+// Client meeting is the one Timeline entry that's mirrored onto a SECOND
+// client's Timeline too (the counterpart picked in openCounterpartPicker) —
+// "client meeting with (buyer name)" on the seller's side, and the reverse
+// ("... with (seller name)") on the buyer's side, per spec. A plain insert
+// can't do the counterpart's half when that client belongs to a different
+// account (client_events_insert_own is still strictly own-client-only, same
+// as everywhere else in this file — see supabase/schema.sql), so this calls
+// the log_client_meeting() security-definer function instead, which checks
+// the caller actually owns `currentClient` and then inserts both sides.
+async function logClientMeeting(eventDate, time, counterpart) {
+  const { error } = await supabase.rpc("log_client_meeting", {
+    p_client_id: currentClient.id,
+    p_counterpart_client_id: counterpart.id,
+    p_event_date: eventDate,
+    p_time: time || null,
+    p_created_by: profile.id,
+  });
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   renderModalBody();
@@ -801,8 +998,9 @@ async function toggleClientEventConfirmed(eventId, newValue) {
 
 // Same shared "Schedule Intro Call" form the Dials page uses (js/introCall.js)
 // — here the client already exists, so it's passed directly (no createClient
-// callback needed). eventDate is whatever was chosen in openEventDateModal.
-function openTimelineIntroCall(eventDate) {
+// callback needed). eventDate/time are whatever was chosen in
+// openEventDetailsModal.
+function openTimelineIntroCall(eventDate, time) {
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowSkip: true });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
@@ -818,7 +1016,7 @@ function openTimelineIntroCall(eventDate) {
         client_id: client.id,
         event_type: "intro_call",
         event_date: eventDate || new Date().toISOString(),
-        details: { via: "calendly_link" },
+        details: { via: "calendly_link", time: time || null },
         created_by: profile.id,
       });
       setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
@@ -951,6 +1149,7 @@ function renderModalBody() {
     wireTimelineTab();
   } else if (currentSubTab === "progress") {
     positionProgressConnectors();
+    wireProgressMetWith();
   } else if (currentSubTab === "profile") {
     wireCategoryDropdown();
     stopContactActionPropagation(els.clientModalBody);
@@ -1000,10 +1199,10 @@ function openCreateModal() {
   renderModalBody();
 }
 
-async function openDetailModal(client) {
+async function openDetailModal(client, initialSubTab = "profile") {
   currentClient = client;
   currentMode = "view";
-  currentSubTab = "profile";
+  currentSubTab = initialSubTab;
   els.clientModal.classList.remove("hidden");
   lockPageScroll();
   await loadClientEvents();
@@ -1033,6 +1232,10 @@ if (isAdmin) {
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");
+    // Refreshes the green category's label ("Connected to buyer" <->
+    // "In cahoots" — see statusLabel()) immediately on toggle, not just
+    // after a full reload.
+    renderCategoriesSubmenu();
     await loadClients();
     renderTable();
   });
@@ -1043,3 +1246,24 @@ els.editProfileBtn.addEventListener("click", () => {
 });
 
 await loadClients();
+
+// ---------------------------------------------------------------------------
+// Deep-link support: ?client=<id>&tab=timeline opens straight into that
+// client's Timeline tab — used by Profile's Upcoming events list (see
+// loadUpcomingEvents() in js/profile.js) and the Progress tab's "Buyers/
+// Sellers met with" names (see buildProgressHTML). Fetches the target client
+// directly (rather than looking it up in the client_type-filtered `clients`
+// array above) since the linked client may be the opposite buyer/seller side
+// from whatever's currently toggled in Sellers/Buyers.
+// ---------------------------------------------------------------------------
+const deepLinkParams = new URLSearchParams(window.location.search);
+const deepLinkClientId = deepLinkParams.get("client");
+if (deepLinkClientId) {
+  const { data: deepLinkClient } = await supabase.from("clients").select("*").eq("id", deepLinkClientId).maybeSingle();
+  if (deepLinkClient) {
+    await openDetailModal(deepLinkClient, deepLinkParams.get("tab") === "timeline" ? "timeline" : "profile");
+  }
+  // Clean the URL so refreshing, or closing the modal, doesn't reopen the
+  // same client again.
+  window.history.replaceState({}, "", "clients.html");
+}

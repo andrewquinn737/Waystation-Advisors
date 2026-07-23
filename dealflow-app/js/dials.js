@@ -6,6 +6,7 @@ import { rfContact, contactActionIcons, stopContactActionPropagation, locationPi
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
+import { getVisibleAccountIds, wireAccountsVisiblePopup } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -67,15 +68,6 @@ const SHOW_CALLED_TODAY_STATUSES = new Set(["uncontacted", "no_response", "callb
 // palette filter button).
 const hiddenStatuses = new Set();
 
-// Admin-only "Accounts visible" filter (see menuAccountsVisibleBtn below) —
-// same pattern as js/clients.js's version. null = no filter applied (every
-// account's tabs show, i.e. "Select all"), otherwise a Set of profile ids
-// whose tabs should be shown. Requires dial_lists_select_own/dials_select_own
-// to also allow is_admin() (see supabase/schema.sql) so an admin's session can
-// fetch other accounts' tabs at all before this client-side filter narrows it
-// down further.
-let visibleAccountIds = null;
-
 // ---------------------------------------------------------------------------
 // Select mode (bulk-select dials for mass email/text/move/delete) — see
 // enterSelectMode/exitSelectMode, renderDialsTable's selectMode branch, and
@@ -100,7 +92,6 @@ const DIALS_STORAGE_KEYS = {
   listId: "waystation_dials_list_id",
   status: "waystation_dials_status",
   hiddenStatuses: "waystation_dials_hidden_statuses",
-  visibleAccounts: "waystation_dials_visible_accounts",
 };
 
 function loadPersistedDialsState() {
@@ -117,23 +108,6 @@ function loadPersistedDialsState() {
   } catch {
     // Storage may be unavailable (private browsing, etc.) or contain
     // malformed data — just fall back to defaults rather than throwing.
-  }
-  try {
-    const savedAccounts = localStorage.getItem(DIALS_STORAGE_KEYS.visibleAccounts);
-    if (savedAccounts) {
-      const arr = JSON.parse(savedAccounts);
-      if (Array.isArray(arr)) visibleAccountIds = new Set(arr);
-    }
-  } catch {
-    // ignore
-  }
-}
-function persistVisibleAccountIds() {
-  try {
-    if (visibleAccountIds === null) localStorage.removeItem(DIALS_STORAGE_KEYS.visibleAccounts);
-    else localStorage.setItem(DIALS_STORAGE_KEYS.visibleAccounts, JSON.stringify([...visibleAccountIds]));
-  } catch {
-    // ignore
   }
 }
 function persistCurrentListId() {
@@ -553,6 +527,7 @@ async function loadLists() {
 }
 
 function filteredLists() {
+  const visibleAccountIds = getVisibleAccountIds();
   return allLists
     .filter(
       (l) =>
@@ -560,8 +535,8 @@ function filteredLists() {
         l.status === currentStatus &&
         // Admin-only "Accounts visible" filter — applied before the tab list
         // is even built, same layering as Clients' renderTable (see
-        // renderAccountsVisiblePopup below). null means no account filter is
-        // active (every account's tabs pass through).
+        // js/accountsVisible.js). null means no account filter is active
+        // (every account's tabs pass through).
         (!visibleAccountIds || visibleAccountIds.has(l.created_by))
     )
     .sort((a, b) => a.sort_order - b.sort_order || new Date(a.created_at) - new Date(b.created_at));
@@ -2038,84 +2013,30 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Admin-only "Accounts visible" filter — same popup/behavior as the Clients
-// page's version (see js/clients.js). Lets an admin narrow the Dials tab bar
-// down to only tabs created by whichever accounts they've selected, on top of
-// the existing Sellers/Buyers + Current/Archived + Categories filtering.
+// Admin-only "Accounts visible" filter — shared module (js/accountsVisible.js)
+// with the Clients/Profile pages. Lets an admin narrow the Dials tab bar down
+// to only tabs created by whichever accounts they've selected, on top of the
+// existing Sellers/Buyers + Current/Archived + Categories filtering.
 // Requires dial_lists_select_own/dials_select_own to also allow is_admin()
 // (see supabase/schema.sql) — otherwise the admin's own session could never
 // fetch other accounts' tabs in the first place, filter or no filter.
 // ---------------------------------------------------------------------------
 
-let allAccounts = []; // [{id, full_name}] — every account in the company, including the admin's own
-let accountsLoaded = false;
-
-async function loadAccountsIfNeeded() {
-  if (accountsLoaded) return;
-  const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
-  if (!error) {
-    allAccounts = data || [];
-    accountsLoaded = true;
-  }
-}
-
-function isAccountVisible(id) {
-  return !visibleAccountIds || visibleAccountIds.has(id);
-}
-
-function renderAccountsVisiblePopup() {
-  const allSelected = !visibleAccountIds;
-  const rowsHTML = allAccounts.length
-    ? allAccounts
-        .map(
-          (a) => `
-        <button type="button" class="accounts-visible-row" data-id="${a.id}">
-          <input type="checkbox" ${isAccountVisible(a.id) ? "checked" : ""} tabindex="-1" />
-          ${escapeHtml(a.full_name)}${a.id === profile.id ? " (you)" : ""}
-        </button>`
-        )
-        .join("")
-    : `<div class="accounts-visible-empty">No accounts found.</div>`;
-
-  els.accountsVisibleBody.innerHTML = `
-    <div class="accounts-visible-list">
-      <button type="button" class="accounts-visible-row select-all" id="accountsSelectAllBtn">
-        <input type="checkbox" ${allSelected ? "checked" : ""} tabindex="-1" />
-        Select all
-      </button>
-      ${rowsHTML}
-    </div>
-  `;
-
-  document.getElementById("accountsSelectAllBtn").addEventListener("click", () => {
-    visibleAccountIds = null;
-    persistVisibleAccountIds();
-    renderAccountsVisiblePopup();
-    renderTabs();
-  });
-  els.accountsVisibleBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
-    row.addEventListener("click", () => {
-      const id = row.dataset.id;
-      // Narrowing down from "all" for the first time starts from the full
-      // set of accounts (i.e. everything stays visible except the one just
-      // unchecked), rather than jumping straight to "only this one".
-      if (visibleAccountIds === null) visibleAccountIds = new Set(allAccounts.map((a) => a.id));
-      if (visibleAccountIds.has(id)) visibleAccountIds.delete(id);
-      else visibleAccountIds.add(id);
-      persistVisibleAccountIds();
-      renderAccountsVisiblePopup();
-      renderTabs();
-    });
+if (isAdmin) {
+  wireAccountsVisiblePopup({
+    menuBtn: els.menuAccountsVisibleBtn,
+    popupEl: els.accountsVisiblePopup,
+    bodyEl: els.accountsVisibleBody,
+    closeBtn: els.accountsVisibleClose,
+    closePageHeaderMenu: closePageHeaderMenu,
+    myProfileId: profile.id,
+    getAllAccounts: async () => {
+      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      return error ? [] : data || [];
+    },
+    onChange: renderTabs,
+    escapeHtml,
   });
 }
-
-els.menuAccountsVisibleBtn.addEventListener("click", async () => {
-  closePageHeaderMenu();
-  els.accountsVisiblePopup.classList.remove("hidden");
-  els.accountsVisibleBody.innerHTML = `<div class="accounts-visible-empty">Loading…</div>`;
-  await loadAccountsIfNeeded();
-  renderAccountsVisiblePopup();
-});
-els.accountsVisibleClose.addEventListener("click", () => els.accountsVisiblePopup.classList.add("hidden"));
 
 await loadLists();
