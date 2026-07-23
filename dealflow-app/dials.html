@@ -25,7 +25,8 @@
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
 <link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#2f5fed" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -124,6 +125,7 @@
          forces its overflow-y to auto too and would clip a popup nested
          inside it. -->
     <div class="dial-tab-archive-menu hidden" id="dialTabArchiveMenu">
+      <button type="button" class="dial-tab-archive-btn" id="dialTabRenameBtn">Rename</button>
       <button type="button" class="dial-tab-archive-btn" id="dialTabArchiveBtn"></button>
       <!-- Admin-only — see js/dials.js's `if (isAdmin) els.dialTabTransferBtn...`. -->
       <button type="button" class="dial-tab-transfer-btn hidden" id="dialTabTransferBtn">Transfer</button>
