@@ -2,7 +2,8 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import {
   escapeHtml,
-  lookingForLabel,
+  notesLabel,
+  combinedNotes,
   defaultClient,
   buildEditableSections,
   wireEditableFormEvents,
@@ -20,6 +21,12 @@ const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
 const isAdmin = profile?.role === "admin";
+// Team leads get the settings gear (Sellers/Buyers + Accounts visible) like
+// admins do, but Accounts visible only ever lists their own teammates (see
+// getAllAccounts below) — everything else gated on isAdmin alone (Contract
+// advancement, etc.) stays admin-only; a team lead is otherwise treated like
+// an intern.
+const isTeamLead = profile?.role === "team_lead";
 // First-ever use of the shared Accounts visible setting defaults to "just
 // me" instead of "Select all" — a no-op every subsequent load (see
 // js/accountsVisible.js).
@@ -369,18 +376,18 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Admin-only "Accounts visible" filter — now a single shared setting across
-// Clients, Dials, and Profile (see js/accountsVisible.js). Requires
-// clients_select_own to also allow is_admin() (see supabase/schema.sql) —
-// otherwise the admin's own Supabase session could never fetch other
+// "Accounts visible" filter — a single shared setting across Clients, Dials,
+// and Profile (see js/accountsVisible.js), visible to admins and team leads.
+// Requires clients_select_own to also allow is_admin()/is_team_lead_of() (see
+// supabase/schema.sql) — otherwise the session could never fetch other
 // accounts' clients in the first place, filter or no filter. The Categories
 // filter above is applied on top of whatever this leaves in (see
 // renderTable).
 // ---------------------------------------------------------------------------
 
-if (isAdmin) els.menuAccountsVisibleBtn.classList.remove("hidden");
+if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
 
-if (isAdmin) {
+if (isAdmin || isTeamLead) {
   wireAccountsVisiblePopup({
     menuBtn: els.menuAccountsVisibleBtn,
     popupEl: els.accountsVisiblePopup,
@@ -389,7 +396,21 @@ if (isAdmin) {
     closePageHeaderMenu: closePageHeaderMenu,
     myProfileId: profile.id,
     getAllAccounts: async () => {
-      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      // Admins see everyone; a team lead only ever sees their own teammates
+      // (same team_id) — never every account. Requires clients_select_own to
+      // also allow is_team_lead_of() (see supabase/schema.sql), otherwise a
+      // team lead's session could never fetch a teammate's clients in the
+      // first place, filter or no filter.
+      if (isAdmin) {
+        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+        return error ? [] : data || [];
+      }
+      if (!profile.team_id) return [];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("team_id", profile.team_id)
+        .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
     onChange: renderTable,
@@ -513,8 +534,7 @@ function buildClientViewHTML(client) {
     ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
     ${rf("Employees", client.employee_count)}
     ${rf("Founded", founded)}
-    ${rf(lookingForLabel(), client.looking_for)}
-    ${rf("Notes", client.other_notes)}
+    ${rf(notesLabel(), combinedNotes(client))}
   `;
 }
 
@@ -1230,12 +1250,12 @@ els.menuAddNewBtn.addEventListener("click", () => {
 els.clientModalClose.addEventListener("click", closeModal);
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
 
-// Settings gear popover — admin-only Sellers/Buyers toggle (see
-// js/dealSide.js). Hidden entirely for interns (it used to just be inert
-// but still visible/clickable, which was pointless since it has nothing
-// for them — now it's not even shown).
-if (!isAdmin) els.pageSettingsBtn.classList.add("hidden");
-if (isAdmin) {
+// Settings gear popover — Sellers/Buyers toggle (see js/dealSide.js), visible
+// to admins and team leads. Hidden entirely for interns (it used to just be
+// inert but still visible/clickable, which was pointless since it has
+// nothing for them — now it's not even shown).
+if (!isAdmin && !isTeamLead) els.pageSettingsBtn.classList.add("hidden");
+if (isAdmin || isTeamLead) {
   wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     els.settingsMenu.classList.add("hidden");

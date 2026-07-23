@@ -16,6 +16,11 @@ const { profile } = session;
 // gate the settings gear (Sellers/Buyers + Accounts visible), which now shows
 // on Profile too (see wiring near the bottom of this file).
 const isAdminSync = profile?.role === "admin";
+// Team leads also get the settings gear (Sellers/Buyers + Accounts visible),
+// but Accounts visible only ever lists their own teammates, never every
+// account — see the getAllAccounts callback near the bottom of this file.
+// Everything else gated on isAdminSync (nothing else is) stays admin-only.
+const isTeamLeadSync = profile?.role === "team_lead";
 // First-ever use of the shared Accounts visible setting defaults to "just
 // me" instead of "Select all" — a no-op every subsequent load (see
 // js/accountsVisible.js).
@@ -50,7 +55,7 @@ const els = {
   callsChart: document.getElementById("callsChart"),
   introCallsThisWeekText: document.getElementById("introCallsThisWeekText"),
   introCallsChart: document.getElementById("introCallsChart"),
-  teamsBtn: document.getElementById("teamsBtn"),
+  menuTeamsBtn: document.getElementById("menuTeamsBtn"),
   teamsModal: document.getElementById("teamsModal"),
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
   teamsAddBtn: document.getElementById("teamsAddBtn"),
@@ -59,6 +64,7 @@ const els = {
   teamsAddAccountBtn: document.getElementById("teamsAddAccountBtn"),
   teamsAddTeamBtn: document.getElementById("teamsAddTeamBtn"),
   teamsWrap: document.getElementById("teamsWrap"),
+  teamsErrorBox: document.getElementById("teamsErrorBox"),
   profileSignOutBtn: document.getElementById("profileSignOutBtn"),
   addAccountModal: document.getElementById("addAccountModal"),
   newAccountFirstName: document.getElementById("newAccountFirstName"),
@@ -143,7 +149,7 @@ async function loadAllAccountsForSelection() {
   if (allAccountsForSelection) return allAccountsForSelection;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role, phone, email, avatar_url")
+    .select("id, full_name, role, phone, email, avatar_url, team_id")
     .order("full_name", { ascending: true });
   allAccountsForSelection = error ? [] : data || [];
   return allAccountsForSelection;
@@ -155,12 +161,19 @@ async function loadAllAccountsForSelection() {
 // narrowed down to nothing (an edge case the shared popup doesn't otherwise
 // prevent), so this can never return an empty list.
 async function resolveSelectedAccounts() {
-  if (!isAdminSync) return [profile];
+  if (!isAdminSync && !isTeamLeadSync) return [profile];
   const all = await loadAllAccountsForSelection();
+  // Team leads only ever get their own teammates back here, even though
+  // loadAllAccountsForSelection() itself fetches every account — filtering
+  // happens client-side, same as the getAllAccounts callback passed to
+  // wireAccountsVisiblePopup near the bottom of this file (which is what
+  // actually controls which accounts a team lead can pick from in the first
+  // place — this just needs to agree with that scope).
+  const pool = isAdminSync ? all : all.filter((a) => a.id === profile.id || (profile.team_id && a.team_id === profile.team_id));
   const visible = getVisibleAccountIds();
-  if (!visible) return all.length ? all : [profile];
-  const picked = all.filter((a) => visible.has(a.id));
-  return picked.length ? picked : all.length ? all : [profile];
+  if (!visible) return pool.length ? pool : [profile];
+  const picked = pool.filter((a) => visible.has(a.id));
+  return picked.length ? picked : pool.length ? pool : [profile];
 }
 
 async function renderProfileHeader() {
@@ -173,7 +186,7 @@ async function renderProfileHeader() {
   const showAccount = isSingleOther ? selected[0] : profile;
 
   els.profileName.textContent = showAccount.full_name;
-  els.profileRole.textContent = showAccount.role === "admin" ? "Admin" : "Intern";
+  els.profileRole.textContent = showAccount.role === "admin" ? "Admin" : showAccount.role === "team_lead" ? "Team lead" : "Intern";
   renderAvatar(showAccount);
 
   // Either line is simply omitted if that field isn't on file (e.g. older
@@ -325,16 +338,21 @@ els.avatarFileInput.addEventListener("change", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Outreach calls / Intro calls / Upcoming events toggle — the header menu's
-// second option, now a 3-state cycle. Purely a view toggle — nothing is
-// persisted, so it always starts back on Outreach calls next time the page
-// loads. Whichever view is showing always reflects whatever account(s) are
-// currently selected in Accounts visible (see resolveSelectedAccounts above,
-// and the settings-gear wiring near the bottom of this file), so switching
-// accounts re-fetches rather than relying on a stale first-load cache.
+// Outreach calls / Intro calls toggle — the header menu's last option, a
+// 2-state cycle. Purely a view toggle — nothing is persisted, so it always
+// starts back on Outreach calls next time the page loads. Whichever view is
+// showing always reflects whatever account(s) are currently selected in
+// Accounts visible (see resolveSelectedAccounts above, and the settings-gear
+// wiring near the bottom of this file), so switching accounts re-fetches
+// rather than relying on a stale first-load cache.
+//
+// Upcoming events used to be the 3rd state in this cycle; it's now its own
+// always-visible box further down the page (see #upcomingEventsSection in
+// profile.html) and is refreshed independently, in refreshActiveCallsView()
+// below and once on initial load, rather than being toggled here.
 // ---------------------------------------------------------------------------
-const CALLS_VIEW_CYCLE = ["outreach", "intro", "upcoming"];
-const CALLS_VIEW_LABELS = { outreach: "Outreach calls", intro: "Intro calls", upcoming: "Upcoming events" };
+const CALLS_VIEW_CYCLE = ["outreach", "intro"];
+const CALLS_VIEW_LABELS = { outreach: "Outreach calls", intro: "Intro calls" };
 
 function showCallsView(view) {
   els.menuCallsViewBtn.dataset.view = view;
@@ -342,17 +360,17 @@ function showCallsView(view) {
   label.textContent = CALLS_VIEW_LABELS[view];
   els.outreachCallsSection.classList.toggle("hidden", view !== "outreach");
   els.introCallsSection.classList.toggle("hidden", view !== "intro");
-  els.upcomingEventsSection.classList.toggle("hidden", view !== "upcoming");
   if (view === "outreach") loadCallsChart();
-  else if (view === "intro") loadIntroCallsChart();
-  else loadUpcomingEvents();
+  else loadIntroCallsChart();
 }
 
-// Re-runs whichever calls-view is currently on screen — called after the
-// Accounts visible selection changes, so the numbers/graph/events update
-// immediately instead of only on next toggle or reload.
+// Re-runs whichever calls-view is currently on screen, plus the always-visible
+// Upcoming events box — called after the Accounts visible selection changes,
+// so the numbers/graph/events update immediately instead of only on next
+// toggle or reload.
 function refreshActiveCallsView() {
   showCallsView(els.menuCallsViewBtn.dataset.view || "outreach");
+  loadUpcomingEvents();
 }
 
 els.menuCallsViewBtn.addEventListener("click", (e) => {
@@ -381,7 +399,7 @@ let editMode = false;
 // accordion-header click handler. A group not in this set renders open, so
 // entering/exiting edit mode (which re-renders) no longer resets everything
 // back to "only the first section open". Cleared to empty (i.e. everything
-// open) each time the Teams popup is freshly opened via els.teamsBtn.
+// open) each time the Teams popup is freshly opened via els.menuTeamsBtn.
 let closedGroupKeys = new Set();
 // profile_id -> temp password string, admin-only (RLS on profile_temp_passwords
 // restricts select to admins — see supabase/schema.sql). Populated in
@@ -397,7 +415,7 @@ function escapeHtml(str) {
 }
 
 function memberPositionLabel(m) {
-  return m.role === "admin" ? "Admin" : "Intern";
+  return m.role === "admin" ? "Admin" : m.role === "team_lead" ? "Team lead" : "Intern";
 }
 
 // Which group (key) a given profile row currently belongs to. Admins always
@@ -431,8 +449,8 @@ async function loadTeams() {
     // Teams from loading — so no error-checking on this one.
     supabase.from("profile_temp_passwords").select("profile_id, temp_password"),
   ]);
-  if (profErr) return showError(els.errorBox, profErr);
-  if (teamsErr) return showError(els.errorBox, teamsErr);
+  if (profErr) return showError(els.teamsErrorBox, profErr);
+  if (teamsErr) return showError(els.teamsErrorBox, teamsErr);
   tempPasswordsByMemberId = {};
   (tempPwData || []).forEach((row) => {
     tempPasswordsByMemberId[row.profile_id] = row.temp_password;
@@ -455,6 +473,20 @@ async function loadTeams() {
   allMembers.forEach((m) => {
     teamMembersByGroup[groupKeyForMember(m)].push(m);
   });
+  // A team's lead (if it has one) always sorts to the top of its box — see
+  // memberCardHTML's divider line, drawn right after whichever card is
+  // role==='team_lead'. There's only ever at most one per box (promoting a
+  // 2nd swaps the 1st back to intern — see setMemberRole below), so this only
+  // ever moves at most one row per group; everyone else stays in the
+  // alphabetical order the query above already returned.
+  Object.keys(teamMembersByGroup).forEach((key) => {
+    const members = teamMembersByGroup[key];
+    const leadIdx = members.findIndex((m) => m.role === "team_lead");
+    if (leadIdx > 0) {
+      const [lead] = members.splice(leadIdx, 1);
+      members.unshift(lead);
+    }
+  });
   renderTeams();
 }
 
@@ -474,7 +506,7 @@ function renderTeams() {
       // only closed if the user explicitly collapsed it (see the
       // accordion-header click handler below). Groups never touched (or
       // newly created) default to open. Opening the Teams popup fresh always
-      // clears closedGroupKeys first (see els.teamsBtn's click handler).
+      // clears closedGroupKeys first (see els.menuTeamsBtn's click handler).
       return `
       <div class="accordion-section team-group ${closedGroupKeys.has(g.key) ? "" : "open"}" data-group="${g.key}">
         <div class="accordion-header">
@@ -487,7 +519,7 @@ function renderTeams() {
         <div class="accordion-body team-group-body">
           ${
             members.length
-              ? `<div class="team-member-list">${members.map(memberCardHTML).join("")}</div>`
+              ? `<div class="team-member-list">${members.map((m, i) => memberCardHTML(m, i, members)).join("")}</div>`
               : `<div class="empty-state">No one here yet.</div>`
           }
         </div>
@@ -550,7 +582,28 @@ function renderTeams() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const menu = btn.closest(".position-menu");
-      moveMemberToGroup(menu.dataset.memberId, btn.dataset.role === "admin" ? ADMINS_KEY : UNASSIGNED_KEY);
+      const memberId = menu.dataset.memberId;
+      const role = btn.dataset.role; // "intern" | "team_lead" | "admin"
+
+      if (role === "admin") {
+        moveMemberToGroup(memberId, ADMINS_KEY);
+        return;
+      }
+      if (role === "team_lead") {
+        setMemberAsTeamLead(memberId);
+        return;
+      }
+      // role === "intern"
+      const member = allMembers.find((m) => m.id === memberId);
+      if (member?.role === "admin") {
+        // No "previous team" to return an admin to — send them to
+        // Unassigned interns, same as always.
+        moveMemberToGroup(memberId, UNASSIGNED_KEY);
+      } else {
+        // Demoting a team lead (or clicking "Intern" on a plain intern,
+        // a no-op) keeps them in their current team box.
+        demoteTeamLeadInPlace(memberId);
+      }
     });
   });
   els.teamsWrap.querySelectorAll(".member-trash-btn").forEach((btn) => {
@@ -570,7 +623,7 @@ function renderTeams() {
   stopContactActionPropagation(els.teamsWrap);
 }
 
-function memberCardHTML(m) {
+function memberCardHTML(m, idx, groupMembers) {
   const isMemberAdmin = m.role === "admin";
   const positionLabel = memberPositionLabel(m);
   const positionHTML = isAdmin
@@ -579,10 +632,17 @@ function memberCardHTML(m) {
       <span class="mc-sub position-toggle" data-member-id="${m.id}">${escapeHtml(positionLabel)}</span>
       <div class="position-menu hidden" data-member-id="${m.id}">
         <button type="button" class="position-option" data-role="intern">Intern</button>
+        <button type="button" class="position-option" data-role="team_lead">Team lead</button>
         <button type="button" class="position-option" data-role="admin">Admin</button>
       </div>
     </div>`
     : `<div class="mc-sub">${escapeHtml(positionLabel)}</div>`;
+
+  // The team lead (if this box has one) always sorts to index 0 (see
+  // loadTeams()) — draw the divider right after their card, but only if
+  // there's actually someone else below it to separate from.
+  const leadDividerHTML =
+    m.role === "team_lead" && idx === 0 && groupMembers && groupMembers.length > 1 ? `<div class="team-lead-divider"></div>` : "";
 
   const rightHTML =
     editMode && !isMemberAdmin
@@ -607,7 +667,8 @@ function memberCardHTML(m) {
         ${rightHTML}
       </div>
       ${pwRevealed ? tempPasswordRevealHTML(m.id) : ""}
-    </div>`;
+    </div>
+    ${leadDividerHTML}`;
 }
 
 // Small photo (or initials, if none uploaded) shown left of each member's
@@ -779,18 +840,92 @@ function togglePositionMenu(toggleEl) {
 document.addEventListener("click", () => closeAllPositionMenus());
 
 // Moves a member into `groupKey` (either ADMINS_KEY, UNASSIGNED_KEY, or a
-// custom team's id) — shared by the position dropdown and the drag-drop
-// gesture below. Moving into Admins always sets role='admin'; moving
-// anywhere else always sets role='intern' (an admin dragged out becomes an
-// intern again, per spec) plus that destination's team_id.
+// custom team's id) — shared by the position dropdown's Admin/Intern options
+// and the drag-drop gesture below. Moving into Admins always sets
+// role='admin'; moving anywhere else always sets role='intern' (an admin or
+// team lead dragged out becomes a plain intern again, per spec) plus that
+// destination's team_id. Team lead promotion itself is NOT done through this
+// function — see setMemberAsTeamLead/demoteTeamLeadInPlace below, which
+// change role without moving anyone between boxes.
 async function moveMemberToGroup(memberId, groupKey) {
   const updates =
     groupKey === ADMINS_KEY
       ? { role: "admin" }
       : { role: "intern", team_id: groupKey === UNASSIGNED_KEY ? null : groupKey };
   const { error } = await supabase.from("profiles").update(updates).eq("id", memberId);
-  if (error) return showError(els.errorBox, error);
+  if (error) return showError(els.teamsErrorBox, error);
   await loadTeams();
+  // A move can leave either the source or destination team box down to (or
+  // up to) exactly one member — re-check every team box for the "sole
+  // account auto-becomes team lead" rule. No exclusion here: that exception
+  // only applies to the explicit "switch this team lead back to intern"
+  // action below, not to an ordinary move/drag.
+  await applyAutoPromotion(null);
+}
+
+// Promotes memberId to team lead. Only valid for someone already inside a
+// real (non-virtual) team box — Admins and Unassigned interns are rejected
+// with an inline error, per spec ("they have to be in a box that is not
+// admins or unassigned interns to be made a team lead"). If that box already
+// has a different team lead, the two swap places: the existing lead reverts
+// to intern (in place, same box — not moved anywhere).
+async function setMemberAsTeamLead(memberId) {
+  const member = allMembers.find((m) => m.id === memberId);
+  if (!member) return;
+  const groupKey = groupKeyForMember(member);
+  if (groupKey === ADMINS_KEY || groupKey === UNASSIGNED_KEY) {
+    showError(els.teamsErrorBox, new Error("Only accounts inside a team box can be made team lead."));
+    return;
+  }
+  const boxmates = teamMembersByGroup[groupKey] || [];
+  const existingLead = boxmates.find((m) => m.id !== memberId && m.role === "team_lead");
+  if (existingLead) {
+    const { error: demoteErr } = await supabase.from("profiles").update({ role: "intern" }).eq("id", existingLead.id);
+    if (demoteErr) return showError(els.teamsErrorBox, demoteErr);
+  }
+  const { error } = await supabase.from("profiles").update({ role: "team_lead" }).eq("id", memberId);
+  if (error) return showError(els.teamsErrorBox, error);
+  await loadTeams();
+}
+
+// Demoting an admin via the position dropdown's "Intern" option has always
+// meant "send to Unassigned interns as a plain intern" (moveMemberToGroup,
+// above) — Admins is a virtual group with no team_id of its own to fall back
+// to. Demoting a team lead is different: they stay exactly where they are,
+// only their role changes (see moveMemberToGroup's own comment for why this
+// needs to be a separate function rather than reusing it).
+async function demoteTeamLeadInPlace(memberId) {
+  const { error } = await supabase.from("profiles").update({ role: "intern" }).eq("id", memberId);
+  if (error) return showError(els.teamsErrorBox, error);
+  await loadTeams();
+  // "...unless they are switched back to an intern" — this action IS that
+  // explicit switch-back, so this member specifically is excluded from
+  // immediately being auto-re-promoted even though they're likely still
+  // alone in their box. Anything else that later changes that box's
+  // membership runs applyAutoPromotion() with no exclusion, so they're fair
+  // game to be auto-promoted again after that.
+  await applyAutoPromotion(memberId);
+}
+
+// "If there is only one account in a box they are automatically set to a
+// team lead" — checked after every operation that can change a custom team
+// box's membership or headcount (promotion swaps don't change headcount, so
+// they don't call this). excludeMemberId (see demoteTeamLeadInPlace above)
+// skips re-promoting whoever was just explicitly demoted in this same
+// action.
+async function applyAutoPromotion(excludeMemberId) {
+  let changed = false;
+  for (const team of customTeams) {
+    const members = teamMembersByGroup[team.id] || [];
+    if (members.length === 1) {
+      const only = members[0];
+      if (only.id !== excludeMemberId && only.role !== "team_lead") {
+        const { error } = await supabase.from("profiles").update({ role: "team_lead" }).eq("id", only.id);
+        if (!error) changed = true;
+      }
+    }
+  }
+  if (changed) await loadTeams();
 }
 
 // ---------------------------------------------------------------------------
@@ -1017,8 +1152,11 @@ function handleDeleteAccount(memberId, memberName) {
     const { data, error } = await supabase.functions.invoke("admin-delete-account", {
       body: { user_id: memberId },
     });
-    if (error || data?.error) return showError(els.errorBox, error || new Error(data.error));
+    if (error || data?.error) return showError(els.teamsErrorBox, error || new Error(data.error));
     await loadTeams();
+    // Removing an account can leave its old team box down to exactly one
+    // member — re-run the "sole account auto-becomes team lead" check.
+    await applyAutoPromotion(null);
   });
 }
 
@@ -1388,7 +1526,7 @@ async function loadUpcomingEvents() {
 
   const { data, error } = await supabase
     .from("client_events")
-    .select("id, event_type, event_date, details, client_id, clients!inner(id, first_name, last_name, company_name, client_type, created_by)")
+    .select("id, event_type, event_date, details, client_id, clients!inner(id, first_name, last_name, created_by)")
     .gte("event_date", startOfToday.toISOString())
     .in("clients.created_by", ids)
     .order("event_date", { ascending: true });
@@ -1403,7 +1541,7 @@ async function loadUpcomingEvents() {
   els.upcomingEventsBox.innerHTML = rows
     .map((r) => {
       const c = r.clients;
-      const name = c.client_type === "seller" && c.company_name ? c.company_name : `${c.first_name} ${c.last_name}`.trim();
+      const name = `${c.first_name} ${c.last_name}`.trim();
       const typeLabel = UPCOMING_EVENT_TYPE_LABELS[r.event_type] || r.event_type;
       const hasTime = !!r.details?.time;
       return `
@@ -1421,9 +1559,12 @@ async function loadUpcomingEvents() {
   });
 }
 
-els.teamsBtn.addEventListener("click", async () => {
+els.menuTeamsBtn.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  closePageHeaderMenu();
   editMode = false;
   closedGroupKeys.clear(); // every section starts open each time the popup is (re)opened
+  els.teamsErrorBox.classList.add("hidden");
   els.teamsModal.classList.remove("hidden");
   lockPageScroll();
   await loadTeams();
@@ -1445,9 +1586,11 @@ wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu }
 // visible also drives which account(s)' info/numbers/events are shown (see
 // resolveSelectedAccounts, renderProfileHeader, refreshActiveCallsView).
 // Hidden entirely for interns (used to just be inert/unwired but still
-// visible, which was pointless since it has nothing for them).
-if (!isAdminSync) els.pageSettingsBtn.classList.add("hidden");
-if (isAdminSync) {
+// visible, which was pointless since it has nothing for them). Team leads get
+// it too, same as admins — see getAllAccounts below for how their Accounts
+// visible list is scoped down to just their own teammates.
+if (!isAdminSync && !isTeamLeadSync) els.pageSettingsBtn.classList.add("hidden");
+if (isAdminSync || isTeamLeadSync) {
   wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, () => {
     els.settingsMenu.classList.add("hidden");
@@ -1462,7 +1605,22 @@ if (isAdminSync) {
     closePageHeaderMenu: closePageHeaderMenu,
     myProfileId: profile.id,
     getAllAccounts: async () => {
-      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      // Admins see everyone; a team lead only ever sees their own teammates
+      // (same team_id) — never every account. Requires
+      // client_events_select_own/intro_call_log_select_own to also allow
+      // is_team_lead_of() (see supabase/schema.sql), otherwise a team lead's
+      // session could never fetch a teammate's numbers/events in the first
+      // place, filter or no filter.
+      if (isAdminSync) {
+        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+        return error ? [] : data || [];
+      }
+      if (!profile.team_id) return [];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("team_id", profile.team_id)
+        .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
     onChange: async () => {
@@ -1474,3 +1632,4 @@ if (isAdminSync) {
 }
 
 showCallsView("outreach");
+loadUpcomingEvents();

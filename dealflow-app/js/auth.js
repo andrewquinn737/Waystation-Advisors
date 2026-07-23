@@ -3,8 +3,10 @@ import { supabase } from "./supabaseClient.js";
 /**
  * Call at the top of every protected page. Redirects to login.html if
  * there's no session, otherwise returns { user, profile }.
- * (Team-lead-only page gating has been removed for now — every account is
- * an intern. Re-add a role check here if/when team leads come back.)
+ * (No page-level gating by role here — team_lead is a real role again (see
+ * supabase/schema.sql), but every page (Profile/Clients/Dials) is open to
+ * every role; it's individual buttons/features within a page that check
+ * profile.role, not whole-page access.)
  */
 export async function requireSession() {
   const { data: { session } } = await supabase.auth.getSession();
@@ -75,7 +77,7 @@ export function renderNav(profile) {
       </div>
       <div class="who">
         <span>${profile.full_name}</span>
-        <span class="role-badge">${profile.role === "admin" ? "Admin" : "Intern"}</span>
+        <span class="role-badge">${profile.role === "admin" ? "Admin" : profile.role === "team_lead" ? "Team lead" : "Intern"}</span>
         <button class="btn danger small" id="signOutBtn">Log out</button>
       </div>
     </div>

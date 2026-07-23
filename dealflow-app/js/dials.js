@@ -13,6 +13,12 @@ if (!session) throw new Error("redirecting to login");
 const { profile, user } = session;
 const internEmail = user?.email || "";
 const isAdmin = profile?.role === "admin";
+// Team leads get the settings gear (Sellers/Buyers + Accounts visible) like
+// admins do, but Accounts visible only ever lists their own teammates (see
+// getAllAccounts near the bottom of this file). CSV import and Transfer stay
+// admin-only (isAdmin alone gates those) — a team lead is otherwise treated
+// like an intern.
+const isTeamLead = profile?.role === "team_lead";
 // First-ever use of the shared Accounts visible setting defaults to "just
 // me" instead of "Select all" — a no-op every subsequent load (see
 // js/accountsVisible.js).
@@ -211,9 +217,11 @@ const els = {
   massContactWarningCancelBtn: document.getElementById("massContactWarningCancelBtn"),
 };
 
+// CSV import and Transfer stay strictly admin-only — team leads don't get
+// either (see isTeamLead comment above).
 if (isAdmin) els.menuImportBtn.classList.remove("hidden");
 if (isAdmin) els.dialTabTransferBtn.classList.remove("hidden");
-if (isAdmin) els.menuAccountsVisibleBtn.classList.remove("hidden");
+if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
@@ -1210,8 +1218,8 @@ els.pageMenuToggle.addEventListener("click", closeArchiveMenu);
 // js/dealSide.js). Hidden entirely for interns (it used to just be inert
 // but still visible/clickable, which was pointless since it has nothing
 // for them — now it's not even shown).
-if (!isAdmin) els.pageSettingsBtn.classList.add("hidden");
-if (isAdmin) {
+if (!isAdmin && !isTeamLead) els.pageSettingsBtn.classList.add("hidden");
+if (isAdmin || isTeamLead) {
   wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
   els.pageSettingsBtn.addEventListener("click", closeArchiveMenu); // see comment above
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
@@ -2041,14 +2049,16 @@ els.dialModalBackdrop.addEventListener("touchend", (e) => {
 // ---------------------------------------------------------------------------
 // "Schedule intro call" from a dial — replaces the old "Create client"
 // button entirely. Only the info already on the dial is required (no
-// preferences/looking-for step); once that's present, this creates the
-// client silently (call notes carry over into Other notes) and immediately
-// opens the Intro Call scheduling popup for it — no separate review form.
+// Notes step); once that's present, this creates the client silently (call
+// notes carry over into other_notes, which shows up merged into the single
+// "Notes" box the next time this client is opened/edited — see
+// combinedNotes() in clientForm.js) and immediately opens the Intro Call
+// scheduling popup for it — no separate review form.
 // ---------------------------------------------------------------------------
 
-// Only checks fields that actually exist on a dial — "looking_for" (from the
-// full client form) is intentionally not required here, since a dial has no
-// such field.
+// Only checks fields that actually exist on a dial — "Notes" (from the full
+// client form) is intentionally not required here, since a dial has no such
+// field.
 function getMissingDialClientFields(dial) {
   const missing = [];
   const labels = [];
@@ -2107,8 +2117,9 @@ async function handleScheduleIntroCallFromDial(dial) {
         linkedin: dial.linkedin || "",
         company_name: dial.company_name || "",
         industry: dial.industry || "",
-        // Call notes from the dial transfer straight into the new client's
-        // Other notes field.
+        // Call notes from the dial transfer straight into other_notes, which
+        // merges into the new client's single "Notes" box (see
+        // combinedNotes() in clientForm.js).
         other_notes: dial.call_notes || "",
       });
       data.assigned_to = profile.id;
@@ -2191,7 +2202,7 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
 // fetch other accounts' tabs in the first place, filter or no filter.
 // ---------------------------------------------------------------------------
 
-if (isAdmin) {
+if (isAdmin || isTeamLead) {
   wireAccountsVisiblePopup({
     menuBtn: els.menuAccountsVisibleBtn,
     popupEl: els.accountsVisiblePopup,
@@ -2200,7 +2211,22 @@ if (isAdmin) {
     closePageHeaderMenu: closePageHeaderMenu,
     myProfileId: profile.id,
     getAllAccounts: async () => {
-      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      // Admins see everyone; a team lead only ever sees their own teammates
+      // (same team_id) — never every account. Requires
+      // dial_lists_select_own/dials_select_own to also allow
+      // is_team_lead_of() (see supabase/schema.sql), otherwise a team lead's
+      // session could never fetch a teammate's tabs/dials in the first
+      // place, filter or no filter.
+      if (isAdmin) {
+        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+        return error ? [] : data || [];
+      }
+      if (!profile.team_id) return [];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("team_id", profile.team_id)
+        .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
     onChange: renderTabs,

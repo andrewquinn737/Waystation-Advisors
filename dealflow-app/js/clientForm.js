@@ -22,8 +22,23 @@ export function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-export function lookingForLabel() {
-  return "What they're looking for in a buyer";
+export function notesLabel() {
+  return "Notes";
+}
+
+// "What they're looking for" and "Other notes" used to be two separate boxes
+// (two separate DB columns: looking_for / other_notes). They're now presented
+// as a single "Notes" box everywhere. Rather than a schema migration, the
+// merged text is written back into `looking_for` on save and `other_notes` is
+// cleared out (see collectFormData below) — so there's one source of truth
+// going forward. This combines whatever's in both columns for display, so
+// nothing typed before the merge is lost, even on a client that hasn't been
+// re-saved yet.
+export function combinedNotes(client) {
+  const a = (client?.looking_for || "").trim();
+  const b = (client?.other_notes || "").trim();
+  if (a && b) return `${a}\n\n${b}`;
+  return a || b;
 }
 
 export function defaultClient(profile, overrides) {
@@ -133,18 +148,11 @@ export function buildEditableSections(client) {
       </div>
     </div>
 
-    <div class="accordion-section" data-section="preferences">
-      <div class="accordion-header"><span>Preferences</span><span class="chevron">&#9662;</span></div>
-      <div class="accordion-body">
-        <div class="field-label-row"><label for="f_looking_for">${lookingForLabel()}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
-        <textarea id="f_looking_for">${escapeHtml(client.looking_for || "")}</textarea>
-      </div>
-    </div>
-
     <div class="accordion-section" data-section="notes">
-      <div class="accordion-header"><span>Other notes</span><span class="chevron">&#9662;</span></div>
+      <div class="accordion-header"><span>Notes</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        <textarea id="f_other_notes">${escapeHtml(client.other_notes || "")}</textarea>
+        <div class="field-label-row"><label for="f_notes">${notesLabel()}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
+        <textarea id="f_notes">${escapeHtml(combinedNotes(client))}</textarea>
       </div>
     </div>
   `;
@@ -168,8 +176,12 @@ export function collectFormData(container) {
     email: container.querySelector("#f_email").value.trim(),
     phone: container.querySelector("#f_phone").value.trim(),
     linkedin: container.querySelector("#f_linkedin").value.trim(),
-    looking_for: container.querySelector("#f_looking_for").value.trim(),
-    other_notes: container.querySelector("#f_other_notes").value.trim(),
+    // Single "Notes" box now (see combinedNotes/notesLabel above) — the
+    // merged text is saved into looking_for, the sole DB column that still
+    // gets written to going forward; other_notes is cleared since its content
+    // (if any) was already folded into this same textarea on load.
+    looking_for: container.querySelector("#f_notes").value.trim(),
+    other_notes: "",
     intern_name: container.querySelector("#f_intern_name").value.trim(),
     company_name: container.querySelector("#f_company_name").value.trim(),
     industry: container.querySelector("#f_industry").value.trim(),
@@ -208,7 +220,7 @@ export function getMissingFields(data) {
 
   if (!data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
 
-  if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
+  if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("Notes"); }
 
   if (!data.intern_name) { missing.push("intern_name"); popupLabels.push("Intern's name"); }
 
