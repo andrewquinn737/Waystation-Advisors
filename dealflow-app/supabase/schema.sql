@@ -1154,3 +1154,18 @@ drop policy if exists "dials_update_own" on dials;
 create policy "dials_update_own" on dials
   for update using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by))
   with check (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+-- ============================================================================
+-- "Called today" no longer disappears the instant you pick "Not interested" /
+-- "Unable to contact" / "Intro call scheduled" — it now stays visible for the
+-- rest of that same local day, only actually hiding starting the NEXT day for
+-- whichever of those 3 categories the dial is still sitting in at that point
+-- (picking one of the other 3 categories un-hides it again immediately). See
+-- isCalledTodayVisible()/updateDialStatus() in js/dials.js. This date is the
+-- local calendar day (YYYY-MM-DD, no timezone conversion — set from the
+-- browser's local date same as called_today_date above) from which the hide
+-- should actually take effect; null means either currently a "show" category,
+-- or a hide-category dial that predates this column (treated as already
+-- hidden — see isCalledTodayVisible's comment on that).
+-- ============================================================================
+alter table dials add column if not exists status_hide_effective_date date;
