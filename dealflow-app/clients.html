@@ -45,6 +45,14 @@
       </button>
     </div>
     <div class="page-header-menu hidden" id="pageHeaderMenu">
+      <!-- Admin-only — see the `if (isAdmin)` line near the top of
+           js/clients.js. Sits above Categories: picking accounts here narrows
+           down which clients even reach the Categories filter (see
+           renderTable's combined filter). -->
+      <button type="button" class="page-header-menu-item hidden" id="menuAccountsVisibleBtn">
+        <span class="menu-item-label">Accounts visible</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuCategoriesBtn">
         <span class="menu-item-label">Categories</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a1 1 0 0 1 0-10 5 5 0 0 0 0-10 10 10 0 1 0 0 20z"/><circle cx="7" cy="10" r="1"/><circle cx="10" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="17" cy="10" r="1"/></svg></span>
@@ -89,6 +97,22 @@
       <button type="button" data-tab="profile">Profile</button>
       <button type="button" data-tab="progress">Progress</button>
       <button type="button" data-tab="timeline">Timeline</button>
+    </div>
+  </div>
+
+  <!-- Admin-only "Accounts visible" popup (see menuAccountsVisibleBtn above).
+       "Select all" sits above the individual account checkboxes as its own
+       distinct row — checking/unchecking it snaps every account on/off at
+       once; the Categories filter still applies on top of whatever's picked
+       here (see renderTable's combined filter in js/clients.js). -->
+  <div class="modal-backdrop hidden" id="accountsVisiblePopup">
+    <div class="modal">
+      <h2>Accounts visible</h2>
+      <p class="help-text">Choose which accounts' clients show up in your list.</p>
+      <div id="accountsVisibleBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="accountsVisibleClose">Done</button>
+      </div>
     </div>
   </div>
 
