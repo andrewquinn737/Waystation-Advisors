@@ -602,3 +602,33 @@ alter table profile_temp_passwords enable row level security;
 drop policy if exists "profile_temp_passwords_select_admin" on profile_temp_passwords;
 create policy "profile_temp_passwords_select_admin" on profile_temp_passwords
   for select using (is_admin());
+
+-- ============================================================================
+-- CLIENT PIPELINE STATUS ("Categories" on the client profile — see
+-- CLIENT_STATUSES in js/clients.js). Colored the same way dials.contact_status
+-- is, plus a new "sold" (light blue) tint not used anywhere in dials. Not
+-- required at creation — new clients default to 'not_in_contact'.
+-- ============================================================================
+alter table clients add column if not exists pipeline_status text not null default 'not_in_contact';
+alter table clients drop constraint if exists clients_pipeline_status_check;
+alter table clients add constraint clients_pipeline_status_check
+  check (pipeline_status in ('sold', 'connected_to_buyer', 'potentially_interested', 'not_in_contact', 'no_longer_interested'));
+
+-- ============================================================================
+-- ADMIN-ONLY DIALS TAB TRANSFER
+-- Lets an admin hand off one of their own dial_lists tabs (and every dial in
+-- it) to a different account — see the "Transfer" option added to the tab's
+-- archive/delete popup in js/dials.js. Reassigning created_by is what actually
+-- moves it: dial_lists_select_own / dials_select_own both scope visibility to
+-- created_by = auth.uid(), so the tab simply stops appearing for the admin and
+-- starts appearing for whoever it was transferred to. The existing "_own"
+-- UPDATE policies don't allow that (they only let you update your OWN rows),
+-- so both are widened here to also allow any admin to update either table.
+-- ============================================================================
+drop policy if exists "dial_lists_update_own" on dial_lists;
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dials_update_own" on dials;
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid() or is_admin());
