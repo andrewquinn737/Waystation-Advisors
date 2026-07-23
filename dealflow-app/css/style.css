@@ -456,7 +456,16 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
    in js/profile.js). Same row shell as accounts-visible-row's list feel, but
    each row shows two lines (client name, then type + date/time) instead of a
    checkbox + label. */
-.upcoming-events-box { display: flex; flex-direction: column; gap: 2px; max-width: 320px; }
+/* Fixed-height box with its own internal scroll (rather than growing however
+   tall the list is) so a long list of upcoming events doesn't push the rest
+   of the Profile page down — matches the "put upcoming events in a box you
+   scroll within" requirement. Bordered so it visually reads as its own
+   contained box, not just a bare list. */
+.upcoming-events-box {
+  display: flex; flex-direction: column; gap: 2px; max-width: 320px;
+  max-height: 280px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px;
+}
 .upcoming-event-row {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   width: 100%; text-align: left; background: none; border: 1px solid var(--border);
@@ -465,6 +474,14 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .upcoming-event-row:hover { background: var(--bg); } }
 .upcoming-event-name { font-size: 14px; font-weight: 700; }
 .upcoming-event-meta { font-size: 12px; color: var(--text-muted); }
+
+/* #upcomingEventOverlay (see profile.html/js) reuses .fullscreen-modal for
+   its inset:0/z-index, just with an iframe filling the body instead of the
+   usual .fs-header/.fs-body — the iframe's own content (clients.html,
+   deep-linked straight to a client's Timeline) already renders its own
+   fullscreen client modal, so no extra chrome is needed here beyond the
+   close button layered on top. */
+.upcoming-event-frame { flex: 1; width: 100%; border: none; }
 
 /* ---- Floating action button ---- */
 .fab {
@@ -496,7 +513,15 @@ tr.clickable-row { cursor: pointer; }
 
 /* ---- Popups need to sit above the full-screen client modal ---- */
 #requiredPopup, #confirmDeleteModal, #introCallPopup, #eventDateModal,
-#addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal { z-index: 200; }
+#addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal,
+/* eventReportModal ("write a report" on checking a Timeline event) and
+   editEventModal (its Edit button) were added later (see js/clients.js) and
+   were missing from this list — left at the base .modal-backdrop z-index of
+   50, well under the client modal's fullscreen z-index of 100, so they
+   rendered invisibly underneath it. counterpartModal has the same "opens
+   while the client modal is already open" shape, so it's included too even
+   though it wasn't reported broken. */
+#eventReportModal, #editEventModal, #counterpartModal { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
@@ -651,6 +676,14 @@ html.is-desktop-device .contact-action-tel { display: none; }
    keeps its right edge safely inside the popup's padding instead of poking
    past it. */
 #eventDateModal #eventDateInput { width: 92%; }
+
+/* Timeline "Edit event" popup (see openEditEventModal in js/clients.js) has
+   the exact same native-date-input overflow quirk as #eventDateModal right
+   above — its date input was running past the popup's right edge inside the
+   default 480px .modal. Same fix: trim the input's own width, no need to
+   widen/un-clip the modal itself here since the report textarea below it
+   already needs the full-width .modal shell. */
+#editEventModal #editEventDateInput { width: 92%; box-sizing: border-box; }
 
 /* ---- Client "Categories" pipeline-status dropdown (Profile tab) ----
    Reuses the dial popup's .dial-status-* classes (see js/dials.js) directly
