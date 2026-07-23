@@ -713,3 +713,33 @@ where event_type = 'intro_call'
     where (first_name = 'JD' and last_name = 'Smith')
        or (first_name = 'Curtis' and last_name = 'Pittman')
   );
+
+-- ============================================================================
+-- FIX: ADMIN DIALS TAB TRANSFER — "new row violates row-level security
+-- policy for table dial_lists"
+-- The ADMIN-ONLY DIALS TAB TRANSFER block above widened the UPDATE policies
+-- on dial_lists/dials so an admin can reassign created_by, but that alone
+-- wasn't enough: Postgres re-checks a table's SELECT policy against the
+-- POST-update row whenever the statement returns the updated row (which
+-- Supabase's client library always requests) — and dial_lists_select_own /
+-- dials_select_own were still scoped to `created_by = auth.uid()` only.
+-- So the moment an admin reassigned a row to someone else, the new row (now
+-- owned by that other account) failed the admin's own SELECT policy, and
+-- Postgres surfaced that as the same generic RLS error, masking the real
+-- cause. Fix: widen both SELECT policies to also allow is_admin(), matching
+-- the UPDATE policies. (dial_lists_update_own is also re-created here with
+-- an explicit WITH CHECK — functionally identical to its USING clause, but
+-- spelled out for clarity/symmetry with dials_update_own.)
+-- ============================================================================
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dial_lists_update_own" on dial_lists;
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid() or is_admin())
+  with check (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid() or is_admin());
