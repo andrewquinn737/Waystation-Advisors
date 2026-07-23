@@ -1,10 +1,18 @@
 // Shared admin-only "Accounts visible" selection — ONE cross-page setting
 // now (Clients, Dials, and Profile all read/write the same value), replacing
 // what used to be two separate per-page selections. null = every account
-// (the default, "Select all"); otherwise a Set of profile ids to show.
-// Mirrors js/dealSide.js's shared-localStorage-key pattern.
+// ("Select all"); otherwise a Set of profile ids to show. Mirrors
+// js/dealSide.js's shared-localStorage-key pattern.
+//
+// The very first time this is ever touched (tracked separately by INIT_KEY,
+// since "Select all" is itself stored as an absent KEY — see persist() —
+// which would otherwise be indistinguishable from "never touched"), it
+// defaults to "just me" instead of "Select all" — see initDefaultToSelf().
+// Every launch/page load after that first initialization leaves whatever was
+// last explicitly chosen alone, including an explicit "Select all".
 
 const KEY = "waystation_visible_accounts";
+const INIT_KEY = "waystation_visible_accounts_initialized";
 
 let visibleAccountIds = null;
 let loaded = false;
@@ -27,9 +35,26 @@ function persist() {
   try {
     if (visibleAccountIds === null) localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, JSON.stringify([...visibleAccountIds]));
+    localStorage.setItem(INIT_KEY, "1");
   } catch {
     // ignore
   }
+}
+
+// Call once per page, right after the signed-in profile is known (see
+// clients.js/dials.js/profile.js) — a no-op every time except the very first
+// time this shared setting is ever touched across the whole app, when it
+// narrows the default down to just the signed-in account instead of
+// everyone.
+export function initDefaultToSelf(myProfileId) {
+  load();
+  try {
+    if (localStorage.getItem(INIT_KEY)) return;
+  } catch {
+    return;
+  }
+  visibleAccountIds = new Set([myProfileId]);
+  persist();
 }
 
 // null = no filter (every account passes).

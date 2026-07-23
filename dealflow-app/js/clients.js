@@ -14,12 +14,16 @@ import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } fr
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
-import { getVisibleAccountIds, wireAccountsVisiblePopup } from "./accountsVisible.js";
+import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
 const isAdmin = profile?.role === "admin";
+// First-ever use of the shared Accounts visible setting defaults to "just
+// me" instead of "Select all" — a no-op every subsequent load (see
+// js/accountsVisible.js).
+initDefaultToSelf(profile.id);
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 

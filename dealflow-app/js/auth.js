@@ -75,7 +75,7 @@ export function renderNav(profile) {
       </div>
       <div class="who">
         <span>${profile.full_name}</span>
-        <span class="role-badge">Intern</span>
+        <span class="role-badge">${profile.role === "admin" ? "Admin" : "Intern"}</span>
         <button class="btn danger small" id="signOutBtn">Log out</button>
       </div>
     </div>

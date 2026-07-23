@@ -6,13 +6,17 @@ import { rfContact, contactActionIcons, stopContactActionPropagation, locationPi
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
-import { getVisibleAccountIds, wireAccountsVisiblePopup } from "./accountsVisible.js";
+import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile, user } = session;
 const internEmail = user?.email || "";
 const isAdmin = profile?.role === "admin";
+// First-ever use of the shared Accounts visible setting defaults to "just
+// me" instead of "Select all" — a no-op every subsequent load (see
+// js/accountsVisible.js).
+initDefaultToSelf(profile.id);
 
 let allLists = []; // every dial_lists row (all types/statuses)
 let dials = []; // dials belonging to the currently selected tab
@@ -462,12 +466,20 @@ function rowsToDials(rows, listId) {
         // A "Status" column's cell isn't plain text to copy over — it's a CSV
         // export label that needs translating through CSV_STATUS_VALUE_MAP
         // into this app's own contact_status enum (see the map's comment
-        // above). An empty cell still explicitly maps to "uncontacted"
-        // ("" is itself a key in that map), so this branch runs even when v
-        // is blank; anything with no match at all is simply left alone.
+        // above). Whenever a Status column is present at all, EVERY row must
+        // come out with some valid contact_status value (never just left
+        // unset) — falling back to "uncontacted" for anything not in the map
+        // (per spec: "if the box does not match anything in the list, mark
+        // it as uncontacted"). This also happens to be required for
+        // correctness, not just intent: supabase-js's bulk insert() sends one
+        // shared column list for the whole batch, so a handful of rows in the
+        // same import quietly having NO contact_status key (while others do)
+        // gets those rows' contact_status sent as an explicit NULL rather
+        // than falling back to the column's DEFAULT — which is exactly what
+        // was tripping the "null value in column contact_status violates
+        // not-null constraint" error.
         if (field === "contact_status") {
-          const mapped = CSV_STATUS_VALUE_MAP[normalizeStatusValue(v)];
-          if (mapped) d.contact_status = mapped;
+          d.contact_status = CSV_STATUS_VALUE_MAP[normalizeStatusValue(v)] || "uncontacted";
           return;
         }
         if (v) d[field] = v;

@@ -4,7 +4,7 @@ import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } fr
 import { contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireDealSideToggle } from "./dealSide.js";
-import { getVisibleAccountIds, wireAccountsVisiblePopup } from "./accountsVisible.js";
+import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -16,6 +16,10 @@ const { profile } = session;
 // gate the settings gear (Sellers/Buyers + Accounts visible), which now shows
 // on Profile too (see wiring near the bottom of this file).
 const isAdminSync = profile?.role === "admin";
+// First-ever use of the shared Accounts visible setting defaults to "just
+// me" instead of "Select all" — a no-op every subsequent load (see
+// js/accountsVisible.js).
+initDefaultToSelf(profile.id);
 
 const els = {
   errorBox: document.getElementById("errorBox"),
