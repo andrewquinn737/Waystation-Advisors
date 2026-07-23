@@ -72,15 +72,6 @@
         <span class="menu-item-label">Current</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg></span>
       </button>
-      <!-- Admin-only — see the `if (isAdmin)` line near the top of
-           js/dials.js. Sits above Categories, same as the Clients page's
-           equivalent button — narrows which accounts' tabs/dials are even
-           visible before Current/Archived, tab selection, or Categories get
-           applied on top (see filteredLists() in js/dials.js). -->
-      <button type="button" class="page-header-menu-item hidden" id="menuAccountsVisibleBtn">
-        <span class="menu-item-label">Accounts visible</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-      </button>
       <button type="button" class="page-header-menu-item" id="menuCategoriesBtn">
         <span class="menu-item-label">Categories</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a1 1 0 0 1 0-10 5 5 0 0 0 0-10 10 10 0 1 0 0 20z"/><circle cx="7" cy="10" r="1"/><circle cx="10" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="17" cy="10" r="1"/></svg></span>
@@ -93,6 +84,15 @@
       <button type="button" class="page-header-menu-item" id="dealSideToggleBtn">
         <span class="menu-item-label" id="dealSideLabel">Sellers</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+      </button>
+      <!-- Admin-only — see the `if (isAdmin)` line near the top of
+           js/dials.js. Moved here, right below Sellers/Buyers, from the
+           triangle dropdown. Narrows which accounts' tabs/dials are even
+           visible before Current/Archived, tab selection, or Categories get
+           applied on top (see filteredLists() in js/dials.js). -->
+      <button type="button" class="page-header-menu-item hidden" id="menuAccountsVisibleBtn">
+        <span class="menu-item-label">Accounts visible</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
       </button>
     </div>
     <div class="categories-submenu hidden" id="categoriesSubmenu"></div>
