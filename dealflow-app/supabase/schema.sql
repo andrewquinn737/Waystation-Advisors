@@ -1020,3 +1020,91 @@ end;
 $$;
 
 grant execute on function log_client_meeting(uuid, uuid, timestamptz, text, uuid) to authenticated;
+
+-- ============================================================================
+-- TEAM LEAD ROLE (reintroduced)
+-- A new tier between intern and admin. Note: this is UNRELATED to the
+-- is_team_lead() function defined way up near the top of this file (in the
+-- original SELLERS/BUYERS/DEALS section) — that function is legacy scaffolding
+-- for the old sellers/buyers/deals/subscription_payments/commissions tables,
+-- which are orphaned (finance.html/sellers.html/buyers.html/deals.html are
+-- unlinked from nav — see js/auth.js renderNav()) and hardcoded to always
+-- return true. It is left alone here, untouched.
+--
+-- profiles_role_check has actually allowed 'team_lead' as a value since the
+-- very first version of this table (see column definition near the top) —
+-- it was never removed even when the team-lead UI/logic was stripped out
+-- (see "Remove team-lead code, interns only" in project history). Re-asserted
+-- here anyway, idempotently, so this constraint is self-documenting and this
+-- migration doesn't silently depend on that historical accident.
+--
+-- What a team lead actually gets (see js/profile.js Teams UI + js/clients.js/
+-- js/dials.js/js/profile.js settings-gear wiring for the app-side half of
+-- this):
+--   * Must be inside a real (non-virtual) team box to be promoted — the
+--     Admins and Unassigned interns boxes are rejected client-side.
+--   * Exactly one team lead per team box; promoting a 2nd swaps the 1st back
+--     to intern (handled entirely in profile.js, not enforced in SQL — same
+--     trust level as any other role/team_id write, which already requires
+--     is_admin() via protect_profile_admin_fields()).
+--   * Can see the Sellers/Buyers toggle + Accounts visible in Clients/Dials/
+--     Profile settings (like an admin), but Accounts visible only ever lists
+--     — and this function only ever grants read access to — teammates who
+--     share their own team_id, never every account.
+--   * Cannot edit teams, see stored temp passwords, or add new accounts
+--     (those stay gated to real is_admin() in the JS, unchanged).
+--   * Everything else (update/delete on their own rows only, no bypass on
+--     anyone else's) is identical to an intern.
+-- ============================================================================
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('intern', 'team_lead', 'admin'));
+
+-- True if the CALLING user is a team lead and target_user is one of their own
+-- teammates (same team_id, and that team_id is a real, non-null team — a
+-- team lead with team_id null shouldn't be possible per the app's own
+-- promotion validation, but the `me.team_id is not null` guard keeps this
+-- function safe even if that's ever violated directly in the database).
+-- security definer, same trusted-bypass pattern as is_admin() above, so this
+-- can read profiles.role/team_id without recursive RLS on the profiles table
+-- itself.
+create or replace function is_team_lead_of(target_user uuid)
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select exists (
+    select 1 from profiles me
+    join profiles them on them.id = target_user
+    where me.id = auth.uid()
+      and me.role = 'team_lead'
+      and me.team_id is not null
+      and me.team_id = them.team_id
+  );
+$$;
+
+-- Widen the same SELECT-only bypass admins already have (see is_admin() uses
+-- above) to also cover a team lead viewing their own teammates' data — never
+-- UPDATE/DELETE, matching how admins themselves are scoped (own-row-only
+-- writes, select-only bypass elsewhere).
+drop policy if exists "clients_select_own" on clients;
+create policy "clients_select_own" on clients
+  for select using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+drop policy if exists "client_events_select_own" on client_events;
+create policy "client_events_select_own" on client_events
+  for select using (
+    exists (select 1 from clients c where c.id = client_events.client_id and (c.created_by = auth.uid() or is_admin() or is_team_lead_of(c.created_by)))
+  );
+
+drop policy if exists "intro_call_log_select_own" on intro_call_log;
+create policy "intro_call_log_select_own" on intro_call_log
+  for select using (user_id = auth.uid() or is_admin() or is_team_lead_of(user_id));
