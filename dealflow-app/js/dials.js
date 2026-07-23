@@ -430,6 +430,25 @@ function normalizeHeader(h) {
     .trim();
 }
 
+// contact_status is matched more loosely than every other field: real CSV
+// exports/spreadsheets label this column all sorts of things ("Status",
+// "Call Status", "Contact Status", "Lead Status", "Current Status", ...), so
+// requiring an exact match against a fixed alias list (like every other
+// field below) kept missing real headers that simply weren't the bare word
+// "status" — which meant NO column ever got mapped to contact_status for
+// that CSV, every imported row was built with contact_status left
+// completely unset, and the insert failed with "null value in column
+// contact_status violates not-null constraint" (see rowsToDials's own
+// baseline default for the second, belt-and-suspenders layer of this fix).
+// "contains" is safe here specifically because it only runs for the one
+// field where we WANT breadth — every other field still requires an exact
+// alias match, so e.g. a "Sub status" or "Status notes" column won't get
+// misrouted into some unrelated field.
+function headerMatchesField(field, aliases, norm) {
+  if (field === "contact_status") return norm.includes("status");
+  return aliases.some((a) => normalizeHeader(a) === norm);
+}
+
 // Maps each column index in the header row to a dial field key, wherever a
 // match is found — unmatched columns are simply ignored on import.
 function buildHeaderFieldMap(headerRow) {
@@ -440,7 +459,7 @@ function buildHeaderFieldMap(headerRow) {
     if (!norm) return;
     for (const [field, aliases] of Object.entries(DIAL_FIELD_ALIASES)) {
       if (usedFields.has(field)) continue;
-      if (aliases.some((a) => normalizeHeader(a) === norm)) {
+      if (headerMatchesField(field, aliases, norm)) {
         map[colIndex] = field;
         usedFields.add(field);
         break;
@@ -460,7 +479,12 @@ function rowsToDials(rows, listId) {
     .slice(1)
     .filter((r) => r.some((cell) => (cell || "").trim() !== ""))
     .map((r) => {
-      const d = { list_id: listId };
+      // contact_status always starts with a valid fallback value baked in —
+      // even if this CSV has no recognizable Status column at all (see
+      // headerMatchesField above), every row built here still has SOME
+      // explicit, valid value for it. Gets overwritten below if a Status
+      // column was actually found and mapped.
+      const d = { list_id: listId, contact_status: "uncontacted" };
       Object.entries(fieldMap).forEach(([colIndex, field]) => {
         const v = (r[Number(colIndex)] || "").trim();
         // A "Status" column's cell isn't plain text to copy over — it's a CSV
