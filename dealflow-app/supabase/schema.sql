@@ -632,3 +632,84 @@ create policy "dial_lists_update_own" on dial_lists
 drop policy if exists "dials_update_own" on dials;
 create policy "dials_update_own" on dials
   for update using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- NEW CLIENTS DEFAULT TO "POTENTIALLY INTERESTED"
+-- Was 'not_in_contact' — changed per product decision that a freshly-added
+-- client has, by definition, already had some contact (that's how they got
+-- added), so "potentially interested" is the more accurate starting bucket.
+-- Only affects the column default for future inserts; existing rows keep
+-- whatever status they already have.
+-- ============================================================================
+alter table clients alter column pipeline_status set default 'potentially_interested';
+
+-- ============================================================================
+-- PROFILE PICTURES
+-- Public Storage bucket + per-user-folder RLS (each account's photo lives at
+-- "<their own profile id>/avatar.<ext>", enforced via the folder-name check
+-- below) so anyone can VIEW any photo (needed to show teammates' pictures in
+-- Teams) but only the account itself can upload/replace/remove its own photo.
+-- profiles.avatar_url just stores the public URL after upload — see
+-- handleAvatarFileSelected() in js/profile.js.
+-- ============================================================================
+alter table profiles add column if not exists avatar_url text;
+
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+drop policy if exists "avatars_public_read" on storage.objects;
+create policy "avatars_public_read" on storage.objects
+  for select using (bucket_id = 'avatars');
+
+drop policy if exists "avatars_insert_own" on storage.objects;
+create policy "avatars_insert_own" on storage.objects
+  for insert with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "avatars_update_own" on storage.objects;
+create policy "avatars_update_own" on storage.objects
+  for update using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "avatars_delete_own" on storage.objects;
+create policy "avatars_delete_own" on storage.objects
+  for delete using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ============================================================================
+-- INTRO CALLS SCHEDULED (Profile page's "Intro calls" tracker/graph — the
+-- toggled alternative to the "people called" outreach chart, see
+-- loadIntroCallsChart() in js/profile.js). One row is inserted every time the
+-- shared "Schedule Intro Call" flow is used (js/introCall.js's
+-- wireIntroCallForm), from EITHER the Dials or the Clients page — this counts
+-- the act of scheduling itself, independent of client_events/Timeline (which
+-- is now only ever touched by manually clicking "+" in a client's Timeline).
+-- ============================================================================
+create table if not exists intro_call_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id) on delete cascade,
+  scheduled_at timestamptz not null default now()
+);
+
+alter table intro_call_log enable row level security;
+
+drop policy if exists "intro_call_log_select_own" on intro_call_log;
+create policy "intro_call_log_select_own" on intro_call_log
+  for select using (user_id = auth.uid());
+
+drop policy if exists "intro_call_log_insert_own" on intro_call_log;
+create policy "intro_call_log_insert_own" on intro_call_log
+  for insert with check (user_id = auth.uid());
+
+-- ============================================================================
+-- ONE-TIME CLEANUP: the intro_call events on JD Smith and Curtis Pittman were
+-- test data logged before Timeline switched to manual-only entries (see the
+-- ADMIN-ONLY DIALS TAB TRANSFER block's client_events comment above) — this
+-- removes those two specific client_events rows so both clients look like
+-- they haven't had their intro call yet. Safe to re-run (no-ops once gone).
+-- ============================================================================
+delete from client_events
+where event_type = 'intro_call'
+  and client_id in (
+    select id from clients
+    where (first_name = 'JD' and last_name = 'Smith')
+       or (first_name = 'Curtis' and last_name = 'Pittman')
+  );
