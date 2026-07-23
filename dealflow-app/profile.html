@@ -38,17 +38,14 @@
         </button>
         <h1>Profile</h1>
       </div>
-      <!-- Not wired to anything yet, per instructions — same icon/spot on
-           Clients and Dials too. -->
       <button type="button" class="page-header-settings" id="pageSettingsBtn" title="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </div>
     <!-- "Edit" turns name/phone/email into text boxes (see
-         enterProfileEditMode() in js/profile.js); the other option toggles
-         the calls-section below between "Outreach calls" (the existing
-         weekly-call chart) and "Intro calls" (a separate scheduled-intro-call
-         tracker) — see toggleCallsView(). -->
+         enterProfileEditMode() in js/profile.js); the other option cycles the
+         calls-section below between "Outreach calls" / "Intro calls" / a new
+         "Upcoming events" view — see toggleCallsView(). -->
     <div class="page-header-menu hidden" id="pageHeaderMenu">
       <button type="button" class="page-header-menu-item" id="menuEditProfileBtn">
         <span class="menu-item-label">Edit</span>
@@ -57,6 +54,21 @@
       <button type="button" class="page-header-menu-item" id="menuCallsViewBtn" data-view="outreach">
         <span class="menu-item-label">Outreach calls</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+      </button>
+    </div>
+    <!-- Settings gear popover — admin-only Sellers/Buyers data-side toggle +
+         Accounts visible, same shared modules/markup pattern as Clients and
+         Dials (see js/dealSide.js, js/accountsVisible.js). Picking accounts
+         here drives which account(s)' info/graphs/upcoming-events show on
+         this Profile page too (see js/profile.js). -->
+    <div class="page-header-menu hidden" id="settingsMenu">
+      <button type="button" class="page-header-menu-item" id="dealSideToggleBtn">
+        <span class="menu-item-label" id="dealSideLabel">Sellers</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item hidden" id="menuAccountsVisibleBtn">
+        <span class="menu-item-label">Accounts visible</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
       </button>
     </div>
     <div id="errorBox" class="error-msg hidden"></div>
@@ -72,6 +84,11 @@
       <p class="help-text" id="profileRole"></p>
       <p class="profile-contact-line hidden" id="profilePhone"></p>
       <p class="profile-contact-line hidden" id="profileEmail"></p>
+      <!-- Admin-only, shown instead of editing when 0 or 2+ accounts are
+           selected in Accounts visible (see resolveSelectedAccounts() in
+           js/profile.js) — the logged-in admin's own info is what's shown
+           above, this just makes that explicit. -->
+      <p class="help-text profile-multi-note hidden" id="profileMultiNote">(Multiple accounts shown)</p>
 
       <!-- Outreach calls (default) — the existing weekly "people called" text
            + chart with the 50/week quota line. -->
@@ -89,6 +106,15 @@
         <div class="profile-chart" id="introCallsChart"></div>
       </div>
 
+      <!-- Upcoming events (toggled in via the header menu, 3rd option) — lists
+           every today-or-future client_events row for whichever account(s)
+           are selected in Accounts visible, across all their clients. Clicking
+           a row opens that client with Timeline selected (see js/clients.js
+           deep-link support and loadUpcomingEvents() in js/profile.js). -->
+      <div class="profile-calls-section hidden" id="upcomingEventsSection">
+        <div class="upcoming-events-box" id="upcomingEventsBox"></div>
+      </div>
+
       <div class="form-actions" style="margin-top:20px;">
         <button class="btn secondary" id="teamsBtn">Teams</button>
         <a class="btn secondary" id="surveyBtn" href="https://docs.google.com/forms/d/e/1FAIpQLSeAtlyF79wX5Q3u3iQM90p-PbXqFoq6mSpqVu2XB-D1qjZXwA/viewform" target="_blank" rel="noopener">Submit weekly survey</a>
@@ -99,6 +125,22 @@
       </div>
     </div>
   </main>
+
+  <!-- Admin-only "Accounts visible" popup (see menuAccountsVisibleBtn above).
+       Same shared component as Clients/Dials (js/accountsVisible.js) — picking
+       accounts here controls whose info/graphs/upcoming-events this Profile
+       page shows (see renderProfileHeader()/loadCallsChart() etc in
+       js/profile.js). -->
+  <div class="modal-backdrop hidden" id="accountsVisiblePopup">
+    <div class="modal">
+      <h2>Accounts visible</h2>
+      <p class="help-text">Choose which account(s) to view on this page.</p>
+      <div id="accountsVisibleBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="accountsVisibleClose">Done</button>
+      </div>
+    </div>
+  </div>
 
   <div class="fullscreen-modal hidden" id="teamsModal">
     <div class="fs-header">

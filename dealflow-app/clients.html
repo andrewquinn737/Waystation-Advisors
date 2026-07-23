@@ -144,16 +144,45 @@
     </div>
   </div>
 
-  <!-- "Choose the date this happened" step, shown before any Timeline "+"
-       event is actually logged (see openEventDateModal in js/clients.js). -->
+  <!-- Timeline "+" details step — date (required), time (optional, 30-min
+       increments), plus either a Meeting/Contract-advancement sub-type
+       dropdown or a Task description field, depending on which top-level
+       category was picked (see openEventDetailsModal in js/clients.js). -->
   <div class="modal-backdrop hidden" id="eventDateModal">
     <div class="modal">
-      <h2>When did this happen?</h2>
+      <h2 id="eventDateModalTitle">When did this happen?</h2>
       <label for="eventDateInput">Date</label>
       <input type="date" id="eventDateInput" />
+      <label for="eventTimeInput">Time (optional)</label>
+      <select id="eventTimeInput"></select>
+      <div class="hidden" id="eventSubtypeWrap">
+        <label for="eventSubtypeSelect">Type</label>
+        <select id="eventSubtypeSelect"></select>
+      </div>
+      <div class="hidden" id="eventTaskWrap">
+        <label for="eventTaskInput">Description</label>
+        <input type="text" id="eventTaskInput" placeholder="What needs to be done?" />
+      </div>
       <div class="form-actions">
         <button type="button" class="btn" id="eventDateConfirmBtn">Continue</button>
         <button type="button" class="btn secondary" id="eventDateCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Who's the meeting with?" step — only shown when Meeting > Client
+       meeting is picked (see openCounterpartPicker in js/clients.js). Lists
+       every opposite-side ("in cahoots"/connected_to_buyer) client currently
+       visible to this account, searchable, and requires picking exactly one
+       row before Continue is enabled. -->
+  <div class="modal-backdrop hidden" id="counterpartModal">
+    <div class="modal">
+      <h2>Who's the meeting with?</h2>
+      <input type="search" id="counterpartSearchInput" placeholder="Search..." />
+      <div id="counterpartList" class="accounts-visible-list"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="counterpartConfirmBtn" disabled>Continue</button>
+        <button type="button" class="btn secondary" id="counterpartCancelBtn">Cancel</button>
       </div>
     </div>
   </div>
