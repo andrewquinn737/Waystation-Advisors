@@ -205,10 +205,15 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
   margin: -8px 0 16px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
 }
 .page-header-menu-item {
-  display: block; width: 100%; text-align: left; padding: 10px 12px; border: none; background: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 12px; border: none; background: none;
   border-radius: 6px; font-size: 13.5px; font-weight: 600; color: var(--text); cursor: pointer; font-family: inherit;
 }
 @media (hover: hover) { .page-header-menu-item:hover { background: var(--bg); } }
+/* Small icon on the right of each menu item's label, hinting at what it
+   does (a "+" for Add new, a color palette for Categories, etc.) — see
+   dials.html for the per-item SVGs. */
+.menu-item-icon { display: flex; align-items: center; justify-content: center; color: var(--text-muted); flex-shrink: 0; }
 .page-header-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-muted); }
 
 /* "Categories" submenu — 6 colored rectangles (with labels) shown to the
@@ -220,6 +225,34 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 @media (hover: hover) { .category-rect-option:hover { background: var(--gold-soft); } }
 .category-rect-swatch { width: 24px; height: 16px; border-radius: 4px; border: 2px solid rgba(0,0,0,.1); flex-shrink: 0; }
 .category-rect-option.is-hidden { opacity: .4; }
+
+/* Select-mode toolbar (Dials page) — replaces the page-header-menu while
+   bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode. */
+.select-mode-bar {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 16px;
+}
+.select-mode-btn {
+  flex: 1 1 auto; white-space: nowrap; padding: 9px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .select-mode-btn:hover { background: var(--gold-soft); } }
+.select-mode-btn.danger { color: var(--danger); border-color: var(--danger); }
+@media (hover: hover) { .select-mode-btn.danger:hover { background: #fdecec; } }
+.select-mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.select-mode-hint { font-size: 12.5px; font-weight: 600; color: var(--accent); margin: -10px 0 14px; }
+
+/* Selection circle shown in place of instant-contact icons while select
+   mode is active (mobile card + desktop table row alike). */
+.select-circle {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border);
+  background: var(--surface); flex-shrink: 0; cursor: pointer; box-sizing: border-box;
+}
+.select-circle.selected { background: var(--accent); border-color: var(--accent); position: relative; }
+.select-circle.selected::after {
+  content: ""; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
 
 /* ---- Cards / auth ---- */
 .auth-card {
@@ -812,6 +845,11 @@ html.is-mobile-device .mobile-list { display: block; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px 14px; cursor: pointer;
+  /* Mobile browsers show a translucent blue/gray "tap highlight" overlay on
+     any pressed element by default — harmless for a quick tap, but very
+     visible (and unwanted) during the hold-and-drag gesture used to move a
+     member between team boxes (see wireMemberDrag in js/profile.js). */
+  -webkit-tap-highlight-color: transparent;
 }
 @media (hover: hover) { .team-member-card:hover { background: var(--bg); } }
 .team-member-card .contact-actions { flex-shrink: 0; }
