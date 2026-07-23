@@ -123,7 +123,7 @@ const els = {
   tableWrap: document.getElementById("tableWrap"),
   search: document.getElementById("search"),
   countBadge: document.getElementById("countBadge"),
-  addBtn: document.getElementById("addBtn"),
+  menuAddNewBtn: document.getElementById("menuAddNewBtn"),
   clientModal: document.getElementById("clientModal"),
   clientModalTitle: document.getElementById("clientModalTitle"),
   clientModalSubtitle: document.getElementById("clientModalSubtitle"),
@@ -1015,7 +1015,13 @@ function closeModal() {
   unlockPageScroll();
 }
 
-els.addBtn.addEventListener("click", openCreateModal);
+// Replaces the old bottom-right "+" FAB — same create-client flow, now a
+// regular menu item in the triangle dropdown (see menuAddNewBtn in
+// clients.html), positioned directly above Categories.
+els.menuAddNewBtn.addEventListener("click", () => {
+  closePageHeaderMenu();
+  openCreateModal();
+});
 els.clientModalClose.addEventListener("click", closeModal);
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
 
