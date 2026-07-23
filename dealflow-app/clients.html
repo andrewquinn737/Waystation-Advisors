@@ -58,6 +58,15 @@
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a1 1 0 0 1 0-10 5 5 0 0 0 0-10 10 10 0 1 0 0 20z"/><circle cx="7" cy="10" r="1"/><circle cx="10" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="17" cy="10" r="1"/></svg></span>
       </button>
     </div>
+    <!-- Settings gear popover — admin-only Sellers/Buyers data-side toggle
+         (see js/dealSide.js). Non-admins never get this wired up at all, so
+         the gear icon stays inert for them, same as before this existed. -->
+    <div class="page-header-menu hidden" id="settingsMenu">
+      <button type="button" class="page-header-menu-item" id="dealSideToggleBtn">
+        <span class="menu-item-label" id="dealSideLabel">Sellers</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+      </button>
+    </div>
     <!-- Same fixed-position "escape the clip" submenu pattern as the Dials
          page's Categories button — see positionCategoriesSubmenu() in
          js/clients.js. Options are the 5 client pipeline statuses (see
