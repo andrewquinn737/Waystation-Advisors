@@ -13,6 +13,7 @@ import { rfContact, contactActionIcons, stopContactActionPropagation, locationPi
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
+import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -115,6 +116,10 @@ const els = {
   errorBox: document.getElementById("errorBox"),
   pageMenuToggle: document.getElementById("pageMenuToggle"),
   pageHeaderMenu: document.getElementById("pageHeaderMenu"),
+  pageSettingsBtn: document.getElementById("pageSettingsBtn"),
+  settingsMenu: document.getElementById("settingsMenu"),
+  dealSideToggleBtn: document.getElementById("dealSideToggleBtn"),
+  dealSideLabel: document.getElementById("dealSideLabel"),
   tableWrap: document.getElementById("tableWrap"),
   search: document.getElementById("search"),
   countBadge: document.getElementById("countBadge"),
@@ -189,7 +194,11 @@ function clientCompanyAndLocation(c) {
 // ---------------------------------------------------------------------------
 
 async function loadClients() {
-  const { data, error } = await supabase.from("clients").select("*").order("created_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("clients")
+    .select("*")
+    .eq("client_type", getDealSide())
+    .order("created_at", { ascending: false });
   if (error) return showError(els.errorBox, error);
   clients = data || [];
   renderTable();
@@ -949,6 +958,10 @@ async function handleCreateSave() {
   const data = validateAndCollect();
   if (!data) return;
   data.assigned_to = profile.id;
+  // Overrides whatever defaultClient() filled in (always "seller") with
+  // whichever side is actually active right now — see js/dealSide.js. Every
+  // non-admin is always on "seller", so this is a no-op for them.
+  data.client_type = getDealSide();
   const { error } = await supabase.from("clients").insert(data);
   if (error) return showError(document.getElementById("clientModalError"), error);
   closeModal();
@@ -1002,6 +1015,19 @@ function closeModal() {
 els.addBtn.addEventListener("click", openCreateModal);
 els.clientModalClose.addEventListener("click", closeModal);
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
+
+// Settings gear popover — admin-only Sellers/Buyers toggle (see
+// js/dealSide.js). Never wired at all for non-admins, so the gear icon
+// stays inert for them, same as before this existed.
+if (isAdmin) {
+  wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+  wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
+    els.settingsMenu.classList.add("hidden");
+    els.pageSettingsBtn.classList.remove("open");
+    await loadClients();
+    renderTable();
+  });
+}
 els.editProfileBtn.addEventListener("click", () => {
   currentMode = "edit";
   renderModalBody();

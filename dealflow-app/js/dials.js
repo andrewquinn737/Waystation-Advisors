@@ -5,6 +5,7 @@ import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
+import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -14,10 +15,13 @@ const isAdmin = profile?.role === "admin";
 
 let allLists = []; // every dial_lists row (all types/statuses)
 let dials = []; // dials belonging to the currently selected tab
-// Buyer support has been removed entirely — the app is sellers-only. The
-// `dial_lists.dial_type` column still exists in the database, so this stays
-// hardcoded to "seller" rather than ripping out that column.
-const currentType = "seller";
+// Buyer support was removed from the UI (the app was sellers-only for a
+// while) but the `dial_lists.dial_type` column never went away — it's now
+// re-exposed via the admin-only Sellers/Buyers settings toggle (see
+// js/dealSide.js). Starts at whatever getDealSide() currently resolves to
+// (always "seller" for non-admins) and gets reassigned when an admin flips
+// the toggle — see the wireDealSideToggle call further down.
+let currentType = getDealSide();
 let currentStatus = "current"; // 'current' | 'archived'
 let currentListId = null;
 let currentDialIndex = -1;
@@ -133,6 +137,9 @@ const els = {
   pageMenuToggle: document.getElementById("pageMenuToggle"),
   pageHeaderMenu: document.getElementById("pageHeaderMenu"),
   pageSettingsBtn: document.getElementById("pageSettingsBtn"),
+  settingsMenu: document.getElementById("settingsMenu"),
+  dealSideToggleBtn: document.getElementById("dealSideToggleBtn"),
+  dealSideLabel: document.getElementById("dealSideLabel"),
   menuAddNewBtn: document.getElementById("menuAddNewBtn"),
   menuImportBtn: document.getElementById("menuImportBtn"),
   menuSelectBtn: document.getElementById("menuSelectBtn"),
@@ -692,10 +699,18 @@ async function completeTransfer(targetId) {
   els.dialTabTransferMenu.classList.add("hidden");
   els.dialTabArchiveMenu.classList.add("hidden");
 
-  const { error: listErr } = await supabase.from("dial_lists").update({ created_by: targetId }).eq("id", tabId);
-  if (listErr) return showError(els.errorBox, listErr);
-  const { error: dialsErr } = await supabase.from("dials").update({ created_by: targetId }).eq("list_id", tabId);
-  if (dialsErr) return showError(els.errorBox, dialsErr);
+  // Reassigns created_by on both dial_lists and every dial under it in one
+  // trusted, `security definer` operation (see transfer_dial_list in
+  // supabase/schema.sql) instead of two direct .update() calls — those used
+  // to rely on dial_lists_update_own/dials_update_own being widened to allow
+  // any admin to edit any row, which (as a side effect) also let every admin
+  // SEE every account's tabs all the time. Now that visibility is back to
+  // strictly created_by = auth.uid() for everyone, the reassignment itself
+  // has to go through this function instead, so a tab transferred away from
+  // the admin who's transferring it correctly disappears from their own
+  // Dials page right after.
+  const { error } = await supabase.rpc("transfer_dial_list", { p_list_id: tabId, p_new_owner: targetId });
+  if (error) return showError(els.errorBox, error);
 
   archiveMenuTabId = null;
   currentListId = null;
@@ -1008,6 +1023,23 @@ els.menuStatusBtn.addEventListener("click", () => {
 // triangle flips it to point down and reveals this page's options.
 // ---------------------------------------------------------------------------
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
+
+// Settings gear popover — admin-only Sellers/Buyers toggle (see
+// js/dealSide.js). Never wired at all for non-admins, so the gear icon
+// stays inert for them, same as before this existed.
+if (isAdmin) {
+  wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+  wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
+    currentType = getDealSide();
+    els.settingsMenu.classList.add("hidden");
+    els.pageSettingsBtn.classList.remove("open");
+    // Force renderTabs() to pick a fresh default tab for the new side
+    // instead of trying to keep whatever tab id was active before (which
+    // almost certainly doesn't belong to this side at all).
+    currentListId = null;
+    await loadLists();
+  });
+}
 
 els.menuAddNewBtn.addEventListener("click", () => {
   closePageHeaderMenu();
