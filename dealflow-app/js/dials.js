@@ -383,17 +383,23 @@ const DIAL_FIELD_ALIASES = {
   email: ["email", "email address", "e mail"],
   // "Phone - Mobile" (some CRM exports' own naming for the personal cell
   // number, distinct from "Phone - Website" below) normalizes to "phone
-  // mobile".
-  mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number", "phone mobile"],
+  // mobile". "Mobie number" is a real, observed header typo (missing the
+  // "l" in "Mobile") from an actual imported sheet — kept as its own
+  // literal alias since it's a genuine header text some spreadsheet out
+  // there uses, not something a smarter normalizer would catch.
+  mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number", "phone mobile", "mobile number", "mobie number"],
   // "Phone - Website" is that same export's naming for the general/company
   // line (associated with the business's own website/HQ, not a person's
-  // cell) — normalizes to "phone website".
-  company_phone: ["company phone", "office phone", "business phone", "work phone", "phone website"],
+  // cell) — normalizes to "phone website". "Company number" is another
+  // real observed header for this same field.
+  company_phone: ["company phone", "office phone", "business phone", "work phone", "phone website", "company number"],
   linkedin: ["linkedin", "linkedin url", "linkedin profile"],
   city: ["city"],
   state: ["state"],
   website: ["website", "url", "web site", "web address", "business url"],
-  industry: ["industry", "industry sector", "sector", "mandate industry sector"],
+  // "Mandate" alone (no "- Industry sector" suffix) is the real header seen
+  // on the Austin Price sheet — the same field, just named more tersely.
+  industry: ["industry", "industry sector", "sector", "mandate industry sector", "mandate"],
   summary: ["summary", "notes", "description"],
   contact_status: ["status"],
 };
