@@ -109,6 +109,10 @@ const els = {
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
+  eventDateModal: document.getElementById("eventDateModal"),
+  eventDateInput: document.getElementById("eventDateInput"),
+  eventDateConfirmBtn: document.getElementById("eventDateConfirmBtn"),
+  eventDateCancelBtn: document.getElementById("eventDateCancelBtn"),
 };
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
@@ -417,8 +421,17 @@ function buildTimelineHTML(events) {
             <div class="timeline-dot"></div>
             <div class="timeline-line"></div>
             <div class="timeline-box">
-              <div class="tl-date">${escapeHtml(timelineEventDateStr(e))}</div>
-              <div class="tl-type">${escapeHtml(EVENT_TYPE_LABELS[e.event_type] || e.event_type)}</div>
+              <div>
+                <div class="tl-date">${escapeHtml(timelineEventDateStr(e))}</div>
+                <div class="tl-type">${escapeHtml(EVENT_TYPE_LABELS[e.event_type] || e.event_type)}</div>
+              </div>
+              ${
+                // "Client created" is auto-inserted and can't be deleted —
+                // every other event type was added manually via "+" and can be.
+                e.event_type !== "created"
+                  ? `<button type="button" class="timeline-delete-btn" data-event-id="${e.id}" title="Delete event">&times;</button>`
+                  : ""
+              }
             </div>
           </div>`
           )
@@ -445,16 +458,64 @@ function wireTimelineTab() {
   });
   document.addEventListener("click", () => addMenu.classList.add("hidden"), { once: true });
   addMenu.querySelectorAll("button[data-type]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       addMenu.classList.add("hidden");
       const type = btn.dataset.type;
-      if (type === "intro_call") {
-        openTimelineIntroCall();
-        return;
-      }
-      await logClientEvent(type);
+      // Every event added via "+" asks for the date it actually happened
+      // first (defaults to today) — see openEventDateModal — rather than
+      // always stamping it with "right now".
+      openEventDateModal((eventDate) => {
+        if (type === "intro_call") {
+          openTimelineIntroCall(eventDate);
+          return;
+        }
+        logClientEvent(type, eventDate);
+      });
     });
   });
+
+  document.querySelectorAll(".timeline-delete-btn[data-event-id]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteClientEvent(btn.dataset.eventId);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// "Choose the date this happened" step shown before any Timeline "+" event is
+// actually logged — a plain <input type="date"> defaulting to today, reused
+// (rather than duplicated) for every event type including Intro call. Same
+// show/confirm/cancel/cleanup shape as openConfirmModal-style helpers
+// elsewhere in the app.
+// ---------------------------------------------------------------------------
+function openEventDateModal(onConfirm) {
+  const modal = els.eventDateModal;
+  const input = els.eventDateInput;
+  const confirmBtn = els.eventDateConfirmBtn;
+  const cancelBtn = els.eventDateCancelBtn;
+
+  const today = new Date();
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+  input.value = today.toISOString().slice(0, 10);
+  modal.classList.remove("hidden");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    confirmBtn.removeEventListener("click", onConfirmClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onConfirmClick = () => {
+    const val = input.value;
+    cleanup();
+    if (!val) return;
+    // Noon UTC-relative to the chosen calendar day (not midnight) so the
+    // date can never accidentally roll back a day in a timezone behind UTC.
+    onConfirm(new Date(`${val}T12:00:00`).toISOString());
+  };
+  const onCancelClick = () => cleanup();
+  confirmBtn.addEventListener("click", onConfirmClick);
+  cancelBtn.addEventListener("click", onCancelClick);
 }
 
 async function loadClientEvents() {
@@ -466,12 +527,17 @@ async function loadClientEvents() {
   currentClientEvents = error ? [] : data || [];
 }
 
-async function logClientEvent(eventType) {
-  const { error } = await supabase.from("client_events").insert({
-    client_id: currentClient.id,
-    event_type: eventType,
-    created_by: profile.id,
-  });
+async function logClientEvent(eventType, eventDate) {
+  const payload = { client_id: currentClient.id, event_type: eventType, created_by: profile.id };
+  if (eventDate) payload.event_date = eventDate;
+  const { error } = await supabase.from("client_events").insert(payload);
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  await loadClientEvents();
+  renderModalBody();
+}
+
+async function deleteClientEvent(eventId) {
+  const { error } = await supabase.from("client_events").delete().eq("id", eventId);
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   renderModalBody();
@@ -479,17 +545,18 @@ async function logClientEvent(eventType) {
 
 // Same shared "Schedule Intro Call" form the Dials page uses (js/introCall.js)
 // — here the client already exists, so it's passed directly (no createClient
-// callback needed).
-function openTimelineIntroCall() {
+// callback needed). eventDate is whatever was chosen in openEventDateModal.
+function openTimelineIntroCall(eventDate) {
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
+    userId: profile.id,
     onScheduled: async (client) => {
       await supabase.from("client_events").insert({
         client_id: client.id,
         event_type: "intro_call",
-        event_date: new Date().toISOString(),
+        event_date: eventDate || new Date().toISOString(),
         details: { via: "calendly_link" },
         created_by: profile.id,
       });

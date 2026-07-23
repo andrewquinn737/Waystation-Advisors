@@ -15,7 +15,7 @@ export async function requireSession() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role, phone, email, team_id")
+    .select("id, full_name, role, phone, email, team_id, avatar_url")
     .eq("id", session.user.id)
     .single();
 

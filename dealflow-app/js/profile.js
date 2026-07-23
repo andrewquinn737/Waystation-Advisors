@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
-import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
+import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
 import { contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
@@ -12,13 +12,20 @@ const els = {
   errorBox: document.getElementById("errorBox"),
   pageMenuToggle: document.getElementById("pageMenuToggle"),
   pageHeaderMenu: document.getElementById("pageHeaderMenu"),
+  menuEditProfileBtn: document.getElementById("menuEditProfileBtn"),
+  menuCallsViewBtn: document.getElementById("menuCallsViewBtn"),
+  avatarFileInput: document.getElementById("avatarFileInput"),
   avatarInitials: document.getElementById("avatarInitials"),
   profileName: document.getElementById("profileName"),
   profileRole: document.getElementById("profileRole"),
   profilePhone: document.getElementById("profilePhone"),
   profileEmail: document.getElementById("profileEmail"),
+  outreachCallsSection: document.getElementById("outreachCallsSection"),
+  introCallsSection: document.getElementById("introCallsSection"),
   callsThisWeekText: document.getElementById("callsThisWeekText"),
   callsChart: document.getElementById("callsChart"),
+  introCallsThisWeekText: document.getElementById("introCallsThisWeekText"),
+  introCallsChart: document.getElementById("introCallsChart"),
   teamsBtn: document.getElementById("teamsBtn"),
   teamsModal: document.getElementById("teamsModal"),
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
@@ -81,22 +88,196 @@ function initials(name) {
     .join("") || "?";
 }
 
-els.profileName.textContent = profile.full_name;
-els.profileRole.textContent = profile.role === "admin" ? "Admin" : "Intern";
-els.avatarInitials.textContent = initials(profile.full_name);
+// Shows the uploaded photo if there is one (profile.avatar_url), otherwise
+// falls back to the initials circle exactly as before — see
+// handleAvatarFileSelected() below for how avatar_url gets set.
+function renderAvatar() {
+  if (profile.avatar_url) {
+    els.avatarInitials.innerHTML = `<img src="${profile.avatar_url}" alt="" />`;
+  } else {
+    els.avatarInitials.textContent = initials(profile.full_name);
+  }
+}
 
-// Own account's phone + email, right below the listed position (role) and
-// above the weekly call-count section. Either line is simply omitted if
-// that field isn't on file (e.g. older accounts created before phone was
-// required at signup).
-if (profile.phone) {
-  els.profilePhone.textContent = profile.phone;
+function renderProfileHeader() {
+  els.profileName.textContent = profile.full_name;
+  els.profileRole.textContent = profile.role === "admin" ? "Admin" : "Intern";
+  renderAvatar();
+
+  // Own account's phone + email, right below the listed position (role) and
+  // above the weekly call-count section. Either line is simply omitted if
+  // that field isn't on file (e.g. older accounts created before phone was
+  // required at signup).
+  if (profile.phone) {
+    els.profilePhone.textContent = profile.phone;
+    els.profilePhone.classList.remove("hidden");
+  } else {
+    els.profilePhone.classList.add("hidden");
+  }
+  if (profile.email) {
+    els.profileEmail.textContent = profile.email;
+    els.profileEmail.classList.remove("hidden");
+  } else {
+    els.profileEmail.classList.add("hidden");
+  }
+}
+renderProfileHeader();
+
+// ---------------------------------------------------------------------------
+// Profile edit mode — "Edit" in the header triangle dropdown swaps the name/
+// phone/email display elements for text inputs (same input-swap idiom as
+// startRenameTeam() below); pressing "Edit" again, or clicking anywhere else
+// on the page, commits whatever was typed back to the account and reverts to
+// plain text. The avatar circle also becomes clickable (see
+// handleAvatarFileSelected) for exactly as long as edit mode is on.
+// ---------------------------------------------------------------------------
+let profileEditMode = false;
+let profileEditInputs = null; // { nameInput, phoneInput, emailInput } while editing
+
+function openAvatarPicker() {
+  if (!profileEditMode) return;
+  els.avatarFileInput.click();
+}
+els.avatarInitials.addEventListener("click", openAvatarPicker);
+
+function enterProfileEditMode() {
+  if (profileEditMode) return;
+  profileEditMode = true;
+  els.avatarInitials.classList.add("editable");
+
+  const nameInput = document.createElement("input");
+  nameInput.className = "profile-edit-input profile-edit-name";
+  nameInput.value = profile.full_name || "";
+  nameInput.placeholder = "Name";
+  els.profileName.replaceWith(nameInput);
+
+  const phoneInput = document.createElement("input");
+  phoneInput.type = "tel";
+  phoneInput.className = "profile-edit-input";
+  phoneInput.value = profile.phone || "";
+  phoneInput.placeholder = "Phone number";
   els.profilePhone.classList.remove("hidden");
-}
-if (profile.email) {
-  els.profileEmail.textContent = profile.email;
+  els.profilePhone.replaceWith(phoneInput);
+
+  const emailInput = document.createElement("input");
+  emailInput.type = "email";
+  emailInput.className = "profile-edit-input";
+  emailInput.value = profile.email || "";
+  emailInput.placeholder = "Email";
   els.profileEmail.classList.remove("hidden");
+  els.profileEmail.replaceWith(emailInput);
+
+  profileEditInputs = { nameInput, phoneInput, emailInput };
+  nameInput.focus();
+  nameInput.select();
 }
+
+async function exitProfileEditMode() {
+  if (!profileEditMode) return;
+  profileEditMode = false;
+  els.avatarInitials.classList.remove("editable");
+  const { nameInput, phoneInput, emailInput } = profileEditInputs;
+  profileEditInputs = null;
+
+  const newName = nameInput.value.trim() || profile.full_name;
+  const newPhone = phoneInput.value.trim();
+  const newEmail = emailInput.value.trim();
+  nameInput.replaceWith(els.profileName);
+  phoneInput.replaceWith(els.profilePhone);
+  emailInput.replaceWith(els.profileEmail);
+
+  const changed = newName !== profile.full_name || newPhone !== (profile.phone || "") || newEmail !== (profile.email || "");
+  if (changed) {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ full_name: newName, phone: newPhone || null, email: newEmail || null })
+      .eq("id", profile.id);
+    if (error) {
+      showError(els.errorBox, error);
+    } else {
+      profile.full_name = newName;
+      profile.phone = newPhone;
+      profile.email = newEmail;
+    }
+  }
+  renderProfileHeader();
+}
+
+els.menuEditProfileBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeAllPageHeaderMenus();
+  if (profileEditMode) exitProfileEditMode();
+  else enterProfileEditMode();
+});
+
+// Clicking anywhere outside the profile card while editing also commits +
+// exits — same "tap outside" idiom used by Dials' select mode.
+document.addEventListener("click", (e) => {
+  if (!profileEditMode) return;
+  if (e.target.closest(".profile-card") || e.target.closest("#pageHeaderMenu") || e.target.closest("#pageMenuToggle")) return;
+  exitProfileEditMode();
+});
+
+// ---------------------------------------------------------------------------
+// Avatar upload — stored in the public "avatars" Storage bucket at
+// "<profile id>/avatar.<ext>" (see supabase/schema.sql), one file per
+// account (upsert overwrites the previous photo). profiles.avatar_url just
+// caches the public URL (with a cache-busting query string so a re-upload
+// shows immediately instead of the browser serving a stale cached image).
+// ---------------------------------------------------------------------------
+els.avatarFileInput.addEventListener("change", async () => {
+  const file = els.avatarFileInput.files?.[0];
+  els.avatarFileInput.value = "";
+  if (!file) return;
+
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${profile.id}/avatar.${ext}`;
+  const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, {
+    upsert: true,
+    contentType: file.type || "image/jpeg",
+  });
+  if (upErr) return showError(els.errorBox, upErr);
+
+  const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+  const avatar_url = `${pub.publicUrl}?t=${Date.now()}`;
+  const { error: updErr } = await supabase.from("profiles").update({ avatar_url }).eq("id", profile.id);
+  if (updErr) return showError(els.errorBox, updErr);
+
+  profile.avatar_url = avatar_url;
+  renderAvatar();
+});
+
+// ---------------------------------------------------------------------------
+// Outreach calls / Intro calls toggle — the header menu's second option.
+// Defaults to "Outreach calls" (the existing weekly people-called chart);
+// clicking it switches the label to "Intro calls" and swaps in a separate
+// tracker (loadIntroCallsChart, built the first time it's shown); clicking
+// again switches back. Purely a view toggle — nothing is persisted, so it
+// always starts back on Outreach calls next time the page loads.
+// ---------------------------------------------------------------------------
+let introCallsChartLoaded = false;
+
+els.menuCallsViewBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeAllPageHeaderMenus();
+  const showingOutreach = els.menuCallsViewBtn.dataset.view === "outreach";
+  const label = els.menuCallsViewBtn.querySelector(".menu-item-label");
+  if (showingOutreach) {
+    els.menuCallsViewBtn.dataset.view = "intro";
+    label.textContent = "Intro calls";
+    els.outreachCallsSection.classList.add("hidden");
+    els.introCallsSection.classList.remove("hidden");
+    if (!introCallsChartLoaded) {
+      introCallsChartLoaded = true;
+      loadIntroCallsChart();
+    }
+  } else {
+    els.menuCallsViewBtn.dataset.view = "outreach";
+    label.textContent = "Outreach calls";
+    els.introCallsSection.classList.add("hidden");
+    els.outreachCallsSection.classList.remove("hidden");
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Teams popup — Admins + Unassigned interns are virtual groups (derived from
@@ -159,7 +340,7 @@ function buildGroupDefs() {
 
 async function loadTeams() {
   const [{ data: profiles, error: profErr }, { data: teamsData, error: teamsErr }, { data: tempPwData }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name, role, phone, email, team_id").order("full_name", { ascending: true }),
+    supabase.from("profiles").select("id, full_name, role, phone, email, team_id, avatar_url").order("full_name", { ascending: true }),
     supabase.from("teams").select("*").order("sort_order", { ascending: true }),
     // Non-admins are simply denied by RLS here and get back an empty array
     // (or an error we can safely ignore) rather than blocking the rest of
@@ -332,14 +513,27 @@ function memberCardHTML(m) {
   return `
     <div class="team-member-card-wrap">
       <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""}" data-member-id="${m.id}">
-        <div class="mc-main">
-          <div class="mc-name">${escapeHtml(m.full_name)}</div>
-          ${positionHTML}
+        <div class="mc-left">
+          ${memberAvatarHTML(m)}
+          <div class="mc-main">
+            <div class="mc-name">${escapeHtml(m.full_name)}</div>
+            ${positionHTML}
+          </div>
         </div>
         ${rightHTML}
       </div>
       ${pwRevealed ? tempPasswordRevealHTML(m.id) : ""}
     </div>`;
+}
+
+// Small photo (or initials, if none uploaded) shown left of each member's
+// name in Teams — see the "profile picture" feature in js/profile.js's own
+// avatar upload above. Purely cosmetic, no click behavior of its own.
+function memberAvatarHTML(m) {
+  if (m.avatar_url) {
+    return `<div class="mc-avatar"><img src="${m.avatar_url}" alt="" /></div>`;
+  }
+  return `<div class="mc-avatar">${escapeHtml(initials(m.full_name))}</div>`;
 }
 
 // Small key-icon button, admin-only — sits directly left of the
@@ -909,7 +1103,11 @@ function niceStep(roughStep) {
   return step * magnitude;
 }
 
-function renderCallsChart(weekStarts, counts) {
+// targetEl: the .profile-chart element to render into.
+// quota: a fixed reference line to always draw (and to guarantee fits on the
+// axis), or null/undefined to skip it entirely — used by the Outreach calls
+// chart (WEEKLY_QUOTA) but not by the Intro calls chart (no quota).
+function renderCallsChart(targetEl, weekStarts, counts, quota) {
   const w = 300;
   const h = 150;
   const padX = 18;
@@ -917,9 +1115,10 @@ function renderCallsChart(weekStarts, counts) {
   const padBottom = 16;
   const plotH = h - padTop - padBottom;
 
-  // The 50-quota line always has to fit on the chart, even in weeks where
-  // nobody's close to it yet, so the axis max is never less than the quota.
-  const rawMax = Math.max(WEEKLY_QUOTA, ...counts);
+  // A quota line always has to fit on the chart, even in weeks where nobody's
+  // close to it yet, so the axis max is never less than the quota (when
+  // there is one).
+  const rawMax = Math.max(quota || 0, 1, ...counts);
   const step = niceStep(rawMax / 4);
   const axisMax = Math.ceil(rawMax / step) * step;
 
@@ -948,12 +1147,17 @@ function renderCallsChart(weekStarts, counts) {
     gridlines.push(`<text class="profile-chart-grid-label" x="2" y="${(y + 3).toFixed(1)}">${Math.round(v)}</text>`);
   }
 
-  // Fixed quota line at 50, always green, regardless of the data — drawn
-  // after the regular gridlines so it sits on top of them.
-  const quotaY = yFor(WEEKLY_QUOTA);
-  const quotaLine = `<line class="profile-chart-quota-line" x1="${padX}" x2="${(w - padX).toFixed(1)}" y1="${quotaY.toFixed(1)}" y2="${quotaY.toFixed(1)}"></line>`;
+  // Fixed quota reference line, always green, regardless of the data — drawn
+  // after the regular gridlines so it sits on top of them. Omitted entirely
+  // when there's no quota (the Intro calls tracker).
+  const quotaLine = quota
+    ? (() => {
+        const quotaY = yFor(quota);
+        return `<line class="profile-chart-quota-line" x1="${padX}" x2="${(w - padX).toFixed(1)}" y1="${quotaY.toFixed(1)}" y2="${quotaY.toFixed(1)}"></line>`;
+      })()
+    : "";
 
-  els.callsChart.innerHTML = `
+  targetEl.innerHTML = `
     <svg viewBox="0 0 ${w} ${h}">
       ${gridlines.join("")}
       ${quotaLine}
@@ -1010,10 +1214,47 @@ async function loadCallsChart() {
       ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
       : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
   els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week, ${todayCount} today${quotaHTML}`;
-  renderCallsChart(weekStarts, counts);
+  renderCallsChart(els.callsChart, weekStarts, counts, WEEKLY_QUOTA);
 }
 
 loadCallsChart();
+
+// ---------------------------------------------------------------------------
+// Intro calls scheduled per week — the toggled alternative view (see the
+// Outreach/Intro toggle above). No quota line; just counts rows in
+// intro_call_log (one inserted every time the shared Schedule Intro Call flow
+// is used — see js/introCall.js) bucketed into the same Monday-Sunday weeks.
+// Loaded lazily, the first time the Intro calls view is shown.
+// ---------------------------------------------------------------------------
+async function loadIntroCallsChart() {
+  const thisWeekStart = startOfWeek(new Date());
+  const weekStarts = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(thisWeekStart);
+    d.setDate(d.getDate() - i * 7);
+    weekStarts.push(d);
+  }
+  const { data, error } = await supabase
+    .from("intro_call_log")
+    .select("scheduled_at")
+    .eq("user_id", profile.id)
+    .gte("scheduled_at", weekStarts[0].toISOString());
+  if (error) return showError(els.errorBox, error);
+
+  const rows = data || [];
+  const counts = weekStarts.map((ws) => {
+    const we = new Date(ws);
+    we.setDate(we.getDate() + 7);
+    return rows.filter((r) => {
+      const t = new Date(r.scheduled_at);
+      return t >= ws && t < we;
+    }).length;
+  });
+
+  const thisWeekCount = counts[counts.length - 1];
+  els.introCallsThisWeekText.textContent = `${thisWeekCount} intro call${thisWeekCount === 1 ? "" : "s"} scheduled this week`;
+  renderCallsChart(els.introCallsChart, weekStarts, counts, null);
+}
 
 els.teamsBtn.addEventListener("click", async () => {
   editMode = false;

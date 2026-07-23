@@ -16,6 +16,8 @@
 // secrets are set, this file can be swapped back to call it instead of
 // opening Calendly directly.
 
+import { supabase } from "./supabaseClient.js";
+
 // Public Calendly link for the 30-minute intro call event. Update this if
 // the Calendly account or event type ever changes.
 const CALENDLY_BOOKING_URL = "https://calendly.com/mason-waystationadvisors/30min";
@@ -34,7 +36,7 @@ export function buildIntroCallFormHTML() {
 }
 
 // container: element the form HTML above was injected into.
-// opts: { client, createClient, internEmail, onScheduled(client) }
+// opts: { client, createClient, internEmail, userId, onScheduled(client) }
 //   - client: an already-existing client row ({first_name,last_name,email,id,...}).
 //   - createClient: alternative to `client` — an async function called the
 //     moment "Open Calendly" is clicked, which should create the client
@@ -43,10 +45,15 @@ export function buildIntroCallFormHTML() {
 //     isn't actually created in the database until Calendly is opened —
 //     clicking "Schedule Intro Call" itself only validates the dial's info
 //     and opens this form, it no longer creates anything.
+//   - userId: the signed-in profile's id — logged to intro_call_log (see
+//     supabase/schema.sql) so the Profile page's "Intro calls" tracker can
+//     count every time this flow is used, from either Dials or Clients,
+//     independent of client_events/Timeline (see onScheduled below, which is
+//     each caller's own business and no longer touches client_events here).
 // (internEmail is accepted but unused in this simplified version — the
 // booking link isn't per-intern.)
 export function wireIntroCallForm(container, opts) {
-  const { client: initialClient, createClient, onScheduled } = opts;
+  const { client: initialClient, createClient, userId, onScheduled } = opts;
   const btn = container.querySelector("#scheduleCallBtn");
   const errEl = container.querySelector("#introCallError");
   const successEl = container.querySelector("#introCallSuccess");
@@ -82,6 +89,15 @@ export function wireIntroCallForm(container, opts) {
     window.open(`${CALENDLY_BOOKING_URL}${separator}${params.toString()}`, "_blank", "noopener");
 
     successEl.classList.remove("hidden");
+
+    // Counts toward the Profile page's "Intro calls" weekly tracker — see
+    // loadIntroCallsChart() in js/profile.js. Deliberately separate from
+    // client_events/Timeline, which each caller's own onScheduled below
+    // handles (or doesn't) on its own terms.
+    if (userId) {
+      await supabase.from("intro_call_log").insert({ user_id: userId });
+    }
+
     if (onScheduled) await onScheduled(client);
   });
 }

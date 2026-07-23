@@ -1140,7 +1140,8 @@ els.menuSelectBtn.addEventListener("click", (e) => {
 els.selectBackBtn.addEventListener("click", () => {
   // Mid-move, "Back" just backs out of moveMode and returns to the regular
   // select-mode toolbar (selections are kept) — otherwise it exits select
-  // mode entirely.
+  // mode entirely AND reopens the triangle dropdown (Add new/Select/etc.)
+  // right where it left off, instead of leaving the header with nothing open.
   if (moveMode) {
     moveMode = false;
     els.selectMoveHint.classList.add("hidden");
@@ -1148,6 +1149,7 @@ els.selectBackBtn.addEventListener("click", () => {
     return;
   }
   exitSelectMode();
+  els.pageMenuToggle.click();
 });
 
 els.selectAllBtn.addEventListener("click", () => {
@@ -1869,6 +1871,7 @@ async function handleScheduleIntroCallFromDial(dial) {
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     internEmail,
+    userId: profile.id,
     createClient: async () => {
       const data = defaultClient(profile, {
         first_name: dial.first_name || "",
@@ -1892,17 +1895,14 @@ async function handleScheduleIntroCallFromDial(dial) {
       if (error) throw error;
       return inserted;
     },
-    onScheduled: async (client) => {
-      // We don't know the actual booked time here (Calendly handles that in
-      // its own tab), so this just logs that the link was opened, timestamped
-      // to now.
-      await supabase.from("client_events").insert({
-        client_id: client.id,
-        event_type: "intro_call",
-        event_date: new Date().toISOString(),
-        details: { via: "calendly_link" },
-        created_by: profile.id,
-      });
+    // Scheduling from Dials no longer logs a client_events row (and so no
+    // longer appears in the new client's Timeline on its own) — Timeline is
+    // now strictly manual-only, populated exclusively by clicking "+" there
+    // and choosing "Intro call" yourself (see wireTimelineTab/
+    // openTimelineIntroCall in js/clients.js). The "intro calls scheduled"
+    // count on the Profile page still goes up, though — that's logged inside
+    // wireIntroCallForm itself (js/introCall.js) via the `userId` opt above.
+    onScheduled: async () => {
       setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
     },
   });
