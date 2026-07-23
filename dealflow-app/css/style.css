@@ -47,6 +47,14 @@
   --status-scheduled-bg: #e7f8ee;
   --status-scheduled-border: #c9ebd4;
   --status-scheduled-dot: #6fcf8e;
+
+  /* Client "Categories" pipeline-status color (see CLIENT_STATUSES in
+     js/clients.js) — only "Sold" needs a new tint (light blue); the other 4
+     client statuses reuse the dial status colors above directly (same shade,
+     per spec) rather than duplicating them under new variable names. */
+  --status-sold-bg: #e6f4fb;
+  --status-sold-border: #c7e6f5;
+  --status-sold-dot: #5aa9d6;
 }
 
 /* Full dark-mode support: every tab's background and every popup/modal
@@ -91,6 +99,10 @@
     --status-scheduled-bg: #12301d;
     --status-scheduled-border: #1f4a2e;
     --status-scheduled-dot: #7ee0a0;
+
+    --status-sold-bg: #12262f;
+    --status-sold-border: #1e3c49;
+    --status-sold-dot: #6fc0ea;
   }
 }
 
@@ -374,6 +386,9 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   font-size: 22px; font-weight: 700; margin-bottom: 16px;
 }
 .profile-card h1 { margin: 0 0 4px; font-size: 20px; }
+/* Account's own phone/email, between the listed position (role) and the
+   weekly call-count section — see js/profile.js. */
+.profile-contact-line { font-size: 13px; color: var(--text-muted); margin: 2px 0 0; }
 
 .profile-calls-section { margin-top: 18px; }
 .profile-calls-text { font-size: 15px; font-weight: 700; color: var(--text); margin: 0 0 10px; }
@@ -500,6 +515,28 @@ html.is-desktop-device .contact-action-tel { display: none; }
 .timeline-box .tl-date { font-size: 12px; color: var(--text-muted); }
 .timeline-box .tl-type { font-size: 14px; font-weight: 600; }
 
+/* ---- Client "Categories" pipeline-status dropdown (Profile tab) ----
+   Reuses the dial popup's .dial-status-* classes (see js/dials.js) directly
+   instead of duplicating that CSS — this override just stops the button from
+   stretching to the full width of its container the way it does inside
+   dials' align-items:stretch column, so it reads as a compact select-style
+   control here instead of a full-width bar. */
+.client-status-dropdown { margin: 0 0 16px; }
+.client-status-dropdown .dial-status-btn { width: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 150px; }
+
+/* ---- Client Progress tab: vertical stepper of 7 fixed milestones ---- */
+.progress-stepper { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 6px 0 6px 34px; }
+.progress-stepper-line { position: absolute; left: 15px; top: 10px; bottom: 10px; width: 2px; background: var(--border); }
+.progress-step { position: relative; display: flex; align-items: center; gap: 14px; }
+.progress-step-dot {
+  position: absolute; left: -34px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff; z-index: 1;
+}
+.progress-step.done .progress-step-dot { background: var(--success); border-color: var(--success); }
+.progress-step-label { font-size: 14px; font-weight: 600; color: var(--text); }
+.progress-step.done .progress-step-label { color: var(--text-muted); }
+
 /* ---- Dials page ---- */
 .segmented { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
 .segmented button {
@@ -588,6 +625,26 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
   font-size: 12px; font-weight: 600; color: var(--danger); cursor: pointer; white-space: nowrap;
 }
 @media (hover: hover) { .dial-tab-delete-btn:hover { background: #fdecec; } }
+.dial-tab-transfer-btn {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+@media (hover: hover) { .dial-tab-transfer-btn:hover { background: var(--gold-soft); } }
+
+/* Admin-only "Transfer to..." popup — see #dialTabTransferMenu in dials.html. */
+.dial-tab-transfer-menu {
+  position: fixed; z-index: 65; display: flex; flex-direction: column; gap: 4px; padding: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12); min-width: 170px; max-width: 220px;
+}
+.dial-tab-transfer-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); padding: 2px 6px 4px; }
+.dial-tab-transfer-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+.dial-tab-transfer-option {
+  display: block; width: 100%; text-align: left; padding: 8px; border: none; background: none;
+  border-radius: 6px; font-size: 13px; color: var(--text); cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .dial-tab-transfer-option:hover { background: var(--gold-soft); } }
+.dial-tab-transfer-empty { padding: 8px; font-size: 12.5px; color: var(--text-muted); }
 
 /* ---- Dial detail/create popup ---- */
 .dial-modal-stack { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 540px; }
