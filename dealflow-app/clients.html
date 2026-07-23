@@ -53,6 +53,14 @@
         <span class="menu-item-label">New client</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>
       </button>
+      <!-- Filters the Clients list by furthest confirmed Progress-tab
+           milestone (see PROGRESS_STAGES / renderProgressSubmenu in
+           js/clients.js) — sits between New client and Categories per
+           spec. -->
+      <button type="button" class="page-header-menu-item" id="menuProgressBtn">
+        <span class="menu-item-label">Progress</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg></span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuCategoriesBtn">
         <span class="menu-item-label">Categories</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a1 1 0 0 1 0-10 5 5 0 0 0 0-10 10 10 0 1 0 0 20z"/><circle cx="7" cy="10" r="1"/><circle cx="10" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="17" cy="10" r="1"/></svg></span>
@@ -81,6 +89,9 @@
          js/clients.js. Options are the 5 client pipeline statuses (see
          CLIENT_STATUSES) instead of dials' 6 contact statuses. -->
     <div class="categories-submenu hidden" id="categoriesSubmenu"></div>
+    <!-- Same fixed-position submenu pattern, for the Progress filter (see
+         menuProgressBtn above and renderProgressSubmenu in js/clients.js). -->
+    <div class="categories-submenu hidden" id="progressSubmenu"></div>
     <div id="errorBox" class="error-msg hidden"></div>
     <div class="toolbar">
       <input type="search" id="search" placeholder="Search clients..." />
