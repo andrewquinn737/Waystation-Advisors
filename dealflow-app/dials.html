@@ -56,12 +56,41 @@
          Current/Archived switch, "+" FAB, and status-filter palette button —
          same functions, now text-only menu items (see js/dials.js). -->
     <div class="page-header-menu hidden" id="pageHeaderMenu">
-      <button type="button" class="page-header-menu-item" id="menuAddNewBtn">Add new</button>
-      <button type="button" class="page-header-menu-item" id="menuSelectBtn">Select</button>
-      <button type="button" class="page-header-menu-item" id="menuStatusBtn" data-status="current">Current</button>
-      <button type="button" class="page-header-menu-item" id="menuCategoriesBtn">Categories</button>
+      <button type="button" class="page-header-menu-item" id="menuAddNewBtn">
+        <span class="menu-item-label">Add new</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item hidden" id="menuImportBtn">
+        <span class="menu-item-label">Import</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="menuSelectBtn">
+        <span class="menu-item-label">Select</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="menuStatusBtn" data-status="current">
+        <span class="menu-item-label">Current</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="menuCategoriesBtn">
+        <span class="menu-item-label">Categories</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a1 1 0 0 1 0-10 5 5 0 0 0 0-10 10 10 0 1 0 0 20z"/><circle cx="7" cy="10" r="1"/><circle cx="10" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="17" cy="10" r="1"/></svg></span>
+      </button>
     </div>
     <div class="categories-submenu hidden" id="categoriesSubmenu"></div>
+
+    <!-- Shown instead of the page-header-menu while bulk-selecting dials
+         (see js/dials.js's enterSelectMode/exitSelectMode). Tapping anywhere
+         outside this bar and outside the dials list itself exits select mode. -->
+    <div class="select-mode-bar hidden" id="selectModeBar">
+      <button type="button" class="select-mode-btn" id="selectBackBtn">Back</button>
+      <button type="button" class="select-mode-btn" id="selectAllBtn">Select all</button>
+      <button type="button" class="select-mode-btn" id="selectMassEmailBtn">Mass email</button>
+      <button type="button" class="select-mode-btn" id="selectMassTextBtn">Mass text</button>
+      <button type="button" class="select-mode-btn" id="selectMoveBtn">Move</button>
+      <button type="button" class="select-mode-btn danger" id="selectDeleteBtn">Delete</button>
+    </div>
+    <div class="select-mode-hint hidden" id="selectMoveHint">Tap a tab above to move the selected dials there.</div>
 
     <div id="errorBox" class="error-msg hidden"></div>
 
@@ -137,6 +166,31 @@
     </div>
   </div>
 
+  <!-- Bulk delete confirmation for Select mode's Delete button -->
+  <div class="modal-backdrop hidden" id="confirmBulkDeleteModal">
+    <div class="modal">
+      <h2 id="confirmBulkDeleteTitle">Delete these dials?</h2>
+      <p class="help-text">This cannot be undone.</p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="confirmBulkDeleteYesBtn">Delete</button>
+        <button type="button" class="btn secondary" id="confirmBulkDeleteNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Warning shown by Select mode's Mass email/Mass text when some of the
+       selected dials are missing that contact method -->
+  <div class="modal-backdrop hidden" id="massContactWarningModal">
+    <div class="modal">
+      <h2 id="massContactWarningTitle">Some dials are missing this info</h2>
+      <p id="massContactWarningText" class="help-text"></p>
+      <div class="form-actions">
+        <button type="button" class="btn" id="massContactWarningContinueBtn">Continue</button>
+        <button type="button" class="btn secondary" id="massContactWarningCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- New-list dialog (in-app, replacing window.prompt) -->
   <div class="modal-backdrop hidden" id="newListModal">
     <div class="modal">
@@ -147,6 +201,25 @@
       <div class="form-actions">
         <button type="button" class="btn" id="newListCreateBtn">Create</button>
         <button type="button" class="btn secondary" id="newListCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import dials from CSV (admin-only, see menuImportBtn in js/dials.js).
+       The CSV's filename (minus extension) becomes the name of a new tab
+       under Current; one dial is created per row, with columns matched by
+       header name to the closest dial field. -->
+  <div class="modal-backdrop hidden" id="importDialsModal">
+    <div class="modal">
+      <h2>Import dials from CSV</h2>
+      <div id="importDialsError" class="error-msg hidden"></div>
+      <p class="help-text" style="margin-top:0;">Column headers in the first row are matched to dial fields (First name, Last name, Company name, Email, Mobile phone, Company phone, LinkedIn, City, State, Website, Industry, Summary) automatically.</p>
+      <input type="file" id="importDialsFileInput" accept=".csv,text/csv" class="hidden" />
+      <button type="button" class="btn secondary" id="importDialsChooseBtn">Choose CSV</button>
+      <div id="importDialsFileName" class="help-text"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="importDialsImportBtn" disabled>Import</button>
+        <button type="button" class="btn secondary" id="importDialsCancelBtn">Cancel</button>
       </div>
     </div>
   </div>
