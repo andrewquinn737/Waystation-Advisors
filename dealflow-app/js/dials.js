@@ -10,6 +10,7 @@ const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile, user } = session;
 const internEmail = user?.email || "";
+const isAdmin = profile?.role === "admin";
 
 let allLists = []; // every dial_lists row (all types/statuses)
 let dials = []; // dials belonging to the currently selected tab
@@ -51,9 +52,29 @@ function statusInfo(value) {
   return CONTACT_STATUSES.find((s) => s.value === value) || CONTACT_STATUSES[0];
 }
 
+// "Called today" only makes sense for statuses that still represent an
+// active, in-progress prospect — white (uncontacted), orange (no response,
+// try again), and yellow (callback, interested). It's hidden for green
+// (intro call scheduled), red (not interested), and gray (unable to
+// contact), where logging "called today" doesn't add anything.
+const SHOW_CALLED_TODAY_STATUSES = new Set(["uncontacted", "no_response", "callback_interested"]);
+
 // Which statuses are currently hidden from every list/tab (toggled via the
 // palette filter button).
 const hiddenStatuses = new Set();
+
+// ---------------------------------------------------------------------------
+// Select mode (bulk-select dials for mass email/text/move/delete) — see
+// enterSelectMode/exitSelectMode, renderDialsTable's selectMode branch, and
+// the select-mode-bar wiring below. `selectedDialIds` only ever holds ids
+// belonging to whatever tab was active when select mode was entered — select
+// mode is exited (clearing the set) as soon as the user switches tabs for any
+// reason other than completing a Move (see the document click listener and
+// wireTabInteractions' click handler).
+// ---------------------------------------------------------------------------
+let selectMode = false;
+let moveMode = false;
+let selectedDialIds = new Set();
 
 // ---------------------------------------------------------------------------
 // Persisted Dials view state (selected tab + Categories filter) — saved to
@@ -113,6 +134,7 @@ const els = {
   pageHeaderMenu: document.getElementById("pageHeaderMenu"),
   pageSettingsBtn: document.getElementById("pageSettingsBtn"),
   menuAddNewBtn: document.getElementById("menuAddNewBtn"),
+  menuImportBtn: document.getElementById("menuImportBtn"),
   menuSelectBtn: document.getElementById("menuSelectBtn"),
   menuStatusBtn: document.getElementById("menuStatusBtn"),
   menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
@@ -145,7 +167,31 @@ const els = {
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
+  importDialsModal: document.getElementById("importDialsModal"),
+  importDialsError: document.getElementById("importDialsError"),
+  importDialsFileInput: document.getElementById("importDialsFileInput"),
+  importDialsChooseBtn: document.getElementById("importDialsChooseBtn"),
+  importDialsFileName: document.getElementById("importDialsFileName"),
+  importDialsImportBtn: document.getElementById("importDialsImportBtn"),
+  importDialsCancelBtn: document.getElementById("importDialsCancelBtn"),
+  selectModeBar: document.getElementById("selectModeBar"),
+  selectBackBtn: document.getElementById("selectBackBtn"),
+  selectAllBtn: document.getElementById("selectAllBtn"),
+  selectMassEmailBtn: document.getElementById("selectMassEmailBtn"),
+  selectMassTextBtn: document.getElementById("selectMassTextBtn"),
+  selectMoveBtn: document.getElementById("selectMoveBtn"),
+  selectDeleteBtn: document.getElementById("selectDeleteBtn"),
+  selectMoveHint: document.getElementById("selectMoveHint"),
+  confirmBulkDeleteModal: document.getElementById("confirmBulkDeleteModal"),
+  confirmBulkDeleteTitle: document.getElementById("confirmBulkDeleteTitle"),
+  massContactWarningModal: document.getElementById("massContactWarningModal"),
+  massContactWarningTitle: document.getElementById("massContactWarningTitle"),
+  massContactWarningText: document.getElementById("massContactWarningText"),
+  massContactWarningContinueBtn: document.getElementById("massContactWarningContinueBtn"),
+  massContactWarningCancelBtn: document.getElementById("massContactWarningCancelBtn"),
 };
+
+if (isAdmin) els.menuImportBtn.classList.remove("hidden");
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
@@ -232,6 +278,142 @@ function emptyDial() {
     website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted",
     called_today_date: null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// CSV import (admin-only, "Import" menu item — see els.menuImportBtn below).
+// Parses the file entirely client-side (no server round-trip needed for
+// something this small), matches column headers to dial fields by name, and
+// bulk-inserts one dials row per data row into a brand-new tab named after
+// the file.
+// ---------------------------------------------------------------------------
+
+// Minimal RFC4180-ish CSV parser: handles quoted fields (including embedded
+// commas/newlines) and "" as an escaped quote inside a quoted field. Good
+// enough for CSVs exported from Excel/Google Sheets/Numbers, which is the
+// only realistic source here.
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  let i = 0;
+  const len = text.length;
+  while (i < len) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(field);
+      field = "";
+      i++;
+      continue;
+    }
+    if (ch === "\r") {
+      i++;
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      i++;
+      continue;
+    }
+    field += ch;
+    i++;
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// column header (any reasonable spelling/casing) -> dial field name. Each
+// dial field only ever gets matched to the FIRST header that matches one of
+// its aliases, so a CSV with both "Phone" and "Mobile" columns doesn't have
+// the second one silently overwrite the first.
+const DIAL_FIELD_ALIASES = {
+  first_name: ["first name", "firstname", "first"],
+  last_name: ["last name", "lastname", "last"],
+  company_name: ["company name", "company", "business name", "business"],
+  email: ["email", "email address", "e mail"],
+  mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number"],
+  company_phone: ["company phone", "office phone", "business phone", "work phone"],
+  linkedin: ["linkedin", "linkedin url", "linkedin profile"],
+  city: ["city"],
+  state: ["state"],
+  website: ["website", "url", "web site", "web address"],
+  industry: ["industry", "industry sector", "sector"],
+  summary: ["summary", "notes", "description"],
+};
+
+function normalizeHeader(h) {
+  return String(h || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Maps each column index in the header row to a dial field key, wherever a
+// match is found — unmatched columns are simply ignored on import.
+function buildHeaderFieldMap(headerRow) {
+  const map = {};
+  const usedFields = new Set();
+  headerRow.forEach((rawHeader, colIndex) => {
+    const norm = normalizeHeader(rawHeader);
+    if (!norm) return;
+    for (const [field, aliases] of Object.entries(DIAL_FIELD_ALIASES)) {
+      if (usedFields.has(field)) continue;
+      if (aliases.some((a) => normalizeHeader(a) === norm)) {
+        map[colIndex] = field;
+        usedFields.add(field);
+        break;
+      }
+    }
+  });
+  return map;
+}
+
+// Turns parsed CSV rows (including the header row at index 0) into an array
+// of dials-table-ready insert objects for `listId`. Blank rows (every cell
+// empty) are skipped.
+function rowsToDials(rows, listId) {
+  if (rows.length < 2) return [];
+  const fieldMap = buildHeaderFieldMap(rows[0]);
+  return rows
+    .slice(1)
+    .filter((r) => r.some((cell) => (cell || "").trim() !== ""))
+    .map((r) => {
+      const d = { list_id: listId };
+      Object.entries(fieldMap).forEach(([colIndex, field]) => {
+        const v = (r[Number(colIndex)] || "").trim();
+        if (v) d[field] = v;
+      });
+      return d;
+    });
 }
 
 // Local calendar date (not UTC) as YYYY-MM-DD — used for the "Did call
@@ -518,6 +700,13 @@ function wireTabInteractions() {
         tabDragState.suppressClick = false;
         return;
       }
+      // Select mode's "Move" button puts us in moveMode, waiting for the
+      // user to tap whichever tab they want the selected dials moved into —
+      // intercept that tap here instead of doing a normal tab switch.
+      if (selectMode && moveMode) {
+        completeMoveToList(id);
+        return;
+      }
       if (isMobileViewport() && id === currentListId) {
         archiveMenuTabId = archiveMenuTabId === id ? null : id;
         renderTabs();
@@ -698,7 +887,7 @@ els.newListNameInput.addEventListener("keydown", (e) => {
 // same on both platforms.
 function setStatus(status) {
   currentStatus = status;
-  els.menuStatusBtn.textContent = status === "current" ? "Current" : "Archived";
+  els.menuStatusBtn.querySelector(".menu-item-label").textContent = status === "current" ? "Current" : "Archived";
   els.menuStatusBtn.dataset.status = status;
   currentListId = null;
   persistStatus();
@@ -708,8 +897,10 @@ function setStatus(status) {
 // Reflect whatever status was restored from localStorage (see
 // loadPersistedDialsState()) in the menu button's label right away, without
 // going through setStatus() itself — that also nulls out currentListId,
-// which would throw away the just-restored tab selection.
-els.menuStatusBtn.textContent = currentStatus === "current" ? "Current" : "Archived";
+// which would throw away the just-restored tab selection. Only the label
+// span's text is set (not the whole button), so the icon markup next to it
+// (see dials.html) survives.
+els.menuStatusBtn.querySelector(".menu-item-label").textContent = currentStatus === "current" ? "Current" : "Archived";
 els.menuStatusBtn.dataset.status = currentStatus;
 
 els.menuStatusBtn.addEventListener("click", () => {
@@ -728,10 +919,249 @@ els.menuAddNewBtn.addEventListener("click", () => {
   openCreateDialModal();
 });
 
-// "Select" is a placeholder for a future bulk-selection mode — added now per
-// request, not wired up to anything yet.
+// ---------------------------------------------------------------------------
+// Import dials from CSV (admin-only — els.menuImportBtn is only unhidden for
+// admins, see the `if (isAdmin)` line near the top of this file).
+// ---------------------------------------------------------------------------
+let selectedImportFile = null;
+
+function openImportDialsModal() {
+  els.importDialsError.classList.add("hidden");
+  els.importDialsFileName.textContent = "";
+  els.importDialsImportBtn.disabled = true;
+  els.importDialsFileInput.value = "";
+  selectedImportFile = null;
+  els.importDialsModal.classList.remove("hidden");
+}
+
+els.menuImportBtn.addEventListener("click", () => {
+  closePageHeaderMenu();
+  openImportDialsModal();
+});
+els.importDialsCancelBtn.addEventListener("click", () => els.importDialsModal.classList.add("hidden"));
+// The visible "Choose CSV" button just proxies to the real (hidden) file
+// input — clicking a styled button instead of the native input directly
+// gives a consistent look on both desktop (Finder) and mobile (Files/Photos
+// picker), both of which open from input[type=file] the same way.
+els.importDialsChooseBtn.addEventListener("click", () => els.importDialsFileInput.click());
+els.importDialsFileInput.addEventListener("change", () => {
+  const file = els.importDialsFileInput.files?.[0] || null;
+  selectedImportFile = file;
+  els.importDialsFileName.textContent = file ? file.name : "";
+  els.importDialsImportBtn.disabled = !file;
+});
+
+els.importDialsImportBtn.addEventListener("click", async () => {
+  if (!selectedImportFile) return;
+  els.importDialsError.classList.add("hidden");
+  els.importDialsImportBtn.disabled = true;
+  try {
+    const text = await selectedImportFile.text();
+    const rows = parseCSV(text).filter((r) => r.some((c) => (c || "").trim() !== ""));
+    if (rows.length < 2) {
+      throw new Error("That CSV doesn't have any data rows to import.");
+    }
+    // The new tab's name is the CSV's filename (minus the .csv extension),
+    // always created under Current — regardless of whether Current or
+    // Archived happens to be selected right now — per spec.
+    const tabName = selectedImportFile.name.replace(/\.csv$/i, "").trim() || "Imported";
+    const sortOrder = allLists.filter((l) => l.dial_type === currentType && l.status === "current").length;
+    const { data: newList, error: listErr } = await supabase
+      .from("dial_lists")
+      .insert({ name: tabName, dial_type: currentType, status: "current", sort_order: sortOrder })
+      .select()
+      .single();
+    if (listErr) throw listErr;
+
+    const dialRows = rowsToDials(rows, newList.id);
+    if (!dialRows.length) {
+      throw new Error("No data rows found in that CSV.");
+    }
+    const { error: insertErr } = await supabase.from("dials").insert(dialRows);
+    if (insertErr) throw insertErr;
+
+    // Land the user on the tab that was just created, switching to Current
+    // first if Archived was selected so the new tab is actually visible.
+    if (currentStatus !== "current") {
+      currentStatus = "current";
+      els.menuStatusBtn.querySelector(".menu-item-label").textContent = "Current";
+      els.menuStatusBtn.dataset.status = "current";
+      persistStatus();
+    }
+    currentListId = newList.id;
+    persistCurrentListId();
+    els.importDialsModal.classList.add("hidden");
+    await loadLists();
+  } catch (err) {
+    els.importDialsError.textContent = err.message || "Could not import that CSV.";
+    els.importDialsError.classList.remove("hidden");
+  } finally {
+    els.importDialsImportBtn.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Select mode — bulk-select dials in the current tab for mass email/text,
+// moving to another tab, or deleting. See the module-level selectMode/
+// moveMode/selectedDialIds declared near the top of this file, and the
+// selectMode branch inside renderDialsTable() for the selection-circle UI.
+// ---------------------------------------------------------------------------
+
+function enterSelectMode() {
+  selectMode = true;
+  moveMode = false;
+  selectedDialIds = new Set();
+  els.selectModeBar.classList.remove("hidden");
+  els.selectMoveHint.classList.add("hidden");
+  els.selectMoveBtn.classList.remove("active");
+  renderDialsTable();
+}
+
+function exitSelectMode() {
+  selectMode = false;
+  moveMode = false;
+  selectedDialIds = new Set();
+  els.selectModeBar.classList.add("hidden");
+  els.selectMoveHint.classList.add("hidden");
+  els.selectMoveBtn.classList.remove("active");
+  renderDialsTable();
+}
+
+function toggleDialSelection(id) {
+  if (selectedDialIds.has(id)) selectedDialIds.delete(id);
+  else selectedDialIds.add(id);
+  renderDialsTable();
+}
+
 els.menuSelectBtn.addEventListener("click", () => {
   closePageHeaderMenu();
+  enterSelectMode();
+});
+
+els.selectBackBtn.addEventListener("click", () => {
+  // Mid-move, "Back" just backs out of moveMode and returns to the regular
+  // select-mode toolbar (selections are kept) — otherwise it exits select
+  // mode entirely.
+  if (moveMode) {
+    moveMode = false;
+    els.selectMoveHint.classList.add("hidden");
+    els.selectMoveBtn.classList.remove("active");
+    return;
+  }
+  exitSelectMode();
+});
+
+els.selectAllBtn.addEventListener("click", () => {
+  const visible = visibleDials();
+  if (!visible.length) return;
+  const allSelected = visible.every((d) => selectedDialIds.has(d.id));
+  if (allSelected) {
+    visible.forEach((d) => selectedDialIds.delete(d.id));
+  } else {
+    visible.forEach((d) => selectedDialIds.add(d.id));
+  }
+  renderDialsTable();
+});
+
+// Shared by Mass email / Mass text — kind is "email" or "phone". Warns first
+// if any selected dial is missing that contact method, then (if continuing)
+// only includes the dials that actually have it.
+function handleMassContact(kind) {
+  const selected = dials.filter((d) => selectedDialIds.has(d.id));
+  if (!selected.length) return;
+  const withInfo = selected.filter((d) => (kind === "email" ? !!d.email : !!d.mobile_phone));
+  const missingCount = selected.length - withInfo.length;
+
+  const proceed = () => {
+    if (!withInfo.length) return;
+    if (kind === "email") {
+      window.location.href = `mailto:${withInfo.map((d) => d.email).join(",")}`;
+    } else {
+      const numbers = withInfo.map((d) => d.mobile_phone).join(",");
+      window.location.href = `sms:${numbers}`;
+    }
+  };
+
+  if (missingCount > 0) {
+    const noun = kind === "email" ? "an email" : "a mobile number";
+    els.massContactWarningTitle.textContent = `Some dials are missing ${noun}`;
+    els.massContactWarningText.textContent = `${missingCount} of the ${selected.length} selected dial${selected.length === 1 ? "" : "s"} ${
+      missingCount === 1 ? "doesn't" : "don't"
+    } have ${noun} on file. Continuing will only ${kind === "email" ? "email" : "text"} the ${withInfo.length} that ${withInfo.length === 1 ? "does" : "do"}.`;
+    els.massContactWarningModal.classList.remove("hidden");
+    const cleanup = () => {
+      els.massContactWarningModal.classList.add("hidden");
+      els.massContactWarningContinueBtn.removeEventListener("click", onContinue);
+      els.massContactWarningCancelBtn.removeEventListener("click", onCancel);
+    };
+    const onContinue = () => {
+      cleanup();
+      proceed();
+    };
+    const onCancel = () => cleanup();
+    els.massContactWarningContinueBtn.addEventListener("click", onContinue);
+    els.massContactWarningCancelBtn.addEventListener("click", onCancel);
+  } else {
+    proceed();
+  }
+}
+
+els.selectMassEmailBtn.addEventListener("click", () => handleMassContact("email"));
+els.selectMassTextBtn.addEventListener("click", () => handleMassContact("phone"));
+
+els.selectMoveBtn.addEventListener("click", () => {
+  if (!selectedDialIds.size) return;
+  moveMode = true;
+  els.selectMoveBtn.classList.add("active");
+  els.selectMoveHint.classList.remove("hidden");
+});
+
+// Called from wireTabInteractions' tab click handler once moveMode is active
+// and the user taps the destination tab.
+async function completeMoveToList(listId) {
+  const ids = [...selectedDialIds];
+  if (!ids.length) {
+    exitSelectMode();
+    return;
+  }
+  const { error } = await supabase.from("dials").update({ list_id: listId }).in("id", ids);
+  if (error) {
+    showError(els.errorBox, error);
+    return;
+  }
+  exitSelectMode();
+  currentListId = listId;
+  persistCurrentListId();
+  await loadLists();
+}
+
+els.selectDeleteBtn.addEventListener("click", () => {
+  const count = selectedDialIds.size;
+  if (!count) return;
+  els.confirmBulkDeleteTitle.textContent = `Delete ${count} dial${count === 1 ? "" : "s"}?`;
+  openConfirmModal(els.confirmBulkDeleteModal, "confirmBulkDeleteYesBtn", "confirmBulkDeleteNoBtn", async () => {
+    const ids = [...selectedDialIds];
+    const { error } = await supabase.from("dials").delete().in("id", ids);
+    if (error) return showError(els.errorBox, error);
+    exitSelectMode();
+    await loadDials();
+  });
+});
+
+// Tapping anywhere outside the select-mode-bar and outside the dials list
+// itself exits select mode (per spec). Clicks inside any modal (the bulk
+// delete confirm, the mass-contact warning, or any other popup) are exempt —
+// those manage their own dismissal and shouldn't also tear down select mode
+// underneath them. A tab tap while moveMode is active is also exempt — that's
+// handled by wireTabInteractions' click handler (completeMoveToList), which
+// itself calls exitSelectMode() when it's done.
+document.addEventListener("click", (e) => {
+  if (!selectMode) return;
+  if (e.target.closest(".modal-backdrop")) return;
+  if (els.selectModeBar.contains(e.target)) return;
+  if (els.dialsTableWrap.contains(e.target)) return;
+  if (moveMode && e.target.closest(".dial-tab")) return;
+  exitSelectMode();
 });
 
 // ---------------------------------------------------------------------------
@@ -792,10 +1222,17 @@ function renderDialsTable() {
     return;
   }
 
+  // While select mode is active, instant-contact icons are replaced by a
+  // plain selection circle (highlighted when that dial is selected), and a
+  // matching empty header cell is added to the desktop table so the columns
+  // still line up.
+  const selectCircleHTML = (d) => `<div class="select-circle ${selectedDialIds.has(d.id) ? "selected" : ""}"></div>`;
+
   els.dialsTableWrap.innerHTML = `
     <table>
       <thead>
         <tr>
+          ${selectMode ? "<th></th>" : ""}
           <th>Name</th>
           <th>Company</th>
           <th>Location</th>
@@ -808,6 +1245,7 @@ function renderDialsTable() {
           .map(
             (d, i) => `
           <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
+            ${selectMode ? `<td>${selectCircleHTML(d)}</td>` : ""}
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
             <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
@@ -821,7 +1259,8 @@ function renderDialsTable() {
 
     <!-- Mobile-only simplified card list — no column labels, just name on
          top, company + location smaller underneath, and instant-contact
-         icons using the mobile number only (never the company number). -->
+         icons using the mobile number only (never the company number) — or,
+         in select mode, a selection circle in their place. -->
     <div class="mobile-list">
       ${visible
         .map(
@@ -831,16 +1270,28 @@ function renderDialsTable() {
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
           </div>
-          ${contactActionIcons({ phone: d.mobile_phone, email: d.email })}
+          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone, email: d.email })}
         </div>`
         )
         .join("")}
     </div>
   `;
   els.dialsTableWrap.querySelectorAll("[data-index]").forEach((row) => {
-    row.addEventListener("click", () => openDialModal(Number(row.dataset.index)));
+    const idx = Number(row.dataset.index);
+    const d = visible[idx];
+    row.addEventListener("click", () => {
+      if (selectMode) {
+        toggleDialSelection(d.id);
+        return;
+      }
+      openDialModal(idx);
+    });
   });
-  stopContactActionPropagation(els.dialsTableWrap);
+  if (!selectMode) stopContactActionPropagation(els.dialsTableWrap);
+
+  if (selectMode) {
+    els.selectAllBtn.classList.toggle("active", visible.every((d) => selectedDialIds.has(d.id)));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -964,7 +1415,11 @@ function renderDialModal() {
                 ).join("")}
               </div>
             </div>
-            <button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Called today</button>
+            ${
+              SHOW_CALLED_TODAY_STATUSES.has(dial.contact_status || "uncontacted")
+                ? `<button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Called today</button>`
+                : ""
+            }
           </div>
           <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
         </div>
@@ -986,7 +1441,8 @@ function renderDialModal() {
       dialMode = "edit";
       renderDialModal();
     });
-    document.getElementById("dialDidCallBtn").addEventListener("click", toggleDidCallToday);
+    const didCallBtn = document.getElementById("dialDidCallBtn");
+    if (didCallBtn) didCallBtn.addEventListener("click", toggleDidCallToday);
     const statusBtn = document.getElementById("dialStatusBtn");
     const statusMenu = document.getElementById("dialStatusMenu");
     statusBtn.addEventListener("click", (e) => {
