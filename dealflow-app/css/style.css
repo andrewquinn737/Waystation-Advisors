@@ -545,14 +545,17 @@ html.is-desktop-device .contact-action-tel { display: none; }
 
 /* ---- Timeline tab ---- */
 .timeline-add-btn {
-  position: fixed; right: 28px; bottom: 28px; z-index: 110;
+  /* bottom nudged up from the original 28px on desktop — it was overlapping
+     the Timeline subtab button in the client popup at that position (see
+     .subtabs). Mobile still uses its own bottom value below, unaffected. */
+  position: fixed; right: 28px; bottom: 48px; z-index: 110;
   width: 48px; height: 48px; border-radius: 999px; border: none; background: var(--accent);
   color: #fff; font-size: 24px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 14px rgba(47,95,237,.35);
 }
 @media (hover: hover) { .timeline-add-btn:hover { background: var(--accent-hover); } }
 .timeline-add-menu {
-  position: fixed; right: 28px; bottom: 84px; background: var(--surface); border: 1px solid var(--border);
+  position: fixed; right: 28px; bottom: 104px; background: var(--surface); border: 1px solid var(--border);
   border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 110; min-width: 150px; overflow: hidden;
 }
 .timeline-add-menu button { display: block; width: 100%; text-align: left; padding: 10px 14px; border: none; background: none; font-size: 13.5px; cursor: pointer; }
@@ -787,6 +790,10 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
   margin-bottom: 4px;
 }
 .accounts-visible-empty { padding: 8px 10px; font-size: 12.5px; color: var(--text-muted); }
+/* Shown instead of/alongside the "Done" button (disabled via the native
+   `disabled` attribute, see wireAccountsVisiblePopup) whenever zero accounts
+   are selected — the popup can't be closed until at least one is checked. */
+.accounts-visible-warning { padding: 8px 10px 0; font-size: 12.5px; color: var(--danger); }
 /* Selected-row highlight — used by the "Who's the meeting with?" counterpart
    picker (see openCounterpartPicker in js/clients.js), which reuses the
    accounts-visible-row shell but needs an actual persistent selection state
