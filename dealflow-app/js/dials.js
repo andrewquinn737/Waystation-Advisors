@@ -503,7 +503,21 @@ function rowsToDials(rows, listId) {
         // was tripping the "null value in column contact_status violates
         // not-null constraint" error.
         if (field === "contact_status") {
-          d.contact_status = CSV_STATUS_VALUE_MAP[normalizeStatusValue(v)] || "uncontacted";
+          const norm = normalizeStatusValue(v);
+          if (CSV_STATUS_VALUE_MAP[norm]) {
+            d.contact_status = CSV_STATUS_VALUE_MAP[norm];
+          } else if (norm.includes("nda") || norm.includes("loi")) {
+            // NDA/LOI-stage statuses (e.g. "NDA Signed", "LOI Signed" — real
+            // deal-stage values seen in actual CSV exports that aren't in
+            // CSV_STATUS_VALUE_MAP above, since they're specific to certain
+            // sheets rather than universal) count as real, live engagement —
+            // grouped under "Intro call scheduled" rather than falling all
+            // the way back to "Uncontacted" like every other unrecognized
+            // value.
+            d.contact_status = "intro_call_scheduled";
+          } else {
+            d.contact_status = "uncontacted";
+          }
           return;
         }
         if (v) d[field] = v;
