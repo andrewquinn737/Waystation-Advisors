@@ -55,6 +55,15 @@
   --status-sold-bg: #e6f4fb;
   --status-sold-border: #c7e6f5;
   --status-sold-dot: #5aa9d6;
+
+  /* Mobile bottom tab bar (see .bottom-tabbar below) — a floating pill whose
+     colors need their own theme-aware variables since they're deliberately
+     NOT the same as --surface/--border (it floats over the page content
+     rather than sitting flush with it). */
+  --tabbar-bg: rgba(107, 114, 128, 0.85);
+  --tabbar-icon: rgba(255, 255, 255, .8);
+  --tabbar-active-bg: rgba(255, 255, 255, .18);
+  --tabbar-active-icon: #fff;
 }
 
 /* Full dark-mode support: every tab's background and every popup/modal
@@ -103,6 +112,14 @@
     --status-sold-bg: #12262f;
     --status-sold-border: #1e3c49;
     --status-sold-dot: #6fc0ea;
+
+    /* Dark charcoal pill (not the same gray used in light mode) with the
+       accent blue used for the active tab, instead of a plain white
+       highlight — matches every other "active" state in dark mode. */
+    --tabbar-bg: rgba(28, 28, 30, 0.9);
+    --tabbar-icon: #a3adba;
+    --tabbar-active-bg: rgba(109, 141, 255, 0.22);
+    --tabbar-active-icon: #6d8dff;
   }
 }
 
@@ -142,7 +159,7 @@ a:hover { text-decoration: underline; }
 .bottom-tabbar {
   display: none;
   position: fixed; left: 16px; right: 16px; bottom: 14px; z-index: 40;
-  background: rgba(107, 114, 128, 0.85);
+  background: var(--tabbar-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-radius: 20px;
@@ -152,13 +169,13 @@ a:hover { text-decoration: underline; }
 }
 .bottom-tabbar a, .bottom-tabbar button {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  padding: 10px 2px; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.8);
+  padding: 10px 2px; font-size: 12px; font-weight: 600; color: var(--tabbar-icon);
   border: none; background: none; cursor: pointer; border-radius: 14px; text-decoration: none;
   font-family: inherit;
 }
 .bottom-tabbar a svg { display: block; }
-.bottom-tabbar a.active { color: #fff; background: rgba(255,255,255,.18); }
-.bottom-tabbar a:active, .bottom-tabbar button:active { background: rgba(255,255,255,.24); }
+.bottom-tabbar a.active { color: var(--tabbar-active-icon); background: var(--tabbar-active-bg); }
+.bottom-tabbar a:active, .bottom-tabbar button:active { background: var(--tabbar-active-bg); }
 .role-badge {
   font-size: 11px;
   text-transform: uppercase;
@@ -241,7 +258,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 /* Select-mode toolbar (Dials page) — replaces the page-header-menu while
    bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode. */
 .select-mode-bar {
-  display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 16px;
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 16px;
 }
 .select-mode-btn {
   flex: 1 1 auto; white-space: nowrap; padding: 9px 12px; border-radius: 999px;
@@ -383,12 +400,30 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .profile-avatar {
   width: 64px; height: 64px; border-radius: 999px; background: var(--accent);
   color: #fff; display: flex; align-items: center; justify-content: center;
-  font-size: 22px; font-weight: 700; margin-bottom: 16px;
+  font-size: 22px; font-weight: 700; margin-bottom: 16px; overflow: hidden; position: relative;
+}
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Only clickable (to open the photo picker) while editing — see
+   enterProfileEditMode()/exitProfileEditMode() in js/profile.js. */
+.profile-avatar.editable { cursor: pointer; box-shadow: 0 0 0 3px var(--accent-hover); }
+.profile-avatar.editable::after {
+  content: "Edit"; position: absolute; inset: auto 0 0 0; text-align: center;
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  background: rgba(0,0,0,.55); color: #fff; padding: 3px 0;
 }
 .profile-card h1 { margin: 0 0 4px; font-size: 20px; }
 /* Account's own phone/email, between the listed position (role) and the
    weekly call-count section — see js/profile.js. */
 .profile-contact-line { font-size: 13px; color: var(--text-muted); margin: 2px 0 0; }
+/* Editable versions of the name/phone/email fields, swapped in for the plain
+   text elements while the header's "Edit" option is active (see
+   enterProfileEditMode() in js/profile.js). */
+.profile-edit-input {
+  display: block; width: 100%; max-width: 260px; box-sizing: border-box;
+  font-family: inherit; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); padding: 6px 8px; margin: 2px 0;
+}
+.profile-edit-input.profile-edit-name { font-size: 18px; font-weight: 700; margin-top: 0; }
 
 .profile-calls-section { margin-top: 18px; }
 .profile-calls-text { font-size: 15px; font-weight: 700; color: var(--text); margin: 0 0 10px; }
@@ -492,14 +527,14 @@ html.is-desktop-device .contact-action-tel { display: none; }
 
 /* ---- Timeline tab ---- */
 .timeline-add-btn {
-  position: fixed; right: 28px; bottom: 78px; z-index: 110;
+  position: fixed; right: 28px; bottom: 28px; z-index: 110;
   width: 48px; height: 48px; border-radius: 999px; border: none; background: var(--accent);
   color: #fff; font-size: 24px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 14px rgba(47,95,237,.35);
 }
 @media (hover: hover) { .timeline-add-btn:hover { background: var(--accent-hover); } }
 .timeline-add-menu {
-  position: fixed; right: 28px; bottom: 134px; background: var(--surface); border: 1px solid var(--border);
+  position: fixed; right: 28px; bottom: 84px; background: var(--surface); border: 1px solid var(--border);
   border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 110; min-width: 150px; overflow: hidden;
 }
 .timeline-add-menu button { display: block; width: 100%; text-align: left; padding: 10px 14px; border: none; background: none; font-size: 13.5px; cursor: pointer; }
@@ -511,9 +546,23 @@ html.is-desktop-device .contact-action-tel { display: none; }
 .timeline-dot { position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; border-radius: 999px; background: var(--accent); }
 .timeline-line { position: absolute; left: -16px; top: 14px; bottom: -10px; width: 2px; background: var(--border); }
 .timeline-item:last-child .timeline-line { display: none; }
-.timeline-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+.timeline-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .timeline-box .tl-date { font-size: 12px; color: var(--text-muted); }
 .timeline-box .tl-type { font-size: 14px; font-weight: 600; }
+/* Delete (x) control on the right of a timeline event's box — never shown on
+   the auto-inserted "created" event (see buildTimelineHTML in js/clients.js,
+   which simply omits this button's markup for that one event type). */
+.timeline-delete-btn {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+@media (hover: hover) { .timeline-delete-btn:hover { background: var(--danger); border-color: var(--danger); color: #fff; } }
+
+/* Small "pick the date this happened" step shown before an event actually
+   gets logged (see openEventDateModal in js/clients.js) — reuses the regular
+   .modal-backdrop/.modal shell, just narrower. */
+#eventDateModal .modal { max-width: 280px; }
 
 /* ---- Client "Categories" pipeline-status dropdown (Profile tab) ----
    Reuses the dial popup's .dial-status-* classes (see js/dials.js) directly
@@ -800,8 +849,8 @@ html.is-mobile-device .topnav-bar { display: none; }
 html.is-mobile-device .bottom-tabbar { display: flex; }
 html.is-mobile-device .mobile-only { display: block; }
 html.is-mobile-device .fab { bottom: 98px; }
-html.is-mobile-device .timeline-add-btn { bottom: 148px; }
-html.is-mobile-device .timeline-add-menu { bottom: 204px; }
+html.is-mobile-device .timeline-add-btn { bottom: 98px; }
+html.is-mobile-device .timeline-add-menu { bottom: 154px; }
 
 /* Forms: two-column rows (first/last name, city/state, revenue/employees,
    min/max spend, etc.) stack into one column. */
@@ -890,6 +939,17 @@ html.is-mobile-device .mobile-list { display: block; }
   padding: 12px 14px; margin-bottom: 8px;
 }
 .mobile-card:last-child { margin-bottom: 0; }
+/* Wraps the small photo/initials circle + the name/position block together
+   as one flex child of .team-member-card (which is itself
+   justify-content: space-between against the icons/trash on the right) —
+   see memberAvatarHTML()/memberCardHTML() in js/profile.js. */
+.mc-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.mc-avatar {
+  width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0; overflow: hidden;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.mc-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .mc-main { min-width: 0; }
 .mc-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1014,8 +1074,8 @@ html.is-mobile-device .mobile-list { display: block; }
   html.is-mobile-device main { padding: 12px 12px 78px; }
   html.is-mobile-device .page-header h1 { font-size: 17px; }
   html.is-mobile-device .fab { right: 18px; bottom: 88px; width: 52px; height: 52px; font-size: 26px; }
-  html.is-mobile-device .timeline-add-btn { right: 18px; bottom: 142px; }
-  html.is-mobile-device .timeline-add-menu { right: 18px; bottom: 196px; }
+  html.is-mobile-device .timeline-add-btn { right: 18px; bottom: 88px; }
+  html.is-mobile-device .timeline-add-menu { right: 18px; bottom: 144px; }
   html.is-mobile-device .modal { padding: 16px; }
   html.is-mobile-device .accordion-header { padding: 10px 12px; }
   html.is-mobile-device .accordion-body { padding: 12px; }
