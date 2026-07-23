@@ -576,19 +576,43 @@ html.is-desktop-device .contact-action-tel { display: none; }
 .timeline-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .timeline-box .tl-date { font-size: 12px; color: var(--text-muted); }
 .timeline-box .tl-type { font-size: 14px; font-weight: 600; }
-/* Delete (x) + confirm-happened controls on the right of a timeline event's
-   box — grouped together so justify-content:space-between on .timeline-box
-   still only ever sees two children (the date/type block, and this group).
-   Never shown on the auto-inserted "created" event (see buildTimelineHTML in
-   js/clients.js, which simply omits this whole group's markup for that one
-   event type). */
+/* Title + triangle-toggle sit on one line together ("directly right of the
+   title" — see buildTimelineHTML in js/clients.js); the triangle only exists
+   at all once the event is confirmed. */
+.tl-title-row { display: flex; align-items: center; gap: 6px; }
+/* Edit (pencil) + confirm-happened controls on the right of a timeline
+   event's box — grouped together so justify-content:space-between on
+   .timeline-box still only ever sees two children (the date/type block, and
+   this group). Never shown on the auto-inserted "created" event (see
+   buildTimelineHTML in js/clients.js, which simply omits this whole group's
+   markup for that one event type). */
 .timeline-box-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.timeline-delete-btn {
+.timeline-edit-btn {
   flex-shrink: 0; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer;
+  background: var(--surface); color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
   display: flex; align-items: center; justify-content: center; padding: 0;
 }
-@media (hover: hover) { .timeline-delete-btn:hover { background: var(--danger); border-color: var(--danger); color: #fff; } }
+@media (hover: hover) { .timeline-edit-btn:hover { background: var(--bg); border-color: var(--accent); color: var(--accent); } }
+
+/* Triangle toggle next to a confirmed event's title — right-side-up
+   (collapsed) by default on every fresh render; clicking it adds .expanded
+   (rotate 180deg = upside down) and reveals the connected .timeline-report-box
+   directly below (see wireTimelineTab in js/clients.js). */
+.timeline-triangle-btn {
+  flex-shrink: 0; width: 16px; height: 16px; border: none; background: none; color: var(--text-muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+  transition: transform .15s ease;
+}
+.timeline-triangle-btn.expanded { transform: rotate(180deg); }
+@media (hover: hover) { .timeline-triangle-btn:hover { color: var(--accent); } }
+
+/* Report box connected directly underneath its event's .timeline-box (shares
+   its side borders, no gap, rounded only on the bottom) — hidden by default,
+   shown by the triangle toggle. */
+.timeline-report-box {
+  background: var(--bg); border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px;
+  margin-top: -1px; padding: 10px 14px; font-size: 13px; color: var(--text-muted); white-space: pre-wrap;
+}
 
 /* Confirm-happened circle — only rendered for events dated today or earlier
    (see buildTimelineHTML's `future` check); future-dated events haven't
@@ -1069,10 +1093,11 @@ html.is-mobile-device .mobile-list { display: block; }
 /* ---- Teams popup: member rectangles (same look as .mobile-card, but shown
    on both mobile and desktop — Teams doesn't have a separate table view) ---- */
 .team-member-list { display: flex; flex-direction: column; gap: 8px; }
-/* Separates a team's lead (always sorted to the top — see loadTeams() in
-   js/profile.js) from the rest of that box's accounts. Just a thin rule, no
-   extra vertical gap of its own beyond the list's existing 8px item gap. */
-.team-lead-divider { height: 1px; background: var(--border); margin: 0 2px; }
+/* Marks a team's lead (always sorted to the top — see loadTeams() in
+   js/profile.js): instead of a separator line between them and the rest of
+   the box, their own card gets a slightly darker/heavier border all the way
+   around. */
+.team-member-card.is-team-lead { border-color: var(--text-muted); border-width: 2px; }
 .team-member-card {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -1090,6 +1115,15 @@ html.is-mobile-device .mobile-list { display: block; }
   user-select: none; -webkit-user-select: none;
   -webkit-touch-callout: none; -webkit-user-drag: none;
 }
+/* The actual fix for "can't drag a card into another team box on mobile":
+   without this, the browser's native scroll-gesture recognition can claim a
+   touch-and-hold+move before wireMemberDrag's own pointer-capture kicks in,
+   which silently fires pointercancel and kills the drag — same root cause
+   the Dials page's tab-reorder gesture had (see html.is-mobile-device
+   .dial-tab.active above), fixed the same way here. Every card can be picked
+   up (admin-only — see wireMemberDrag), so unlike the single active dial tab
+   this applies to all of them, not just one. */
+html.is-mobile-device .team-member-card { touch-action: none; }
 @media (hover: hover) { .team-member-card:hover { background: var(--bg); } }
 .team-member-card .contact-actions { flex-shrink: 0; }
 /* Tapping a member's card expands their phone/email inline right below it
@@ -1102,6 +1136,10 @@ html.is-mobile-device .mobile-list { display: block; }
   border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
   margin-top: -1px; padding: 2px 14px 2px;
 }
+/* Keep the detail box's side/bottom border matching when it's expanded out
+   from underneath a team lead's highlighted card, so the seam between them
+   doesn't visually mismatch. */
+.team-member-card.is-team-lead + .team-member-detail { border-color: var(--text-muted); border-width: 0 2px 2px; }
 .team-member-detail .readonly-field:first-child { border-top: none; }
 .copy-toast { font-size: 11px; font-weight: 600; color: var(--success); }
 
