@@ -1137,7 +1137,12 @@ els.menuSelectBtn.addEventListener("click", (e) => {
   enterSelectMode();
 });
 
-els.selectBackBtn.addEventListener("click", () => {
+els.selectBackBtn.addEventListener("click", (e) => {
+  // Without this, the very same click bubbles up to the document-level
+  // "tap outside exits page header menu" listener (added the instant the
+  // synthetic pageMenuToggle.click() below opens it) and immediately closes
+  // it again — same pitfall as menuSelectBtn's own handler above.
+  e.stopPropagation();
   // Mid-move, "Back" just backs out of moveMode and returns to the regular
   // select-mode toolbar (selections are kept) — otherwise it exits select
   // mode entirely AND reopens the triangle dropdown (Add new/Select/etc.)
