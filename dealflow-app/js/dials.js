@@ -1033,7 +1033,11 @@ function toggleDialSelection(id) {
   renderDialsTable();
 }
 
-els.menuSelectBtn.addEventListener("click", () => {
+els.menuSelectBtn.addEventListener("click", (e) => {
+  // Without this, the very same click bubbles up to the document-level
+  // "tap outside exits select mode" listener below (added the instant
+  // enterSelectMode() runs) and immediately exits the mode it just entered.
+  e.stopPropagation();
   closePageHeaderMenu();
   enterSelectMode();
 });
