@@ -1123,3 +1123,34 @@ alter table clients add column if not exists mobile_phone text;
 alter table clients add column if not exists company_phone text;
 
 update clients set mobile_phone = phone where mobile_phone is null and phone is not null;
+
+-- ============================================================================
+-- FIX: FLAKY DIAL CATEGORY SELECTION (and edit/notes/"Called today") ON
+-- CROSS-ACCOUNT DIALS.
+--
+-- dials_select_own was progressively widened (see the several overrides
+-- above) to `created_by = auth.uid() or is_admin() or is_team_lead_of(...)`
+-- so an admin/team lead can actually SEE other accounts' dials through the
+-- "Accounts visible" filter. dials_update_own, however, was never widened to
+-- match — it's been stuck at strictly `created_by = auth.uid()` since the
+-- "REWORK: DIAL TAB OWNERSHIP" migration above (which deliberately reset it,
+-- for reasons specific to that migration's own bug, and nothing since then
+-- re-added a bypass). The result: opening a dial you don't personally own
+-- (anyone else's, visible only because of the admin/team-lead bypass) and
+-- clicking a category, editing/saving, toggling "Called today", or editing
+-- Call notes all silently fail — Postgres just returns 0 rows affected with
+-- no thrown error (no .select() is chained on any of these .update() calls
+-- in js/dials.js), so the UI often looks like nothing happened, or is
+-- momentarily inconsistent with what's actually in the database. This is the
+-- "sometimes it works, sometimes it doesn't" flakiness reported when picking
+-- a category — it actually depends on whose dial is open, not on timing.
+--
+-- Fix: widen dials_update_own with the exact same bypass dials_select_own
+-- already has. WITH CHECK mirrors USING since none of these updates ever
+-- change created_by itself, so the pre- and post-update row are equivalent
+-- for this check.
+-- ============================================================================
+drop policy if exists "dials_update_own" on dials;
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by))
+  with check (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
