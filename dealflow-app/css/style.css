@@ -228,10 +228,16 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 @media (hover: hover) { .page-header-settings:hover { background: var(--gold-soft); color: var(--text); } }
 
 /* Dropdown menu revealed under the page header when the triangle is open.
-   Content differs per page (js/profile.js, js/clients.js, js/dials.js). */
+   Content differs per page (js/profile.js, js/clients.js, js/dials.js).
+   No top margin of its own — the 16px gap above comes from .page-header's
+   own bottom margin collapsing through (same as any two stacked blocks),
+   which matches the 16px margin-bottom below so the menu sits evenly spaced
+   between the header box above and whatever box comes next (previously a
+   -8px top margin pulled it noticeably closer to the header than to the box
+   beneath it). */
 .page-header-menu {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  margin: -8px 0 16px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  margin: 0 0 16px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
 }
 .page-header-menu-item {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left;
@@ -1063,6 +1069,10 @@ html.is-mobile-device .mobile-list { display: block; }
 /* ---- Teams popup: member rectangles (same look as .mobile-card, but shown
    on both mobile and desktop — Teams doesn't have a separate table view) ---- */
 .team-member-list { display: flex; flex-direction: column; gap: 8px; }
+/* Separates a team's lead (always sorted to the top — see loadTeams() in
+   js/profile.js) from the rest of that box's accounts. Just a thin rule, no
+   extra vertical gap of its own beyond the list's existing 8px item gap. */
+.team-lead-divider { height: 1px; background: var(--border); margin: 0 2px; }
 .team-member-card {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -1147,7 +1157,8 @@ html.is-mobile-device .mobile-list { display: block; }
 
 /* Position label ("Intern"/"Admin") under a member's name — clickable only
    for admins (position-toggle class only rendered when isAdmin), opening a
-   tiny 2-option dropdown right below it. Same look as .dial-status-menu. */
+   tiny 3-option dropdown (Intern/Team lead/Admin) right below it. Same look
+   as .dial-status-menu. */
 .mc-sub-wrap { position: relative; display: inline-block; }
 .mc-sub.position-toggle { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .position-menu {
