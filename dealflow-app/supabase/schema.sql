@@ -1108,3 +1108,18 @@ create policy "client_events_select_own" on client_events
 drop policy if exists "intro_call_log_select_own" on intro_call_log;
 create policy "intro_call_log_select_own" on intro_call_log
   for select using (user_id = auth.uid() or is_admin() or is_team_lead_of(user_id));
+
+-- ============================================================================
+-- Split clients.phone into mobile_phone/company_phone, matching the pattern
+-- dials has had since an earlier migration (same column names, so the shared
+-- buildPhoneNumbersHTML() display helper in js/contactIcons.js works for
+-- both). Mobile is still what's used for instant call/text everywhere;
+-- company is just a second number on file. The old `phone` column is left in
+-- place (unused going forward) rather than dropped, matching this file's
+-- usual convention — its value is backfilled into mobile_phone below so no
+-- existing client's number is lost.
+-- ============================================================================
+alter table clients add column if not exists mobile_phone text;
+alter table clients add column if not exists company_phone text;
+
+update clients set mobile_phone = phone where mobile_phone is null and phone is not null;
