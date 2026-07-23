@@ -107,7 +107,19 @@
          inside it. -->
     <div class="dial-tab-archive-menu hidden" id="dialTabArchiveMenu">
       <button type="button" class="dial-tab-archive-btn" id="dialTabArchiveBtn"></button>
+      <!-- Admin-only — see js/dials.js's `if (isAdmin) els.dialTabTransferBtn...`. -->
+      <button type="button" class="dial-tab-transfer-btn hidden" id="dialTabTransferBtn">Transfer</button>
       <button type="button" class="dial-tab-delete-btn" id="dialTabDeleteBtn">Delete</button>
+    </div>
+
+    <!-- Admin-only "Transfer" target list — lists every other account so the
+         tab (and every dial in it) can be reassigned to them. Positioned to
+         the right of #dialTabArchiveMenu via JS (see openTransferMenu() in
+         js/dials.js), same fixed-position escape-the-scroll-container pattern
+         used for that menu. -->
+    <div class="dial-tab-transfer-menu hidden" id="dialTabTransferMenu">
+      <div class="dial-tab-transfer-title">Transfer to...</div>
+      <div class="dial-tab-transfer-list" id="dialTabTransferList"></div>
     </div>
 
     <div id="dialsTableWrap"></div>
