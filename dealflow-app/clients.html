@@ -171,6 +171,47 @@
     </div>
   </div>
 
+  <!-- Timeline "write a report" step — shown when the confirm-happened circle
+       is pressed on an event that isn't yet checked (also reused when
+       re-confirming after an uncheck, prefilled with the last-saved report —
+       see openEventReportModal in js/clients.js). Confirming here both marks
+       the event confirmed and saves the report text. -->
+  <div class="modal-backdrop hidden" id="eventReportModal">
+    <div class="modal">
+      <h2>Write a report</h2>
+      <label for="eventReportInput">What happened?</label>
+      <textarea id="eventReportInput" rows="5"></textarea>
+      <div class="form-actions">
+        <button type="button" class="btn" id="eventReportConfirmBtn">Confirm</button>
+        <button type="button" class="btn secondary" id="eventReportCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline "edit event" popup — opened from the pencil/edit button on a
+       logged event (see openEditEventModal in js/clients.js). Always lets you
+       edit the date/time; the report field only shows once the event has
+       actually been checked off (there's nothing to edit otherwise). Also
+       hosts the Delete option that used to be a standalone "x" button. -->
+  <div class="modal-backdrop hidden" id="editEventModal">
+    <div class="modal">
+      <h2>Edit event</h2>
+      <label for="editEventDateInput">Date</label>
+      <input type="date" id="editEventDateInput" />
+      <label for="editEventTimeInput">Time (optional)</label>
+      <select id="editEventTimeInput"></select>
+      <div class="hidden" id="editEventReportWrap">
+        <label for="editEventReportInput">Report</label>
+        <textarea id="editEventReportInput" rows="5"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="editEventSaveBtn">Save</button>
+        <button type="button" class="btn danger" id="editEventDeleteBtn">Delete</button>
+        <button type="button" class="btn secondary" id="editEventCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- "Who's the meeting with?" step — only shown when Meeting > Client
        meeting is picked (see openCounterpartPicker in js/clients.js). Lists
        every opposite-side ("in cahoots"/connected_to_buyer) client currently
@@ -202,7 +243,7 @@
   <!-- Delete confirmation (in-app, replacing window.confirm) -->
   <div class="modal-backdrop hidden" id="confirmDeleteModal">
     <div class="modal">
-      <h2>Delete this client?</h2>
+      <h2 id="confirmDeleteTitle">Delete this client?</h2>
       <p class="help-text">This cannot be undone.</p>
       <div class="form-actions">
         <button type="button" class="btn danger" id="confirmDeleteYesBtn">Delete</button>
