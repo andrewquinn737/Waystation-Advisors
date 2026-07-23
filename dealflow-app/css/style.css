@@ -261,6 +261,14 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .category-rect-swatch { width: 24px; height: 16px; border-radius: 4px; border: 2px solid rgba(0,0,0,.1); flex-shrink: 0; }
 .category-rect-option.is-hidden { opacity: .4; }
 
+/* "Progress" filter (js/clients.js renderProgressSubmenu) reuses
+   .category-rect-option's rectangle-row look, but is additive (checked =
+   shown) rather than Categories' subtractive dimming, so it gets its own
+   checkbox-style swatch + a highlighted row when selected instead. */
+.progress-check-swatch { width: 16px; height: 16px; border-radius: 4px; border: 2px solid var(--border); background: var(--bg); display: flex; align-items: center; justify-content: center; color: transparent; flex-shrink: 0; }
+.category-rect-option.is-selected { background: var(--gold-soft); }
+.category-rect-option.is-selected .progress-check-swatch { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* Select-mode toolbar (Dials page) — replaces the page-header-menu while
    bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode. */
 .select-mode-bar {
