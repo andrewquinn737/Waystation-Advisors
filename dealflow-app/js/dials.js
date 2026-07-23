@@ -983,6 +983,15 @@ function wireTabInteractions() {
       if (id === currentListId) {
         archiveMenuTabId = archiveMenuTabId === id ? null : id;
         renderTabs();
+        // If the page-header triangle/settings dropdown was open, this same
+        // click also closes it (see pageHeaderMenu.js's outside-click
+        // handler) — but that dropdown lives in normal document flow (see
+        // .page-header-menu in style.css, no position:absolute/fixed), so
+        // closing it shifts the tab bar upward. renderTabs() just positioned
+        // this popup based on the tab's pre-shift location, so re-run once
+        // more on the next frame, after that reflow has actually happened,
+        // to avoid it landing well below the tab instead of right under it.
+        requestAnimationFrame(updateArchiveMenuPosition);
         return;
       }
       currentListId = id;

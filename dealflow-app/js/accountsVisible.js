@@ -49,7 +49,18 @@ function persist() {
 export function initDefaultToSelf(myProfileId) {
   load();
   try {
-    if (localStorage.getItem(INIT_KEY)) return;
+    if (localStorage.getItem(INIT_KEY)) {
+      // Already initialized before — but as a safety net, if the persisted
+      // state resolves to zero visible accounts (e.g. the tab was closed or
+      // navigated away from mid-selection before the "at least one" guard in
+      // wireAccountsVisiblePopup could catch it), fall back to "just me"
+      // rather than leaving every page showing nothing on open.
+      if (visibleAccountIds && visibleAccountIds.size === 0) {
+        visibleAccountIds = new Set([myProfileId]);
+        persist();
+      }
+      return;
+    }
   } catch {
     return;
   }
@@ -85,6 +96,13 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
   let allAccounts = [];
   let accountsLoaded = false;
 
+  // Zero accounts selected would leave every page showing nothing, so the
+  // popup can't be closed in that state (see closeBtn handler below) — the
+  // close button is visually disabled and a hint is shown instead.
+  function hasAnySelected() {
+    return !visibleAccountIds || visibleAccountIds.size > 0;
+  }
+
   function render() {
     load();
     const allSelected = !visibleAccountIds;
@@ -100,6 +118,7 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
           .join("")
       : `<div class="accounts-visible-empty">No accounts found.</div>`;
 
+    const anySelected = hasAnySelected();
     bodyEl.innerHTML = `
       <div class="accounts-visible-list">
         <button type="button" class="accounts-visible-row select-all" id="accountsSelectAllBtn">
@@ -108,10 +127,17 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
         </button>
         ${rowsHTML}
       </div>
+      ${anySelected ? "" : `<div class="accounts-visible-warning">Select at least one account to continue.</div>`}
     `;
 
+    closeBtn.disabled = !anySelected;
+    closeBtn.classList.toggle("disabled", !anySelected);
+
     bodyEl.querySelector("#accountsSelectAllBtn").addEventListener("click", () => {
-      visibleAccountIds = null;
+      // If everything is currently selected, clicking again clears the
+      // selection entirely instead of being a no-op; otherwise (partial or
+      // empty selection) it selects everyone, same as before.
+      visibleAccountIds = visibleAccountIds === null ? new Set() : null;
       persist();
       render();
       onChange();
@@ -142,5 +168,8 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     }
     render();
   });
-  closeBtn.addEventListener("click", () => popupEl.classList.add("hidden"));
+  closeBtn.addEventListener("click", () => {
+    if (!hasAnySelected()) return; // guarded — see render()
+    popupEl.classList.add("hidden");
+  });
 }
