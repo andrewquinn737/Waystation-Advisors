@@ -1229,8 +1229,10 @@ els.clientModalClose.addEventListener("click", closeModal);
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
 
 // Settings gear popover — admin-only Sellers/Buyers toggle (see
-// js/dealSide.js). Never wired at all for non-admins, so the gear icon
-// stays inert for them, same as before this existed.
+// js/dealSide.js). Hidden entirely for interns (it used to just be inert
+// but still visible/clickable, which was pointless since it has nothing
+// for them — now it's not even shown).
+if (!isAdmin) els.pageSettingsBtn.classList.add("hidden");
 if (isAdmin) {
   wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {

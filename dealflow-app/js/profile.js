@@ -1444,6 +1444,9 @@ wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu }
 // localStorage key each) — on Profile specifically, changing Accounts
 // visible also drives which account(s)' info/numbers/events are shown (see
 // resolveSelectedAccounts, renderProfileHeader, refreshActiveCallsView).
+// Hidden entirely for interns (used to just be inert/unwired but still
+// visible, which was pointless since it has nothing for them).
+if (!isAdminSync) els.pageSettingsBtn.classList.add("hidden");
 if (isAdminSync) {
   wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, () => {

@@ -158,6 +158,7 @@ const els = {
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
+  dialTabRenameBtn: document.getElementById("dialTabRenameBtn"),
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
   dialTabTransferBtn: document.getElementById("dialTabTransferBtn"),
   dialTabTransferMenu: document.getElementById("dialTabTransferMenu"),
@@ -695,7 +696,18 @@ function updateArchiveMenuPosition() {
   }
   const rect = activeBtn.getBoundingClientRect();
   els.dialTabArchiveBtn.textContent = currentStatus === "current" ? "Archive" : "Unarchive";
-  els.dialTabArchiveMenu.style.left = `${rect.left}px`;
+  // Recomputed fresh from the tab's CURRENT on-screen position every time
+  // this runs (getBoundingClientRect(), not a cached value) — so it's
+  // always directly below whichever tab is active right now, including
+  // after the horizontally-scrollable tab bar has been scrolled (see the
+  // scroll listener below, which re-runs this while the menu is open).
+  // Clamped horizontally so the popup always stays fully on screen even
+  // when its tab is scrolled partway out of view at either edge of
+  // .dials-tabbar — once the tab scrolls fully back into view, the clamp
+  // is a no-op and it lands exactly below the tab as usual.
+  const menuWidth = els.dialTabArchiveMenu.offsetWidth || 160;
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - menuWidth - 8);
+  els.dialTabArchiveMenu.style.left = `${left}px`;
   els.dialTabArchiveMenu.style.top = `${rect.bottom + 6}px`;
   els.dialTabArchiveMenu.classList.remove("hidden");
 }
@@ -706,6 +718,21 @@ function closeArchiveMenu() {
   els.dialTabTransferMenu.classList.add("hidden");
   updateArchiveMenuPosition();
 }
+
+// The mobile tab bar (.dials-tabbar) scrolls horizontally on its own — if
+// the Archive/Rename/Delete popup is open and the bar gets scrolled (its
+// active tab sliding to a new on-screen position), re-run the same
+// position logic so the popup keeps tracking the tab's real position
+// instead of staying wherever it was when it first opened.
+els.dialTabs.parentElement.addEventListener(
+  "scroll",
+  () => {
+    if (!archiveMenuTabId) return;
+    updateArchiveMenuPosition();
+    if (!els.dialTabTransferMenu.classList.contains("hidden")) positionTransferMenu();
+  },
+  { passive: true }
+);
 
 // Closes the Archive/Delete popup as soon as anything ELSE is interacted
 // with — a dial row, the settings icon, the page-header triangle, the
@@ -723,6 +750,19 @@ document.addEventListener("click", (e) => {
   if (els.dialTabTransferMenu.contains(e.target)) return;
   if (e.target.closest(".dial-tab")) return;
   closeArchiveMenu();
+});
+
+// Rename, reusing the same double-click-to-rename flow (startRenameTab)
+// that already exists on the tab button itself — this is just a second,
+// more discoverable entry point into that same rename UI, reached through
+// the Archive/Delete popup instead of requiring a double-click.
+els.dialTabRenameBtn.addEventListener("click", () => {
+  if (!archiveMenuTabId) return;
+  const list = filteredLists().find((l) => l.id === archiveMenuTabId);
+  const btn = els.dialTabs.querySelector(".dial-tab.active");
+  if (!list || !btn) return;
+  closeArchiveMenu();
+  startRenameTab(btn, list);
 });
 
 els.dialTabArchiveBtn.addEventListener("click", () => {
@@ -782,13 +822,18 @@ async function openTransferMenu() {
   els.dialTabTransferMenu.classList.remove("hidden");
   positionTransferMenu();
 
-  // Every OTHER account in the company — never the admin doing the
-  // transferring, since a tab can't be "transferred" to its own owner.
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name")
-    .neq("id", profile.id)
-    .order("full_name", { ascending: true });
+  // Normally every OTHER account in the company — never the admin doing the
+  // transferring, since a tab can't be "transferred" to its own owner. BUT
+  // if the tab being transferred belongs to someone else (the admin is
+  // viewing another account's tab via Accounts visible), the admin's own
+  // name IS included, so they have the option to transfer it back to
+  // themselves rather than only ever being able to hand it off sideways to
+  // a third account.
+  const list = filteredLists().find((l) => l.id === archiveMenuTabId);
+  const isOwnTab = !list || list.created_by === profile.id;
+  let query = supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+  if (isOwnTab) query = query.neq("id", profile.id);
+  const { data, error } = await query;
 
   if (error) {
     els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">Couldn't load accounts.</div>`;
@@ -799,7 +844,10 @@ async function openTransferMenu() {
     els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`;
   } else {
     els.dialTabTransferList.innerHTML = targets
-      .map((p) => `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}">${escapeHtml(p.full_name)}</button>`)
+      .map(
+        (p) =>
+          `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}">${escapeHtml(p.full_name)}${p.id === profile.id ? " (you)" : ""}</button>`
+      )
       .join("");
     els.dialTabTransferList.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
       btn.addEventListener("click", () => completeTransfer(btn.dataset.id));
@@ -1138,12 +1186,25 @@ els.menuStatusBtn.addEventListener("click", () => {
 // triangle flips it to point down and reveals this page's options.
 // ---------------------------------------------------------------------------
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
+// wirePageHeaderMenu's own toggle-button click handler calls
+// e.stopPropagation() (see js/pageHeaderMenu.js) so its dropdown doesn't
+// immediately re-close itself via document's outside-click listener — but
+// that stopPropagation also silently prevented the Archive/Rename/Delete
+// popup's own document click listener (above) from ever seeing this click,
+// leaving that popup open and stuck in its old position instead of closing
+// like every other "click elsewhere" case. A second, direct listener on the
+// same button (stopPropagation only blocks bubbling to document, not other
+// listeners on this same element) closes it explicitly.
+els.pageMenuToggle.addEventListener("click", closeArchiveMenu);
 
 // Settings gear popover — admin-only Sellers/Buyers toggle (see
-// js/dealSide.js). Never wired at all for non-admins, so the gear icon
-// stays inert for them, same as before this existed.
+// js/dealSide.js). Hidden entirely for interns (it used to just be inert
+// but still visible/clickable, which was pointless since it has nothing
+// for them — now it's not even shown).
+if (!isAdmin) els.pageSettingsBtn.classList.add("hidden");
 if (isAdmin) {
   wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+  els.pageSettingsBtn.addEventListener("click", closeArchiveMenu); // see comment above
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     currentType = getDealSide();
     els.settingsMenu.classList.add("hidden");
