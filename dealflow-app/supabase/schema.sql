@@ -743,3 +743,18 @@ create policy "dial_lists_update_own" on dial_lists
 drop policy if exists "dials_select_own" on dials;
 create policy "dials_select_own" on dials
   for select using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- ADMIN-ONLY "ACCOUNTS VISIBLE" FILTER (Clients page)
+-- Lets an admin pick which accounts' clients show up in their own Clients
+-- list (see the "Accounts visible" menu item above "Categories" in
+-- js/clients.js) — the account filter is applied client-side, layered
+-- underneath the existing Categories/pipeline-status filter, but that only
+-- works if the admin's browser can actually fetch every account's clients in
+-- the first place. clients_select_own was still scoped to
+-- `created_by = auth.uid()` only (never widened like dial_lists/dials were),
+-- so this widens it the same way.
+-- ============================================================================
+drop policy if exists "clients_select_own" on clients;
+create policy "clients_select_own" on clients
+  for select using (created_by = auth.uid() or is_admin());
