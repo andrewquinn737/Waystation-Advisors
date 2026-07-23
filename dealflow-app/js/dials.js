@@ -143,6 +143,9 @@ const els = {
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
+  dialTabTransferBtn: document.getElementById("dialTabTransferBtn"),
+  dialTabTransferMenu: document.getElementById("dialTabTransferMenu"),
+  dialTabTransferList: document.getElementById("dialTabTransferList"),
   dialTabDeleteBtn: document.getElementById("dialTabDeleteBtn"),
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
   addTabBtn: document.getElementById("addTabBtn"),
@@ -192,6 +195,7 @@ const els = {
 };
 
 if (isAdmin) els.menuImportBtn.classList.remove("hidden");
+if (isAdmin) els.dialTabTransferBtn.classList.remove("hidden");
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
@@ -550,15 +554,21 @@ function renderTabs() {
 // The Archive/Unarchive popup lives outside .dials-tabbar (see dials.html)
 // and is positioned via JS as position:fixed, right under whichever tab is
 // currently active — see the big comment above wireTabInteractions() for why
-// it can't just be absolutely-positioned inside the tab itself.
+// it can't just be absolutely-positioned inside the tab itself. Available on
+// both mobile (tap the already-active tab) and desktop (click it) — see the
+// tab click handler in wireTabInteractions(), which no longer gates this
+// behind isMobileViewport() now that admin-only Transfer needs it on desktop
+// too.
 function updateArchiveMenuPosition() {
-  if (!isMobileViewport() || !archiveMenuTabId || archiveMenuTabId !== currentListId) {
+  if (!archiveMenuTabId || archiveMenuTabId !== currentListId) {
     els.dialTabArchiveMenu.classList.add("hidden");
+    els.dialTabTransferMenu.classList.add("hidden");
     return;
   }
   const activeBtn = els.dialTabs.querySelector(".dial-tab.active");
   if (!activeBtn) {
     els.dialTabArchiveMenu.classList.add("hidden");
+    els.dialTabTransferMenu.classList.add("hidden");
     return;
   }
   const rect = activeBtn.getBoundingClientRect();
@@ -571,20 +581,24 @@ function updateArchiveMenuPosition() {
 function closeArchiveMenu() {
   if (!archiveMenuTabId) return;
   archiveMenuTabId = null;
+  els.dialTabTransferMenu.classList.add("hidden");
   updateArchiveMenuPosition();
 }
 
 // Closes the Archive/Delete popup as soon as anything ELSE is interacted
 // with — a dial row, the settings icon, the page-header triangle, the
-// Categories button, etc. Only two things are deliberately exempted:
+// Categories button, etc. Only three things are deliberately exempted:
 //  - clicks inside the popup itself (its own Archive/Unarchive and Delete
 //    buttons handle themselves, via setListArchived()/the confirm-delete flow)
+//  - clicks inside the admin-only "Transfer to..." popup (its own option
+//    buttons handle themselves, via completeTransfer())
 //  - clicks on any dial tab button, since that's the element whose own click
 //    handler (see wireTabInteractions) already opens/toggles this same popup
 //    for the active tab — closing it here first would fight that logic.
 document.addEventListener("click", (e) => {
   if (!archiveMenuTabId) return;
   if (els.dialTabArchiveMenu.contains(e.target)) return;
+  if (els.dialTabTransferMenu.contains(e.target)) return;
   if (e.target.closest(".dial-tab")) return;
   closeArchiveMenu();
 });
@@ -600,6 +614,7 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
   // Hide the Archive/Delete popup while the "are you sure" confirmation is
   // up, so they're never both visible at once.
   els.dialTabArchiveMenu.classList.add("hidden");
+  els.dialTabTransferMenu.classList.add("hidden");
   openConfirmModal(
     els.confirmDeleteTabModal,
     "confirmDeleteTabYesBtn",
@@ -615,6 +630,82 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
     },
     () => updateArchiveMenuPosition()
   );
+});
+
+// ---------------------------------------------------------------------------
+// Admin-only "Transfer" — hands off one of the current admin's own tabs (and
+// every dial in it) to a different account, by reassigning created_by on both
+// dial_lists and dials (see the widened RLS update policies for both tables
+// in supabase/schema.sql). The tab then disappears from the transferring
+// admin's Dials page and starts appearing on the new owner's instead, since
+// both tables' select policies scope visibility to created_by = auth.uid().
+// ---------------------------------------------------------------------------
+
+// Positioned to the right of the archive/delete popup (same escape-the-clip
+// fixed-position pattern as everything else here), flipping to the left side
+// if it would run off the right edge of the screen.
+function positionTransferMenu() {
+  const rect = els.dialTabArchiveMenu.getBoundingClientRect();
+  const menuWidth = els.dialTabTransferMenu.offsetWidth || 190;
+  let left = rect.right + 8;
+  if (left + menuWidth > window.innerWidth) {
+    left = rect.left - menuWidth - 8;
+  }
+  els.dialTabTransferMenu.style.left = `${Math.max(8, left)}px`;
+  els.dialTabTransferMenu.style.top = `${rect.top}px`;
+}
+
+async function openTransferMenu() {
+  els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">Loading…</div>`;
+  els.dialTabTransferMenu.classList.remove("hidden");
+  positionTransferMenu();
+
+  // Every OTHER account in the company — never the admin doing the
+  // transferring, since a tab can't be "transferred" to its own owner.
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .neq("id", profile.id)
+    .order("full_name", { ascending: true });
+
+  if (error) {
+    els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">Couldn't load accounts.</div>`;
+    return;
+  }
+  const targets = data || [];
+  if (!targets.length) {
+    els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`;
+  } else {
+    els.dialTabTransferList.innerHTML = targets
+      .map((p) => `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}">${escapeHtml(p.full_name)}</button>`)
+      .join("");
+    els.dialTabTransferList.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
+      btn.addEventListener("click", () => completeTransfer(btn.dataset.id));
+    });
+  }
+  positionTransferMenu(); // re-measure now that real content has replaced "Loading…"
+}
+
+async function completeTransfer(targetId) {
+  const tabId = archiveMenuTabId;
+  if (!tabId) return;
+  els.dialTabTransferMenu.classList.add("hidden");
+  els.dialTabArchiveMenu.classList.add("hidden");
+
+  const { error: listErr } = await supabase.from("dial_lists").update({ created_by: targetId }).eq("id", tabId);
+  if (listErr) return showError(els.errorBox, listErr);
+  const { error: dialsErr } = await supabase.from("dials").update({ created_by: targetId }).eq("list_id", tabId);
+  if (dialsErr) return showError(els.errorBox, dialsErr);
+
+  archiveMenuTabId = null;
+  currentListId = null;
+  await loadLists();
+}
+
+els.dialTabTransferBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!archiveMenuTabId) return;
+  openTransferMenu();
 });
 
 // ---------------------------------------------------------------------------
@@ -707,7 +798,11 @@ function wireTabInteractions() {
         completeMoveToList(id);
         return;
       }
-      if (isMobileViewport() && id === currentListId) {
+      // Tap/click the already-active tab -> reveal the Archive/Unarchive
+      // (+ admin-only Transfer) / Delete popup below it. Used to be
+      // mobile-only (isMobileViewport()) since desktop had no use for it, but
+      // admin-only Transfer needs to be reachable on desktop too now.
+      if (id === currentListId) {
         archiveMenuTabId = archiveMenuTabId === id ? null : id;
         renderTabs();
         return;

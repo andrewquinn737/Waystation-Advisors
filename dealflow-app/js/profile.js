@@ -15,6 +15,8 @@ const els = {
   avatarInitials: document.getElementById("avatarInitials"),
   profileName: document.getElementById("profileName"),
   profileRole: document.getElementById("profileRole"),
+  profilePhone: document.getElementById("profilePhone"),
+  profileEmail: document.getElementById("profileEmail"),
   callsThisWeekText: document.getElementById("callsThisWeekText"),
   callsChart: document.getElementById("callsChart"),
   teamsBtn: document.getElementById("teamsBtn"),
@@ -82,6 +84,19 @@ function initials(name) {
 els.profileName.textContent = profile.full_name;
 els.profileRole.textContent = profile.role === "admin" ? "Admin" : "Intern";
 els.avatarInitials.textContent = initials(profile.full_name);
+
+// Own account's phone + email, right below the listed position (role) and
+// above the weekly call-count section. Either line is simply omitted if
+// that field isn't on file (e.g. older accounts created before phone was
+// required at signup).
+if (profile.phone) {
+  els.profilePhone.textContent = profile.phone;
+  els.profilePhone.classList.remove("hidden");
+}
+if (profile.email) {
+  els.profileEmail.textContent = profile.email;
+  els.profileEmail.classList.remove("hidden");
+}
 
 // ---------------------------------------------------------------------------
 // Teams popup — Admins + Unassigned interns are virtual groups (derived from
@@ -410,37 +425,30 @@ function toggleMemberDetail(card, member) {
       ${memberDetailRow("Email", member.email, "email")}
     </div>`
   );
-  wireLongPressCopy(wrap);
+  wireTapCopy(wrap);
   stopContactActionPropagation(wrap);
   updateCardCornerSquaring(wrap);
 }
 
-// Briefly shows "Copied" next to a value after a long-press copies it —
-// same lightweight pattern as the call-notes "Saved" indicator on Dials.
-function wireLongPressCopy(container) {
+// Briefly shows "Copied" next to a value after tapping it copies it — same
+// lightweight pattern as the call-notes "Saved" indicator on Dials. Used to
+// be a 500ms long-press/hold before copying; a plain tap is faster and less
+// surprising (a hold no longer does anything special here).
+function wireTapCopy(container) {
   container.querySelectorAll(".copyable").forEach((el) => {
-    let timer = null;
-    const start = () => {
-      timer = setTimeout(async () => {
-        try {
-          await navigator.clipboard.writeText(el.dataset.copy || "");
-          const toast = el.parentElement.querySelector(".copy-toast");
-          if (toast) {
-            toast.classList.remove("hidden");
-            setTimeout(() => toast.classList.add("hidden"), 1200);
-          }
-        } catch {
-          // Clipboard access can fail (permissions, insecure context, etc.)
-          // — silently ignore, nothing to fall back to here.
+    el.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(el.dataset.copy || "");
+        const toast = el.parentElement.querySelector(".copy-toast");
+        if (toast) {
+          toast.classList.remove("hidden");
+          setTimeout(() => toast.classList.add("hidden"), 1200);
         }
-      }, 500);
-    };
-    const cancel = () => {
-      if (timer) clearTimeout(timer);
-      timer = null;
-    };
-    el.addEventListener("pointerdown", start);
-    ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => el.addEventListener(ev, cancel));
+      } catch {
+        // Clipboard access can fail (permissions, insecure context, etc.)
+        // — silently ignore, nothing to fall back to here.
+      }
+    });
   });
 }
 

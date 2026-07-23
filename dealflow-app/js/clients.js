@@ -12,6 +12,7 @@ import {
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
 import { wirePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
+import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -19,9 +20,70 @@ const { profile } = session;
 
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
+// "Categories" pipeline status (see the colored dropdown in
+// buildClientViewHTML, and the Categories filter menu further down) — colored
+// the same as dials' CONTACT_STATUSES, reusing those same CSS variables for
+// every shade except "Sold" (light blue), which has no dials equivalent.
+const CLIENT_STATUSES = [
+  { value: "sold", label: "Sold", bg: "var(--status-sold-bg)", border: "var(--status-sold-border)", dot: "var(--status-sold-dot)" },
+  { value: "connected_to_buyer", label: "Connected to buyer", bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)", dot: "var(--status-scheduled-dot)" },
+  { value: "potentially_interested", label: "Potentially interested", bg: "var(--status-callback-bg)", border: "var(--status-callback-border)", dot: "var(--status-callback-dot)" },
+  { value: "not_in_contact", label: "Not in contact", bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)", dot: "var(--status-no-response-dot)" },
+  { value: "no_longer_interested", label: "No longer interested", bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)", dot: "var(--status-not-interested-dot)" },
+];
+function clientStatusInfo(value) {
+  return CLIENT_STATUSES.find((s) => s.value === value) || CLIENT_STATUSES[3];
+}
+
+// Which pipeline statuses are currently hidden from the Clients list (toggled
+// via the page-header triangle's Categories submenu) — persisted the same way
+// as dials' hiddenStatuses.
+const CLIENTS_STORAGE_KEYS = { hiddenStatuses: "waystation_clients_hidden_statuses" };
+const hiddenClientStatuses = new Set();
+function loadPersistedClientsState() {
+  try {
+    const saved = localStorage.getItem(CLIENTS_STORAGE_KEYS.hiddenStatuses);
+    if (saved) {
+      const arr = JSON.parse(saved);
+      if (Array.isArray(arr)) arr.forEach((v) => hiddenClientStatuses.add(v));
+    }
+  } catch {
+    // ignore
+  }
+}
+function persistHiddenClientStatuses() {
+  try {
+    localStorage.setItem(CLIENTS_STORAGE_KEYS.hiddenStatuses, JSON.stringify([...hiddenClientStatuses]));
+  } catch {
+    // ignore
+  }
+}
+loadPersistedClientsState();
+
+// The 7 fixed Progress-tab milestones — checked off (green check) once a
+// client_events row with the matching event_type exists (see
+// buildProgressHTML). Timeline's "+" add-menu offers exactly these same 7
+// options, so logging one there is what flips its Progress dot.
+const PROGRESS_STEPS = [
+  { type: "intro_call", label: "Intro call" },
+  { type: "nda_financials", label: "NDA + financials" },
+  { type: "client_approval", label: "Client approval" },
+  { type: "client_meeting", label: "Client meeting" },
+  { type: "loi", label: "LOI" },
+  { type: "due_diligence", label: "Due diligence" },
+  { type: "close", label: "Close" },
+];
+const EVENT_TYPE_LABELS = {
+  created: "Client created",
+  ...Object.fromEntries(PROGRESS_STEPS.map((s) => [s.type, s.label])),
+};
+const CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+
 let clients = [];
 let currentClient = null; // null while creating a new client
 let currentMode = "create"; // 'create' | 'view' | 'edit'
+let currentSubTab = "profile"; // 'profile' | 'progress' | 'timeline' — view mode only
+let currentClientEvents = []; // client_events rows for currentClient, newest-last
 
 const els = {
   errorBox: document.getElementById("errorBox"),
@@ -41,7 +103,15 @@ const els = {
   requiredPopupText: document.getElementById("requiredPopupText"),
   requiredPopupOk: document.getElementById("requiredPopupOk"),
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
+  menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
+  categoriesSubmenu: document.getElementById("categoriesSubmenu"),
+  clientSubtabs: document.getElementById("clientSubtabs"),
+  introCallPopup: document.getElementById("introCallPopup"),
+  introCallPopupBody: document.getElementById("introCallPopupBody"),
+  introCallPopupClose: document.getElementById("introCallPopupClose"),
 };
+
+els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
 function openConfirmDelete(onConfirm) {
   els.confirmDeleteModal.classList.remove("hidden");
@@ -95,10 +165,11 @@ function renderTable() {
   const q = els.search.value.trim().toLowerCase();
   const rows = clients.filter(
     (c) =>
-      !q ||
-      clientDisplayName(c).toLowerCase().includes(q) ||
-      (c.company_name || "").toLowerCase().includes(q) ||
-      (c.industry || "").toLowerCase().includes(q)
+      (!q ||
+        clientDisplayName(c).toLowerCase().includes(q) ||
+        (c.company_name || "").toLowerCase().includes(q) ||
+        (c.industry || "").toLowerCase().includes(q)) &&
+      !hiddenClientStatuses.has(c.pipeline_status || "not_in_contact")
   );
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
 
@@ -116,7 +187,7 @@ function renderTable() {
         ${rows
           .map(
             (c) => `
-          <tr class="clickable-row" data-id="${c.id}">
+          <tr class="clickable-row" data-id="${c.id}" style="background:${clientStatusInfo(c.pipeline_status).bg};">
             <td data-label="Name">${escapeHtml(clientDisplayName(c))}</td>
             <td class="muted" data-label="Company">${escapeHtml(clientSecondary(c))}</td>
             <td class="muted" data-label="Location">${escapeHtml(clientLocation(c))}</td>
@@ -134,7 +205,7 @@ function renderTable() {
       ${rows
         .map(
           (c) => `
-        <div class="mobile-card clickable-row" data-id="${c.id}">
+        <div class="mobile-card clickable-row" data-id="${c.id}" style="background:${clientStatusInfo(c.pipeline_status).bg}; border-color:${clientStatusInfo(c.pipeline_status).border};">
           <div class="mc-main">
             <div class="mc-name">${escapeHtml(clientDisplayName(c))}</div>
             <div class="mc-sub">${escapeHtml(clientCompanyAndLocation(c))}</div>
@@ -153,6 +224,51 @@ function renderTable() {
 }
 
 els.search.addEventListener("input", renderTable);
+
+// ---------------------------------------------------------------------------
+// "Categories" filter — same submenu-of-colored-rectangles pattern as the
+// Dials page's Categories button (js/dials.js renderCategoriesSubmenu /
+// positionCategoriesSubmenu), just with the 5 client pipeline statuses.
+// ---------------------------------------------------------------------------
+
+function renderCategoriesSubmenu() {
+  els.categoriesSubmenu.innerHTML = CLIENT_STATUSES.map(
+    (s) => `
+      <button type="button" class="category-rect-option ${hiddenClientStatuses.has(s.value) ? "is-hidden" : ""}" data-value="${s.value}">
+        <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+      </button>`
+  ).join("");
+  els.categoriesSubmenu.querySelectorAll(".category-rect-option").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = btn.dataset.value;
+      if (hiddenClientStatuses.has(v)) hiddenClientStatuses.delete(v);
+      else hiddenClientStatuses.add(v);
+      persistHiddenClientStatuses();
+      renderCategoriesSubmenu();
+      renderTable();
+    });
+  });
+}
+renderCategoriesSubmenu();
+
+function positionCategoriesSubmenu() {
+  const rect = els.menuCategoriesBtn.getBoundingClientRect();
+  const submenuWidth = els.categoriesSubmenu.offsetWidth || 190;
+  let left = rect.right + 8;
+  if (left + submenuWidth > window.innerWidth) {
+    left = rect.left - submenuWidth - 8;
+  }
+  els.categoriesSubmenu.style.left = `${Math.max(8, left)}px`;
+  els.categoriesSubmenu.style.top = `${rect.top}px`;
+}
+
+els.menuCategoriesBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const opening = els.categoriesSubmenu.classList.contains("hidden");
+  els.categoriesSubmenu.classList.toggle("hidden");
+  if (opening) positionCategoriesSubmenu();
+});
 
 // ---------------------------------------------------------------------------
 // Field sections — shared between "new client" and the Profile tab
@@ -179,6 +295,55 @@ function rfLocation(client) {
     </div>`;
 }
 
+// "Categories" pipeline-status dropdown — a colored rectangle button showing
+// the current status that reveals a dropdown of all 5 on click, same visual
+// component as the dial popup's status dropdown (js/dials.js), reusing its
+// .dial-status-* classes directly rather than duplicating that CSS. Sits
+// right below the header, above Location (see buildClientViewHTML) — the
+// only thing shown in the Profile tab that isn't part of the editable form.
+function categoryDropdownHTML(client) {
+  const info = clientStatusInfo(client.pipeline_status);
+  return `
+    <div class="dial-status-dropdown client-status-dropdown">
+      <button type="button" class="dial-status-btn" id="clientStatusBtn"
+        style="background:${info.bg}; border-color:${info.border};">${escapeHtml(info.label)}</button>
+      <div class="dial-status-menu hidden" id="clientStatusMenu">
+        ${CLIENT_STATUSES.map(
+          (s) => `
+          <button type="button" class="dial-status-option" data-value="${s.value}">
+            <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+          </button>`
+        ).join("")}
+      </div>
+    </div>`;
+}
+
+// Wires the category dropdown's open/close + option clicks — called after
+// buildClientViewHTML's markup lands in the DOM (Profile tab only).
+function wireCategoryDropdown() {
+  const statusBtn = document.getElementById("clientStatusBtn");
+  if (!statusBtn) return;
+  const statusMenu = document.getElementById("clientStatusMenu");
+  statusBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    statusMenu.classList.toggle("hidden");
+  });
+  document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
+  statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
+    btn.addEventListener("click", () => updateClientStatus(btn.dataset.value));
+  });
+}
+
+async function updateClientStatus(newStatus) {
+  const { error } = await supabase.from("clients").update({ pipeline_status: newStatus }).eq("id", currentClient.id);
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  currentClient.pipeline_status = newStatus;
+  const idx = clients.findIndex((c) => c.id === currentClient.id);
+  if (idx !== -1) clients[idx].pipeline_status = newStatus;
+  renderModalBody();
+  renderTable();
+}
+
 // Flat, non-tabbed read-only view — matches the Dials detail popup's layout
 // (see buildDialViewHTML in js/dials.js) instead of the old
 // accordion-sections-in-tabs design. Name is only shown once, up in the
@@ -191,6 +356,7 @@ function buildClientViewHTML(client) {
   // stray leading space in that case instead of assuming both are present.
   const founded = client.founded_year ? [monthName(client.founded_month), client.founded_year].filter(Boolean).join(" ") : "";
   return `
+    ${categoryDropdownHTML(client)}
     ${rfLocation(client)}
     ${rfContact("Email", client.email, "email")}
     ${rfContact("Phone number", client.phone, "phone")}
@@ -204,6 +370,155 @@ function buildClientViewHTML(client) {
     ${rf("Notes", client.other_notes)}
   `;
 }
+
+// ---------------------------------------------------------------------------
+// Progress tab — vertical stepper of the 7 fixed milestones (PROGRESS_STEPS),
+// each checked off green once a client_events row with the matching
+// event_type exists (logged from the Timeline tab's "+" menu — see
+// buildTimelineHTML/wireTimelineTab below).
+// ---------------------------------------------------------------------------
+function buildProgressHTML(events) {
+  const doneTypes = new Set(events.map((e) => e.event_type));
+  return `
+    <div class="progress-stepper">
+      <div class="progress-stepper-line"></div>
+      ${PROGRESS_STEPS.map((s) => {
+        const done = doneTypes.has(s.type);
+        return `
+          <div class="progress-step ${done ? "done" : ""}">
+            <div class="progress-step-dot">${done ? CHECK_SVG : ""}</div>
+            <div class="progress-step-label">${escapeHtml(s.label)}</div>
+          </div>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Timeline tab — vertical event feed + a "+" FAB that logs one of the same 7
+// milestones (or opens the shared Schedule Intro Call form for "Intro call"
+// specifically, same as the Dials page's flow).
+// ---------------------------------------------------------------------------
+function timelineEventDateStr(e) {
+  const d = new Date(e.event_date);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function buildTimelineHTML(events) {
+  // Newest first — most recent milestone at the top of the feed.
+  const sorted = [...events].sort((a, b) => new Date(b.event_date) - new Date(a.event_date));
+  const listHTML = sorted.length
+    ? `
+      <div class="timeline-list">
+        ${sorted
+          .map(
+            (e) => `
+          <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-line"></div>
+            <div class="timeline-box">
+              <div class="tl-date">${escapeHtml(timelineEventDateStr(e))}</div>
+              <div class="tl-type">${escapeHtml(EVENT_TYPE_LABELS[e.event_type] || e.event_type)}</div>
+            </div>
+          </div>`
+          )
+          .join("")}
+      </div>`
+    : `<div class="empty-state">No events yet.</div>`;
+
+  return `
+    ${listHTML}
+    <button type="button" class="timeline-add-btn" id="timelineAddBtn" title="Add event">+</button>
+    <div class="timeline-add-menu hidden" id="timelineAddMenu">
+      ${PROGRESS_STEPS.map((s) => `<button type="button" data-type="${s.type}">${escapeHtml(s.label)}</button>`).join("")}
+    </div>
+  `;
+}
+
+function wireTimelineTab() {
+  const addBtn = document.getElementById("timelineAddBtn");
+  const addMenu = document.getElementById("timelineAddMenu");
+  if (!addBtn) return;
+  addBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    addMenu.classList.toggle("hidden");
+  });
+  document.addEventListener("click", () => addMenu.classList.add("hidden"), { once: true });
+  addMenu.querySelectorAll("button[data-type]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      addMenu.classList.add("hidden");
+      const type = btn.dataset.type;
+      if (type === "intro_call") {
+        openTimelineIntroCall();
+        return;
+      }
+      await logClientEvent(type);
+    });
+  });
+}
+
+async function loadClientEvents() {
+  if (!currentClient) {
+    currentClientEvents = [];
+    return;
+  }
+  const { data, error } = await supabase.from("client_events").select("*").eq("client_id", currentClient.id).order("event_date", { ascending: true });
+  currentClientEvents = error ? [] : data || [];
+}
+
+async function logClientEvent(eventType) {
+  const { error } = await supabase.from("client_events").insert({
+    client_id: currentClient.id,
+    event_type: eventType,
+    created_by: profile.id,
+  });
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  await loadClientEvents();
+  renderModalBody();
+}
+
+// Same shared "Schedule Intro Call" form the Dials page uses (js/introCall.js)
+// — here the client already exists, so it's passed directly (no createClient
+// callback needed).
+function openTimelineIntroCall() {
+  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
+  els.introCallPopup.classList.remove("hidden");
+  wireIntroCallForm(els.introCallPopupBody, {
+    client: currentClient,
+    onScheduled: async (client) => {
+      await supabase.from("client_events").insert({
+        client_id: client.id,
+        event_type: "intro_call",
+        event_date: new Date().toISOString(),
+        details: { via: "calendly_link" },
+        created_by: profile.id,
+      });
+      setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
+      await loadClientEvents();
+      renderModalBody();
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Profile / Progress / Timeline sub-tabs — only shown in view mode (creating
+// or editing a client always shows the plain editable form instead).
+// ---------------------------------------------------------------------------
+function renderSubtabsBar() {
+  const show = currentMode === "view" && !!currentClient;
+  els.clientSubtabs.classList.toggle("hidden", !show);
+  if (!show) return;
+  els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === currentSubTab);
+  });
+}
+
+els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    currentSubTab = btn.dataset.tab;
+    renderModalBody();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -237,8 +552,10 @@ els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.
 
 function renderModalBody() {
   // Edit icon lives in the header (left of the x), not beside "Personal
-  // information" — only shown in view mode.
-  els.editProfileBtn.classList.toggle("hidden", currentMode !== "view");
+  // information" — only shown in view mode, and only on the Profile tab
+  // (editing doesn't apply to Progress/Timeline, which are event-driven).
+  els.editProfileBtn.classList.toggle("hidden", currentMode !== "view" || currentSubTab !== "profile");
+  renderSubtabsBar();
 
   if (currentMode === "create") {
     els.clientModalTitle.textContent = "New client";
@@ -265,9 +582,24 @@ function renderModalBody() {
   els.clientModalSubtitle.textContent = subtitle;
   els.clientModalSubtitle.classList.toggle("hidden", !subtitle);
 
+  // Edit mode always edits the Profile fields regardless of which sub-tab was
+  // last active (the subtabs bar is hidden during edit anyway — see
+  // renderSubtabsBar). Otherwise, show whichever of Profile/Progress/Timeline
+  // is currently selected.
+  let bodyHTML;
+  if (currentMode === "edit") {
+    bodyHTML = buildEditableSections(currentClient);
+  } else if (currentSubTab === "progress") {
+    bodyHTML = buildProgressHTML(currentClientEvents);
+  } else if (currentSubTab === "timeline") {
+    bodyHTML = buildTimelineHTML(currentClientEvents);
+  } else {
+    bodyHTML = buildClientViewHTML(currentClient);
+  }
+
   els.clientModalBody.innerHTML = `
     <div id="clientModalError" class="error-msg hidden"></div>
-    ${currentMode === "edit" ? buildEditableSections(currentClient) : buildClientViewHTML(currentClient)}
+    ${bodyHTML}
     ${
       currentMode === "edit"
         ? `<div class="form-actions">
@@ -287,6 +619,11 @@ function renderModalBody() {
     });
     const delBtn = document.getElementById("deleteClientBtn");
     if (delBtn) delBtn.addEventListener("click", handleDelete);
+  } else if (currentSubTab === "timeline") {
+    wireTimelineTab();
+  } else if (currentSubTab === "profile") {
+    wireCategoryDropdown();
+    stopContactActionPropagation(els.clientModalBody);
   }
 }
 
@@ -323,6 +660,7 @@ function handleDelete() {
 function openCreateModal() {
   currentClient = null;
   currentMode = "create";
+  currentSubTab = "profile";
   els.clientModal.classList.remove("hidden");
   lockPageScroll();
   renderModalBody();
@@ -331,8 +669,10 @@ function openCreateModal() {
 async function openDetailModal(client) {
   currentClient = client;
   currentMode = "view";
+  currentSubTab = "profile";
   els.clientModal.classList.remove("hidden");
   lockPageScroll();
+  await loadClientEvents();
   renderModalBody();
 }
 
@@ -343,7 +683,7 @@ function closeModal() {
 
 els.addBtn.addEventListener("click", openCreateModal);
 els.clientModalClose.addEventListener("click", closeModal);
-wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
+wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
 els.editProfileBtn.addEventListener("click", () => {
   currentMode = "edit";
   renderModalBody();
