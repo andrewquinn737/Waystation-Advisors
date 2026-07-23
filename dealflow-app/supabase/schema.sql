@@ -758,3 +758,25 @@ create policy "dials_select_own" on dials
 drop policy if exists "clients_select_own" on clients;
 create policy "clients_select_own" on clients
   for select using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- TIMELINE: MANUAL "CONFIRM THIS HAPPENED" CHECKMARK
+-- New circle control shown to the right of the delete (x) on any Timeline
+-- event dated today or earlier (never on future-dated events, and never on
+-- the auto-inserted "created" event) — see buildTimelineHTML/
+-- toggleClientEventConfirmed in js/clients.js. Purely a manual flag the
+-- intern can toggle; doesn't affect the Progress tab's own checkmarks, which
+-- are still based on an event of that type simply existing. No existing
+-- UPDATE policy existed on client_events at all (only select/insert/delete),
+-- so one is added here, scoped the same way select/insert already are.
+-- ============================================================================
+alter table client_events add column if not exists confirmed boolean not null default false;
+
+drop policy if exists "client_events_update_own" on client_events;
+create policy "client_events_update_own" on client_events
+  for update using (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  )
+  with check (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  );
