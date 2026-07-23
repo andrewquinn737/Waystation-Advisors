@@ -1761,7 +1761,12 @@ function renderDialModal() {
       renderDialModal();
     });
     const didCallBtn = document.getElementById("dialDidCallBtn");
-    if (didCallBtn) didCallBtn.addEventListener("click", toggleDidCallToday);
+    // Disabling synchronously on click (in addition to the didCallToggleInFlight
+    // guard inside toggleDidCallToday itself) gives an immediate visual cue
+    // that the press registered, so there's no moment where an impatient
+    // second click feels necessary — see toggleDidCallToday's comment for the
+    // duplicate-call bug this combination fixes.
+    if (didCallBtn) didCallBtn.addEventListener("click", () => { didCallBtn.disabled = true; toggleDidCallToday(); });
     const statusBtn = document.getElementById("dialStatusBtn");
     const statusMenu = document.getElementById("dialStatusMenu");
     statusBtn.addEventListener("click", (e) => {
@@ -1871,7 +1876,21 @@ async function updateDialStatus(newStatus) {
 // at the start of each day since the button's checked state is just
 // (dial.called_today_date === todayDateStr()) — no cron job needed, and it
 // never touches any other day's already-logged calls.
+//
+// Guards against a real bug that duplicated calls: this function is async
+// and its very first read (isCalledToday) happens BEFORE any await settles.
+// If the button didn't visibly flip green right away (flushCallNotes/the
+// update can take a moment) and someone impatiently clicked it again, the
+// second call's isCalledToday read the same stale "not called yet" state as
+// the first — both took the "else" branch and both inserted a
+// call_status_changes row for one press, inflating the week's/today's count.
+// didCallToggleInFlight makes every click after the first a no-op until the
+// in-flight one fully finishes and re-renders.
+let didCallToggleInFlight = false;
 async function toggleDidCallToday() {
+  if (didCallToggleInFlight) return;
+  didCallToggleInFlight = true;
+  try {
   // Same reasoning as updateDialStatus — flush any pending notes edit before
   // this re-renders the popup.
   await flushCallNotes();
@@ -1899,6 +1918,9 @@ async function toggleDidCallToday() {
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) dials[idx].called_today_date = currentDial.called_today_date;
   renderDialModal();
+  } finally {
+    didCallToggleInFlight = false;
+  }
 }
 
 function handleDeleteDial() {
@@ -1963,6 +1985,15 @@ const DIAL_SWIPE_MS = 180;
 
 async function goToDial(delta) {
   if (dialMode !== "view") return; // don't discard unsaved edits by navigating away
+  // Block swipe/prev/next/arrow-keys entirely while the Call notes textarea
+  // is actively focused — previously this just auto-flushed (saved) whatever
+  // was typed and navigated straight through, which felt like it swallowed
+  // edits out from under you mid-thought. Now you have to actually finish
+  // editing (blur/click away) before navigation works again; flushCallNotes
+  // below still exists for the moment right after that blur, in case a save
+  // is still in flight when a swipe/arrow-key follows immediately after.
+  const notesEl = document.getElementById("d_call_notes_live");
+  if (notesEl && document.activeElement === notesEl) return;
   // currentDialSet is the filtered/displayed list snapshotted when the popup
   // opened (see openDialModal) — bounds-checking against THIS instead of the
   // full `dials` array is what keeps swipe/prev/next/arrow-keys scoped to

@@ -897,7 +897,7 @@ function openEventDetailsModal(category, onConfirm) {
   const confirmBtn = els.eventDateConfirmBtn;
   const cancelBtn = els.eventDateCancelBtn;
 
-  els.eventDateModalTitle.textContent = category === "task" ? "New task" : "When did this happen?";
+  els.eventDateModalTitle.textContent = category === "task" ? "New task" : "Schedule event";
 
   const today = new Date();
   today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
@@ -1199,11 +1199,12 @@ function openTimelineIntroCall(eventDate, time) {
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
     userId: profile.id,
-    // The Profile page's "Intro calls" graph counts SCHEDULING actions, not
-    // completed/happened calls — so this always credits the graph the moment
-    // "Open Calendly"/"Skip Calendly" is clicked here, regardless of whether
-    // the eventDate picked for the Timeline entry is in the past, today, or
-    // the future (logToGraph defaults to true — see js/introCall.js).
+    // The Profile page's "Intro calls" graph should only count calls actually
+    // scheduled from the Dials page (see handleScheduleIntroCallFromDial in
+    // js/dials.js, which leaves logToGraph at its default true) — logging an
+    // Intro call here, via a Client's own Timeline "+" menu, must NOT also
+    // credit the graph a second time, so this explicitly opts out.
+    logToGraph: false,
     onScheduled: async (client) => {
       await supabase.from("client_events").insert({
         client_id: client.id,
@@ -1405,6 +1406,12 @@ async function openDetailModal(client, initialSubTab = "profile") {
 function closeModal() {
   els.clientModal.classList.add("hidden");
   unlockPageScroll();
+  // Loaded inside Profile's "Upcoming events" overlay iframe (see
+  // openUpcomingEventOverlay in js/profile.js) rather than as its own page —
+  // in that context there's no underlying Clients list worth revealing
+  // inside the iframe, so closing the client here should dismiss the whole
+  // overlay and drop you back on Profile instead.
+  if (window.parent !== window) window.parent.postMessage("closeClientOverlay", "*");
 }
 
 // Replaces the old bottom-right "+" FAB — same create-client flow, now a

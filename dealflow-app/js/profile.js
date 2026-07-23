@@ -83,7 +83,38 @@ const els = {
   addTeamCancelBtn: document.getElementById("addTeamCancelBtn"),
   confirmDeleteTeamModal: document.getElementById("confirmDeleteTeamModal"),
   confirmDeleteAccountModal: document.getElementById("confirmDeleteAccountModal"),
+  upcomingEventOverlay: document.getElementById("upcomingEventOverlay"),
+  upcomingEventFrame: document.getElementById("upcomingEventFrame"),
+  upcomingEventOverlayClose: document.getElementById("upcomingEventOverlayClose"),
 };
+
+// Opens a client (deep-linked straight to its Timeline, same URL the old
+// window.location.href navigation used) inside the fullscreen iframe overlay
+// instead of leaving Profile entirely — see #upcomingEventOverlay in
+// profile.html. Closing it (closeUpcomingEventOverlay) just hides the
+// overlay and blanks the iframe; Profile itself was never navigated away
+// from, so nothing needs to be "returned to".
+function openUpcomingEventOverlay(clientId) {
+  els.upcomingEventFrame.src = `clients.html?client=${encodeURIComponent(clientId)}&tab=timeline`;
+  els.upcomingEventOverlay.classList.remove("hidden");
+  lockPageScroll();
+}
+function closeUpcomingEventOverlay() {
+  els.upcomingEventOverlay.classList.add("hidden");
+  els.upcomingEventFrame.src = "about:blank"; // stop the embedded page running in the background
+  unlockPageScroll();
+}
+els.upcomingEventOverlayClose.addEventListener("click", closeUpcomingEventOverlay);
+// The embedded clients.html posts this the moment its OWN client-popup close
+// (X) button is pressed (see closeModal() in js/clients.js) — that's the
+// close button someone will actually reach for after reading the client's
+// info, so it needs to dismiss this whole overlay, not just the iframe's
+// internal modal.
+window.addEventListener("message", (e) => {
+  if (e.source === els.upcomingEventFrame.contentWindow && e.data === "closeClientOverlay") {
+    closeUpcomingEventOverlay();
+  }
+});
 
 // Generic "are you sure" confirm popup wiring — same pattern as js/dials.js's
 // openConfirmModal, duplicated locally rather than shared since these two
@@ -1519,13 +1550,16 @@ async function loadUpcomingEvents() {
 
   const { data, error } = await supabase
     .from("client_events")
-    .select("id, event_type, event_date, details, client_id, clients!inner(id, first_name, last_name, created_by)")
+    .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, first_name, last_name, created_by)")
     .gte("event_date", startOfToday.toISOString())
     .in("clients.created_by", ids)
     .order("event_date", { ascending: true });
   if (error) return showError(els.errorBox, error);
 
-  const rows = data || [];
+  // Skip the auto-inserted "Client created" entry (never a real event to
+  // follow up on) and anything already checked off as happened on the
+  // client's own Timeline — once confirmed there, it's done, not upcoming.
+  const rows = (data || []).filter((r) => r.event_type !== "created" && !r.confirmed);
   if (!rows.length) {
     els.upcomingEventsBox.innerHTML = `<div class="empty-state">No upcoming events.</div>`;
     return;
@@ -1546,9 +1580,7 @@ async function loadUpcomingEvents() {
     .join("");
 
   els.upcomingEventsBox.querySelectorAll(".upcoming-event-row[data-client-id]").forEach((row) => {
-    row.addEventListener("click", () => {
-      window.location.href = `clients.html?client=${encodeURIComponent(row.dataset.clientId)}&tab=timeline`;
-    });
+    row.addEventListener("click", () => openUpcomingEventOverlay(row.dataset.clientId));
   });
 }
 
