@@ -243,6 +243,18 @@
     </div>
   </div>
 
+  <!-- Clicking a row in "Upcoming events" used to navigate the whole page to
+       clients.html, so closing that client's popup landed you on the Clients
+       list, not back on Profile. This overlay instead loads clients.html
+       (deep-linked straight to that client's Timeline, same as before) in an
+       iframe layered on top of Profile — closing it just hides the overlay,
+       and Profile itself was never actually left (see wireUpcomingEventOverlay
+       in js/profile.js). -->
+  <div class="fullscreen-modal hidden" id="upcomingEventOverlay">
+    <button type="button" class="fs-close" id="upcomingEventOverlayClose" title="Close" style="position:absolute; top:16px; right:16px; z-index:1;">&times;</button>
+    <iframe id="upcomingEventFrame" class="upcoming-event-frame" src="about:blank" title="Client details"></iframe>
+  </div>
+
   <script type="module" src="js/profile.js"></script>
 </body>
 </html>
