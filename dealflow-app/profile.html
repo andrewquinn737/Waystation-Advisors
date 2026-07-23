@@ -44,11 +44,27 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </div>
-    <!-- No Profile-specific options yet — placeholder until there are some. -->
+    <!-- "Edit" turns name/phone/email into text boxes (see
+         enterProfileEditMode() in js/profile.js); the other option toggles
+         the calls-section below between "Outreach calls" (the existing
+         weekly-call chart) and "Intro calls" (a separate scheduled-intro-call
+         tracker) — see toggleCallsView(). -->
     <div class="page-header-menu hidden" id="pageHeaderMenu">
-      <div class="page-header-menu-empty">More options coming soon</div>
+      <button type="button" class="page-header-menu-item" id="menuEditProfileBtn">
+        <span class="menu-item-label">Edit</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="menuCallsViewBtn" data-view="outreach">
+        <span class="menu-item-label">Outreach calls</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
+      </button>
     </div>
     <div id="errorBox" class="error-msg hidden"></div>
+
+    <!-- Hidden file input driving the avatar upload — see
+         handleAvatarFileSelected() in js/profile.js. Only reachable by
+         clicking the avatar circle while profile edit mode is on. -->
+    <input type="file" accept="image/*" id="avatarFileInput" class="hidden" />
 
     <div class="profile-card">
       <div class="profile-avatar" id="avatarInitials">?</div>
@@ -57,9 +73,20 @@
       <p class="profile-contact-line hidden" id="profilePhone"></p>
       <p class="profile-contact-line hidden" id="profileEmail"></p>
 
-      <div class="profile-calls-section">
+      <!-- Outreach calls (default) — the existing weekly "people called" text
+           + chart with the 50/week quota line. -->
+      <div class="profile-calls-section" id="outreachCallsSection">
         <p class="profile-calls-text" id="callsThisWeekText">— people called this week</p>
         <div class="profile-chart" id="callsChart"></div>
+      </div>
+
+      <!-- Intro calls (toggled in via the header menu) — a separate tracker
+           with no quota line, counting intro calls *scheduled* each week
+           (from either Dials or Clients) — see loadIntroCallsChart() in
+           js/profile.js. -->
+      <div class="profile-calls-section hidden" id="introCallsSection">
+        <p class="profile-calls-text" id="introCallsThisWeekText">— intro calls scheduled this week</p>
+        <div class="profile-chart" id="introCallsChart"></div>
       </div>
 
       <div class="form-actions" style="margin-top:20px;">

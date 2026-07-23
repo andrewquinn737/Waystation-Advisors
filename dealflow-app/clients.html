@@ -105,6 +105,20 @@
     </div>
   </div>
 
+  <!-- "Choose the date this happened" step, shown before any Timeline "+"
+       event is actually logged (see openEventDateModal in js/clients.js). -->
+  <div class="modal-backdrop hidden" id="eventDateModal">
+    <div class="modal">
+      <h2>When did this happen?</h2>
+      <label for="eventDateInput">Date</label>
+      <input type="date" id="eventDateInput" />
+      <div class="form-actions">
+        <button type="button" class="btn" id="eventDateConfirmBtn">Continue</button>
+        <button type="button" class="btn secondary" id="eventDateCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Small centered popup summarizing missing required fields -->
   <div class="modal-backdrop hidden" id="requiredPopup">
     <div class="modal">
