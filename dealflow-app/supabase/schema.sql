@@ -780,3 +780,109 @@ create policy "client_events_update_own" on client_events
   with check (
     exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
   );
+
+-- ============================================================================
+-- REWORK: DIAL TAB OWNERSHIP — admins only see their OWN tabs; Transfer
+-- reassigns ownership via a secure function instead of relying on relaxed
+-- RLS.
+--
+-- Previously (see "FIX: ADMIN DIALS TAB TRANSFER" above), dial_lists_select_own
+-- and dials_select_own were widened to `created_by = auth.uid() or is_admin()`
+-- so that an admin performing a Transfer could still see the row immediately
+-- after reassigning its created_by (Postgres re-checks SELECT against the
+-- post-update row whenever the client requests it back). The side effect:
+-- since is_admin() is true for every admin, EVERY admin could see EVERY
+-- account's tabs all the time — not just their own — and a tab transferred
+-- AWAY from an admin would still show up for them afterward, since they could
+-- still see it via the is_admin() bypass regardless of who it's now owned by.
+--
+-- Fix: drop the is_admin() bypass entirely from both SELECT policies (and
+-- from the UPDATE policies) so visibility is strictly `created_by =
+-- auth.uid()` for everyone, admins included — a tab (and every dial in it) is
+-- attached to exactly one account, exactly like a dial is attached to its
+-- tab via list_id (already true, unchanged). Interns only ever see tabs
+-- attached to their own account; admins, for now, only see their own
+-- personal tabs too (a future "view other accounts' tabs" admin toggle is
+-- planned but explicitly not built yet).
+--
+-- The one remaining need for a bypass — an admin reassigning someone else's
+-- tab during Transfer — is now handled by transfer_dial_list(), a `security
+-- definer` function (same trusted-bypass pattern already used by is_admin()/
+-- is_team_lead() to safely read profiles.role without recursive RLS). It
+-- checks is_admin() itself before doing anything, then reassigns created_by
+-- on both dial_lists and the dials under it in one trusted operation — no
+-- broad standing RLS bypass required, and no RETURNING-row SELECT-recheck
+-- complication, since the function body isn't subject to the caller's RLS at
+-- all. See completeTransfer() in js/dials.js, which now calls this via
+-- supabase.rpc(...) instead of two direct .update() calls.
+--
+-- SEPARATE BUG FOUND WHILE VERIFYING THIS: dial_lists had row-level security
+-- DISABLED at the table level entirely (`relrowsecurity = false` — visible
+-- via `select relname, relrowsecurity from pg_class where relname =
+-- 'dial_lists'`), even though every policy above was correctly defined. A
+-- table with RLS disabled ignores every one of its policies and grants
+-- access per ordinary table GRANTs instead — which, combined with
+-- `authenticated` having SELECT granted (needed for the app to work at all),
+-- meant EVERY account could read EVERY tab regardless of created_by. This is
+-- almost certainly the real mechanism behind "every tab in dials is visible
+-- to every account" — not a policy logic bug, but RLS having been switched
+-- off for this one table at some point (every other app table was confirmed
+-- still correctly enabled). Re-enabled below; this is idempotent to re-run.
+-- ============================================================================
+alter table dial_lists enable row level security;
+
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid());
+
+drop policy if exists "dial_lists_update_own" on dial_lists;
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid())
+  with check (created_by = auth.uid());
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid());
+
+drop policy if exists "dials_update_own" on dials;
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid())
+  with check (created_by = auth.uid());
+
+create or replace function transfer_dial_list(p_list_id uuid, p_new_owner uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then
+    raise exception 'Only admins can transfer a tab.';
+  end if;
+  update dial_lists set created_by = p_new_owner where id = p_list_id;
+  update dials set created_by = p_new_owner where list_id = p_list_id;
+end;
+$$;
+
+grant execute on function transfer_dial_list(uuid, uuid) to authenticated;
+
+-- ============================================================================
+-- ADMIN-ONLY SELLERS/BUYERS TOGGLE (Clients + Dials)
+-- No schema change needed here — clients.client_type and dial_lists.dial_type
+-- have existed since the original design (both `check (... in ('buyer',
+-- 'seller'))`), from back when buyer support was built and then hidden app-
+-- wide (see js/clients.js's/js/dials.js's "Buyer support has been removed
+-- entirely" comments). Every existing row was always explicitly inserted
+-- with 'seller' (the hardcoded default in clientForm.js's defaultClient() and
+-- dials.js's old `const currentType = "seller"`), so every current client and
+-- dial tab is already correctly a seller under this column.
+-- This round just re-exposes the toggle in the UI (admin-only, via the
+-- settings gear icon — see js/dealSide.js, and its wiring in js/clients.js /
+-- js/dials.js) and makes currentType/the client_type filter dynamic instead
+-- of hardcoded, so flipping to "Buyers" shows/creates buyer-side data as a
+-- fully separate parallel dataset, scoped underneath account -> seller/buyer
+-- exactly as before (current/archived -> tabs -> category for Dials;
+-- category alone for Clients). No RLS change required since client_type/
+-- dial_type is just another filterable column on tables whose row-level
+-- security already scopes by created_by/account.
+-- ============================================================================
