@@ -22,14 +22,22 @@ import { supabase } from "./supabaseClient.js";
 // the Calendly account or event type ever changes.
 const CALENDLY_BOOKING_URL = "https://calendly.com/mason-waystationadvisors/30min";
 
-export function buildIntroCallFormHTML() {
+// allowSkip: shows a secondary "Log without Calendly" option beneath the
+// main button — used by the Clients Timeline's "+" > Intro call flow (see
+// openTimelineIntroCall in js/clients.js), where the call may already be
+// known to have happened (or be getting logged after the fact) and opening
+// Calendly to actually book it doesn't make sense. Not passed (so omitted)
+// by the Dials "Schedule Intro Call" flow, which is always booking a call
+// that hasn't happened yet.
+export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
   return `
     <div class="intro-call-form">
       <p class="help-text">This opens Calendly in a new tab, pre-filled with the client's name and email, so you can pick a time together.</p>
       <div id="introCallError" class="error-msg hidden"></div>
-      <div id="introCallSuccess" class="help-text hidden" style="color: var(--gold, #7a5c00);">Opened Calendly in a new tab.</div>
+      <div id="introCallSuccess" class="help-text hidden" style="color: var(--gold, #7a5c00);"></div>
       <div class="form-actions">
         <button type="button" class="btn yellow" id="scheduleCallBtn">Open Calendly</button>
+        ${allowSkip ? `<button type="button" class="btn secondary" id="skipCalendlyBtn">Skip Calendly, just log it</button>` : ""}
       </div>
     </div>
   `;
@@ -61,13 +69,13 @@ export function buildIntroCallFormHTML() {
 export function wireIntroCallForm(container, opts) {
   const { client: initialClient, createClient, userId, logToGraph = true, onScheduled } = opts;
   const btn = container.querySelector("#scheduleCallBtn");
+  const skipBtn = container.querySelector("#skipCalendlyBtn");
   const errEl = container.querySelector("#introCallError");
   const successEl = container.querySelector("#introCallSuccess");
 
-  btn.addEventListener("click", async () => {
-    errEl.classList.add("hidden");
-    successEl.classList.add("hidden");
-
+  // Shared by both the normal "Open Calendly" click and the "Skip Calendly"
+  // click below — resolves/creates the client record, same as before.
+  async function resolveClient() {
     let client = initialClient;
     if (!client && createClient) {
       try {
@@ -75,10 +83,19 @@ export function wireIntroCallForm(container, opts) {
       } catch (err) {
         errEl.textContent = err?.message || "Could not create the client record.";
         errEl.classList.remove("hidden");
-        return;
+        return null;
       }
-      if (!client) return; // createClient already showed its own error and bailed
+      if (!client) return null; // createClient already showed its own error and bailed
     }
+    return client;
+  }
+
+  btn.addEventListener("click", async () => {
+    errEl.classList.add("hidden");
+    successEl.classList.add("hidden");
+
+    const client = await resolveClient();
+    if (!client) return;
 
     if (!client?.email) {
       errEl.textContent = "This client doesn't have an email on file, so Calendly can't be pre-filled. Add one first.";
@@ -94,6 +111,7 @@ export function wireIntroCallForm(container, opts) {
     const separator = CALENDLY_BOOKING_URL.includes("?") ? "&" : "?";
     window.open(`${CALENDLY_BOOKING_URL}${separator}${params.toString()}`, "_blank", "noopener");
 
+    successEl.textContent = "Opened Calendly in a new tab.";
     successEl.classList.remove("hidden");
 
     // Counts toward the Profile page's "Intro calls" weekly tracker — see
@@ -107,4 +125,28 @@ export function wireIntroCallForm(container, opts) {
 
     if (onScheduled) await onScheduled(client);
   });
+
+  // "Skip Calendly, just log it" — same end result (onScheduled fires, the
+  // graph gets credited) minus actually opening Calendly, and without
+  // requiring the client to have an email on file (Calendly's pre-fill is
+  // the only reason that was ever needed). See the allowSkip comment on
+  // buildIntroCallFormHTML above for when this button even exists.
+  if (skipBtn) {
+    skipBtn.addEventListener("click", async () => {
+      errEl.classList.add("hidden");
+      successEl.classList.add("hidden");
+
+      const client = await resolveClient();
+      if (!client) return;
+
+      successEl.textContent = "Logged the intro call.";
+      successEl.classList.remove("hidden");
+
+      if (userId && logToGraph) {
+        await supabase.from("intro_call_log").insert({ user_id: userId });
+      }
+
+      if (onScheduled) await onScheduled(client);
+    });
+  }
 }

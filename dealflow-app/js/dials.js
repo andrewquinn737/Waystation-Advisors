@@ -1415,7 +1415,7 @@ function buildDialViewHTML(dial) {
   return `
     ${rfContact("Email", dial.email, "email")}
     ${buildPhoneNumbersHTML(dial)}
-    ${rf("LinkedIn", dial.linkedin)}
+    ${rfWebsite("LinkedIn", dial.linkedin)}
     ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}

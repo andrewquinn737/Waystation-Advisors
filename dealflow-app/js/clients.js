@@ -401,6 +401,26 @@ function rf(label, value) {
   return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
 }
 
+// Adds an https:// scheme if the stored value doesn't already have one (a
+// bare "linkedin.com/in/..." or "www.linkedin.com/..." typed into the field
+// isn't a valid href on its own — clicking it would be treated as a relative
+// link on this site instead of opening LinkedIn).
+function normalizeUrl(value) {
+  const v = String(value).trim();
+  return /^https?:\/\//i.test(v) ? v : `https://${v}`;
+}
+
+// Same shape as rf() but renders the value as an actual clickable link
+// (opens in a new tab) instead of plain text — used for LinkedIn so pressing
+// it takes you straight to the profile instead of just displaying the URL.
+function rfLink(label, value) {
+  const v = value === null || value === undefined || value === "" ? "" : String(value);
+  const valueHTML = v
+    ? `<a href="${escapeHtml(normalizeUrl(v))}" target="_blank" rel="noopener noreferrer">${escapeHtml(v)}</a>`
+    : "Not provided";
+  return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${valueHTML}</div></div>`;
+}
+
 // Location as its own readonly row (above Email), with the map pin next to
 // it — same idea as rfContact's icon row, but for the location + pin instead
 // of a phone/email + contact icons.
@@ -482,7 +502,7 @@ function buildClientViewHTML(client) {
     ${rfLocation(client)}
     ${rfContact("Email", client.email, "email")}
     ${rfContact("Phone number", client.phone, "phone")}
-    ${rf("LinkedIn", client.linkedin)}
+    ${rfLink("LinkedIn", client.linkedin)}
     ${rf("Intern's name", client.intern_name)}
     ${rf("Industry sector", client.industry)}
     ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
@@ -502,8 +522,7 @@ function buildClientViewHTML(client) {
 function buildProgressHTML(events) {
   const doneTypes = new Set(events.map((e) => e.event_type));
   return `
-    <div class="progress-stepper">
-      <div class="progress-stepper-line"></div>
+    <div class="progress-stepper" id="progressStepper">
       ${PROGRESS_STEPS.map((s) => {
         const done = doneTypes.has(s.type);
         return `
@@ -514,6 +533,38 @@ function buildProgressHTML(events) {
       }).join("")}
     </div>
   `;
+}
+
+// Replaces the old single full-height rail with short connector segments
+// drawn only BETWEEN each pair of adjacent dots (nothing above the first dot
+// or below the last one). Positions are measured from the real rendered
+// layout (getBoundingClientRect) rather than assumed from CSS math, since
+// .progress-step-dot is an absolutely-positioned flex child whose exact
+// vertical center depends on flexbox's own alignment math — measuring is far
+// more robust than trying to replicate that math here. Called once right
+// after the Progress tab's HTML is inserted into the DOM (see
+// renderModalBody), inside requestAnimationFrame so layout has settled.
+function positionProgressConnectors() {
+  const stepper = document.getElementById("progressStepper");
+  if (!stepper) return;
+  requestAnimationFrame(() => {
+    stepper.querySelectorAll(".progress-connector").forEach((el) => el.remove());
+    const stepperRect = stepper.getBoundingClientRect();
+    const dots = Array.from(stepper.querySelectorAll(".progress-step-dot"));
+    for (let i = 0; i < dots.length - 1; i++) {
+      const a = dots[i].getBoundingClientRect();
+      const b = dots[i + 1].getBoundingClientRect();
+      const top = a.bottom - stepperRect.top;
+      const height = b.top - a.bottom;
+      if (height <= 0) continue;
+      const connector = document.createElement("div");
+      connector.className = "progress-connector";
+      connector.style.top = `${top}px`;
+      connector.style.height = `${height}px`;
+      connector.style.left = `${a.left - stepperRect.left + a.width / 2}px`;
+      stepper.appendChild(connector);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -741,7 +792,7 @@ async function toggleClientEventConfirmed(eventId, newValue) {
 // — here the client already exists, so it's passed directly (no createClient
 // callback needed). eventDate is whatever was chosen in openEventDateModal.
 function openTimelineIntroCall(eventDate) {
-  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
+  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowSkip: true });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
@@ -886,6 +937,8 @@ function renderModalBody() {
     if (delBtn) delBtn.addEventListener("click", handleDelete);
   } else if (currentSubTab === "timeline") {
     wireTimelineTab();
+  } else if (currentSubTab === "progress") {
+    positionProgressConnectors();
   } else if (currentSubTab === "profile") {
     wireCategoryDropdown();
     stopContactActionPropagation(els.clientModalBody);
