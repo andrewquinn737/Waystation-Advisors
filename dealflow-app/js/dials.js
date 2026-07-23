@@ -369,21 +369,53 @@ function parseCSV(text) {
 // column header (any reasonable spelling/casing) -> dial field name. Each
 // dial field only ever gets matched to the FIRST header that matches one of
 // its aliases, so a CSV with both "Phone" and "Mobile" columns doesn't have
-// the second one silently overwrite the first.
+// the second one silently overwrite the first. "contact_status" is special —
+// its raw cell values aren't dial field text, they're CSV export statuses
+// that need translating through CSV_STATUS_VALUE_MAP (see rowsToDials).
 const DIAL_FIELD_ALIASES = {
   first_name: ["first name", "firstname", "first"],
   last_name: ["last name", "lastname", "last"],
   company_name: ["company name", "company", "business name", "business"],
   email: ["email", "email address", "e mail"],
-  mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number"],
-  company_phone: ["company phone", "office phone", "business phone", "work phone"],
+  // "Phone - Mobile" (some CRM exports' own naming for the personal cell
+  // number, distinct from "Phone - Website" below) normalizes to "phone
+  // mobile".
+  mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number", "phone mobile"],
+  // "Phone - Website" is that same export's naming for the general/company
+  // line (associated with the business's own website/HQ, not a person's
+  // cell) — normalizes to "phone website".
+  company_phone: ["company phone", "office phone", "business phone", "work phone", "phone website"],
   linkedin: ["linkedin", "linkedin url", "linkedin profile"],
   city: ["city"],
   state: ["state"],
-  website: ["website", "url", "web site", "web address"],
-  industry: ["industry", "industry sector", "sector"],
+  website: ["website", "url", "web site", "web address", "business url"],
+  industry: ["industry", "industry sector", "sector", "mandate industry sector"],
   summary: ["summary", "notes", "description"],
+  contact_status: ["status"],
 };
+
+// A "Status" column's cell values (as seen in real CSV exports) -> this
+// app's internal contact_status enum (see CONTACT_STATUSES above). Keys are
+// normalized the same way as everything else (trimmed, lowercased) but
+// punctuation like "/" and "-" is kept since it's part of the label itself —
+// see normalizeStatusValue. An empty cell maps to "uncontacted" explicitly
+// (rather than just being skipped), matching "Empty box = Uncontacted".
+// Any value with no match here is simply left alone (falls back to whatever
+// the dials table's own default is, currently also "uncontacted").
+const CSV_STATUS_VALUE_MAP = {
+  "": "uncontacted",
+  "passed/dead": "not_interested",
+  "scheduling intro": "intro_call_scheduled",
+  "call unanswered": "no_response",
+  "not a fit": "not_interested",
+  "completed outreach": "unable_to_contact",
+  "follow-up": "no_response",
+  "follow up": "no_response",
+};
+
+function normalizeStatusValue(v) {
+  return String(v || "").trim().toLowerCase();
+}
 
 function normalizeHeader(h) {
   return String(h || "")
@@ -427,6 +459,17 @@ function rowsToDials(rows, listId) {
       const d = { list_id: listId };
       Object.entries(fieldMap).forEach(([colIndex, field]) => {
         const v = (r[Number(colIndex)] || "").trim();
+        // A "Status" column's cell isn't plain text to copy over — it's a CSV
+        // export label that needs translating through CSV_STATUS_VALUE_MAP
+        // into this app's own contact_status enum (see the map's comment
+        // above). An empty cell still explicitly maps to "uncontacted"
+        // ("" is itself a key in that map), so this branch runs even when v
+        // is blank; anything with no match at all is simply left alone.
+        if (field === "contact_status") {
+          const mapped = CSV_STATUS_VALUE_MAP[normalizeStatusValue(v)];
+          if (mapped) d.contact_status = mapped;
+          return;
+        }
         if (v) d[field] = v;
       });
       return d;
