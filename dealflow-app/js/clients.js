@@ -526,16 +526,57 @@ function timelineEventDateStr(e) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+// True if the event's calendar date (in the viewer's local timezone) is
+// later than today — a future-dated Timeline entry that hasn't happened yet.
+// Compared by calendar day, not exact timestamp, since event_date may be
+// stamped at noon (manually-chosen dates, see openEventDateModal) or at the
+// exact moment of scheduling (Intro call via Calendly) — either way, "today"
+// should never count as future.
+function isFutureDate(dateStr) {
+  const d = new Date(dateStr);
+  d.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() > today.getTime();
+}
+
 function buildTimelineHTML(events) {
-  // Newest first — most recent milestone at the top of the feed.
+  // Newest first — most recent milestone at the top of the feed. Since
+  // future-dated events sort above today/past ones, they end up clustered
+  // together at the top, letting the divider below sit at a single clean
+  // boundary rather than needing to be threaded between scattered items.
   const sorted = [...events].sort((a, b) => new Date(b.event_date) - new Date(a.event_date));
-  const listHTML = sorted.length
-    ? `
-      <div class="timeline-list">
-        ${sorted
-          .map(
-            (e) => `
-          <div class="timeline-item">
+  const futureFlags = sorted.map((e) => isFutureDate(e.event_date));
+  const hasFuture = futureFlags.some(Boolean);
+  const hasPastOrToday = futureFlags.some((f) => !f);
+  // Only meaningful (and only rendered) when both groups exist — see the
+  // "only visible when future events exist" requirement. futureFlags is
+  // guaranteed future-then-non-future in order (both blocks are internally
+  // sorted by date), so the last `true` is exactly the boundary.
+  const lastFutureIndex = hasFuture && hasPastOrToday ? futureFlags.lastIndexOf(true) : -1;
+
+  const itemsHTML = sorted
+    .map((e, i) => {
+      const future = futureFlags[i];
+      const isCreated = e.event_type === "created";
+
+      // "Client created" is auto-inserted and gets no controls at all — every
+      // other event type was added manually via "+". Of those, all get the
+      // delete (x); only today-or-past ones additionally get the
+      // confirm-happened circle (future events haven't happened yet, so
+      // there's nothing to confirm — see isFutureDate above).
+      let actionsHTML = "";
+      if (!isCreated) {
+        const deleteBtn = `<button type="button" class="timeline-delete-btn" data-event-id="${e.id}" title="Delete event">&times;</button>`;
+        const confirmBtn = future
+          ? ""
+          : `<button type="button" class="timeline-confirm-btn ${e.confirmed ? "confirmed" : ""}" data-event-id="${e.id}" data-confirmed="${e.confirmed ? "1" : "0"}" title="${e.confirmed ? "Mark as not happened" : "Mark as happened"}">${e.confirmed ? CHECK_SVG : ""}</button>`;
+        actionsHTML = `<div class="timeline-box-actions">${deleteBtn}${confirmBtn}</div>`;
+      }
+
+      const beforeDivider = i === lastFutureIndex;
+      const itemHTML = `
+          <div class="timeline-item${beforeDivider ? " tl-before-divider" : ""}">
             <div class="timeline-dot"></div>
             <div class="timeline-line"></div>
             <div class="timeline-box">
@@ -543,19 +584,14 @@ function buildTimelineHTML(events) {
                 <div class="tl-date">${escapeHtml(timelineEventDateStr(e))}</div>
                 <div class="tl-type">${escapeHtml(EVENT_TYPE_LABELS[e.event_type] || e.event_type)}</div>
               </div>
-              ${
-                // "Client created" is auto-inserted and can't be deleted —
-                // every other event type was added manually via "+" and can be.
-                e.event_type !== "created"
-                  ? `<button type="button" class="timeline-delete-btn" data-event-id="${e.id}" title="Delete event">&times;</button>`
-                  : ""
-              }
+              ${actionsHTML}
             </div>
-          </div>`
-          )
-          .join("")}
-      </div>`
-    : `<div class="empty-state">No events yet.</div>`;
+          </div>`;
+      return beforeDivider ? itemHTML + `<div class="timeline-future-divider"></div>` : itemHTML;
+    })
+    .join("");
+
+  const listHTML = sorted.length ? `<div class="timeline-list">${itemsHTML}</div>` : `<div class="empty-state">No events yet.</div>`;
 
   return `
     ${listHTML}
@@ -570,14 +606,36 @@ function wireTimelineTab() {
   const addBtn = document.getElementById("timelineAddBtn");
   const addMenu = document.getElementById("timelineAddMenu");
   if (!addBtn) return;
+
+  // Closing on an outside click used to be wired with a single one-time
+  // document listener registered whenever this function ran (i.e. once per
+  // Timeline-tab render) — but that meant the very next click ANYWHERE
+  // (scrolling the list, tapping a delete button, etc.), not necessarily
+  // opening the menu at all, would silently consume it. After that, no
+  // outside-click listener was left registered, so a later "+" open could
+  // never be dismissed by clicking away. Fixed by adding/removing the
+  // listener exactly when the menu opens/closes instead.
+  const closeMenu = () => {
+    addMenu.classList.add("hidden");
+    document.removeEventListener("click", onOutsideClick);
+  };
+  const onOutsideClick = (e) => {
+    if (addMenu.contains(e.target) || addBtn.contains(e.target)) return;
+    closeMenu();
+  };
   addBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    addMenu.classList.toggle("hidden");
+    const opening = addMenu.classList.contains("hidden");
+    if (opening) {
+      addMenu.classList.remove("hidden");
+      document.addEventListener("click", onOutsideClick);
+    } else {
+      closeMenu();
+    }
   });
-  document.addEventListener("click", () => addMenu.classList.add("hidden"), { once: true });
   addMenu.querySelectorAll("button[data-type]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      addMenu.classList.add("hidden");
+      closeMenu();
       const type = btn.dataset.type;
       // Every event added via "+" asks for the date it actually happened
       // first (defaults to today) — see openEventDateModal — rather than
@@ -596,6 +654,12 @@ function wireTimelineTab() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       deleteClientEvent(btn.dataset.eventId);
+    });
+  });
+  document.querySelectorAll(".timeline-confirm-btn[data-event-id]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleClientEventConfirmed(btn.dataset.eventId, btn.dataset.confirmed !== "1");
     });
   });
 }
@@ -661,6 +725,18 @@ async function deleteClientEvent(eventId) {
   renderModalBody();
 }
 
+// Toggles the "confirm this happened" circle — only ever called for
+// today-or-past events (future ones never render the control at all, see
+// buildTimelineHTML). Purely a manual confirmation flag; doesn't affect the
+// Progress tab's checkmarks, which are still based on the event simply
+// existing, regardless of date or confirmed status.
+async function toggleClientEventConfirmed(eventId, newValue) {
+  const { error } = await supabase.from("client_events").update({ confirmed: newValue }).eq("id", eventId);
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  await loadClientEvents();
+  renderModalBody();
+}
+
 // Same shared "Schedule Intro Call" form the Dials page uses (js/introCall.js)
 // — here the client already exists, so it's passed directly (no createClient
 // callback needed). eventDate is whatever was chosen in openEventDateModal.
@@ -670,6 +746,10 @@ function openTimelineIntroCall(eventDate) {
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
     userId: profile.id,
+    // A future-dated intro call hasn't happened yet, so it shouldn't count
+    // toward the Profile page's "Intro calls" graph until its date arrives
+    // (see isFutureDate above, and the logToGraph comment in js/introCall.js).
+    logToGraph: !isFutureDate(eventDate),
     onScheduled: async (client) => {
       await supabase.from("client_events").insert({
         client_id: client.id,

@@ -36,7 +36,7 @@ export function buildIntroCallFormHTML() {
 }
 
 // container: element the form HTML above was injected into.
-// opts: { client, createClient, internEmail, userId, onScheduled(client) }
+// opts: { client, createClient, internEmail, userId, logToGraph, onScheduled(client) }
 //   - client: an already-existing client row ({first_name,last_name,email,id,...}).
 //   - createClient: alternative to `client` — an async function called the
 //     moment "Open Calendly" is clicked, which should create the client
@@ -50,10 +50,16 @@ export function buildIntroCallFormHTML() {
 //     count every time this flow is used, from either Dials or Clients,
 //     independent of client_events/Timeline (see onScheduled below, which is
 //     each caller's own business and no longer touches client_events here).
+//   - logToGraph: defaults to true. The Clients Timeline's "+" > Intro call
+//     flow passes false when the chosen date is in the future — a call that
+//     hasn't happened yet shouldn't count toward the graph until its date
+//     arrives (see the logToGraph comment in js/clients.js's
+//     openTimelineIntroCall). Every other caller schedules "now", so the
+//     default of true is correct for them without passing anything.
 // (internEmail is accepted but unused in this simplified version — the
 // booking link isn't per-intern.)
 export function wireIntroCallForm(container, opts) {
-  const { client: initialClient, createClient, userId, onScheduled } = opts;
+  const { client: initialClient, createClient, userId, logToGraph = true, onScheduled } = opts;
   const btn = container.querySelector("#scheduleCallBtn");
   const errEl = container.querySelector("#introCallError");
   const successEl = container.querySelector("#introCallSuccess");
@@ -93,8 +99,9 @@ export function wireIntroCallForm(container, opts) {
     // Counts toward the Profile page's "Intro calls" weekly tracker — see
     // loadIntroCallsChart() in js/profile.js. Deliberately separate from
     // client_events/Timeline, which each caller's own onScheduled below
-    // handles (or doesn't) on its own terms.
-    if (userId) {
+    // handles (or doesn't) on its own terms. Skipped when logToGraph is
+    // false (a future-dated Timeline entry — see the opts comment above).
+    if (userId && logToGraph) {
       await supabase.from("intro_call_log").insert({ user_id: userId });
     }
 
