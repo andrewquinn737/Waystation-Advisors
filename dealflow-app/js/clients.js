@@ -60,11 +60,16 @@ function statusLabel(s) {
 
 // Which pipeline statuses are currently hidden from the Clients list (toggled
 // via the page-header triangle's Categories submenu) — persisted the same way
-// as dials' hiddenStatuses.
+// as dials' hiddenStatuses. selectedProgressStages is the analogous
+// persisted set for the newer "Progress" submenu further down — note it's
+// additive (a client shows if its stage is IN this set, or if the set is
+// empty) rather than subtractive like hiddenClientStatuses.
 const CLIENTS_STORAGE_KEYS = {
   hiddenStatuses: "waystation_clients_hidden_statuses",
+  selectedProgressStages: "waystation_clients_selected_progress_stages",
 };
 const hiddenClientStatuses = new Set();
+const selectedProgressStages = new Set();
 function loadPersistedClientsState() {
   try {
     const saved = localStorage.getItem(CLIENTS_STORAGE_KEYS.hiddenStatuses);
@@ -75,10 +80,26 @@ function loadPersistedClientsState() {
   } catch {
     // ignore
   }
+  try {
+    const savedProgress = localStorage.getItem(CLIENTS_STORAGE_KEYS.selectedProgressStages);
+    if (savedProgress) {
+      const arr = JSON.parse(savedProgress);
+      if (Array.isArray(arr)) arr.forEach((v) => selectedProgressStages.add(v));
+    }
+  } catch {
+    // ignore
+  }
 }
 function persistHiddenClientStatuses() {
   try {
     localStorage.setItem(CLIENTS_STORAGE_KEYS.hiddenStatuses, JSON.stringify([...hiddenClientStatuses]));
+  } catch {
+    // ignore
+  }
+}
+function persistSelectedProgressStages() {
+  try {
+    localStorage.setItem(CLIENTS_STORAGE_KEYS.selectedProgressStages, JSON.stringify([...selectedProgressStages]));
   } catch {
     // ignore
   }
@@ -107,6 +128,14 @@ const EVENT_TYPE_LABELS = {
   task: "Task",
   ...Object.fromEntries(PROGRESS_STEPS.map((s) => [s.type, s.label])),
 };
+
+// The "Progress" filter's 8 options — "No meetings yet" plus the same 7
+// PROGRESS_STEPS milestones shown on the Progress tab. A client's filtering
+// "stage" is whichever of these is its FURTHEST confirmed milestone (the
+// highest-index PROGRESS_STEPS entry with a confirmed client_events row, or
+// "no_meetings" if it has none at all) — see loadClientProgressStages() /
+// clientProgressStage() and renderProgressSubmenu() further down.
+const PROGRESS_STAGES = [{ value: "no_meetings", label: "No meetings yet" }, ...PROGRESS_STEPS.map((s) => ({ value: s.type, label: s.label }))];
 const CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
 
 // Right-side-up triangle shown next to a CONFIRMED event's title (see
@@ -185,6 +214,8 @@ const els = {
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
   menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
   categoriesSubmenu: document.getElementById("categoriesSubmenu"),
+  menuProgressBtn: document.getElementById("menuProgressBtn"),
+  progressSubmenu: document.getElementById("progressSubmenu"),
   menuAccountsVisibleBtn: document.getElementById("menuAccountsVisibleBtn"),
   accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
   accountsVisibleBody: document.getElementById("accountsVisibleBody"),
@@ -278,7 +309,39 @@ async function loadClients() {
     .order("created_at", { ascending: false });
   if (error) return showError(els.errorBox, error);
   clients = data || [];
+  await loadClientProgressStages();
   renderTable();
+}
+
+// client_id -> furthest confirmed PROGRESS_STEPS milestone (see
+// PROGRESS_STAGES above), used solely by the "Progress" filter. Recomputed
+// whenever the client list itself reloads, plus after any action that can
+// change a client_events row's confirmed state (see toggleClientEventConfirmed,
+// confirmEventWithReport, deleteClientEvent below) so the filter doesn't go
+// stale while you're viewing someone's Timeline. RLS already scopes which
+// rows come back (own account, or admin/team-lead viewing a teammate's —
+// same as client_events_select_own), so no extra client_id filtering is
+// needed here.
+let clientProgressStages = new Map();
+async function loadClientProgressStages() {
+  const stepIndex = Object.fromEntries(PROGRESS_STEPS.map((s, i) => [s.type, i]));
+  const { data, error } = await supabase
+    .from("client_events")
+    .select("client_id, event_type")
+    .eq("confirmed", true)
+    .in("event_type", PROGRESS_STEPS.map((s) => s.type));
+  if (error) return; // best-effort — Progress filter just won't narrow anything down
+  const next = new Map();
+  (data || []).forEach((row) => {
+    const idx = stepIndex[row.event_type];
+    const currentType = next.get(row.client_id);
+    const currentIdx = currentType !== undefined ? stepIndex[currentType] : -1;
+    if (idx > currentIdx) next.set(row.client_id, row.event_type);
+  });
+  clientProgressStages = next;
+}
+function clientProgressStage(clientId) {
+  return clientProgressStages.get(clientId) || "no_meetings";
 }
 
 function renderTable() {
@@ -296,7 +359,12 @@ function renderTable() {
       // Categories can hide/show anything further (see
       // renderCategoriesSubmenu). null means no account filter is active
       // (every account's clients pass through).
-      (!visibleAccountIds || visibleAccountIds.has(c.created_by))
+      (!visibleAccountIds || visibleAccountIds.has(c.created_by)) &&
+      // "Progress" filter (see renderProgressSubmenu) — additive rather than
+      // subtractive: an empty selectedProgressStages means no filter is
+      // active at all (every client passes through), matching none of the 8
+      // options being picked yet.
+      (selectedProgressStages.size === 0 || selectedProgressStages.has(clientProgressStage(c.id)))
   );
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
 
@@ -393,8 +461,63 @@ function positionCategoriesSubmenu() {
 els.menuCategoriesBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   const opening = els.categoriesSubmenu.classList.contains("hidden");
+  els.progressSubmenu.classList.add("hidden");
   els.categoriesSubmenu.classList.toggle("hidden");
   if (opening) positionCategoriesSubmenu();
+});
+
+// ---------------------------------------------------------------------------
+// "Progress" filter — a second submenu-of-rectangles button, positioned in
+// the page-header menu directly between New client and Categories (see
+// menuProgressBtn in clients.html). Same fixed-position escape-the-clip
+// pattern as Categories just above, but ADDITIVE rather than subtractive:
+// with nothing selected every client shows (no filter active, same as
+// Categories' all-visible default); selecting one or more of the 8
+// PROGRESS_STAGES narrows the list down to clients whose furthest confirmed
+// milestone (loadClientProgressStages/clientProgressStage above) matches one
+// of the selections. Reuses .category-rect-option's rectangle-row styling,
+// with an ".is-selected" checkbox look instead of Categories' ".is-hidden"
+// dimming (see css/style.css).
+// ---------------------------------------------------------------------------
+
+function renderProgressSubmenu() {
+  els.progressSubmenu.innerHTML = PROGRESS_STAGES.map(
+    (p) => `
+      <button type="button" class="category-rect-option ${selectedProgressStages.has(p.value) ? "is-selected" : ""}" data-value="${p.value}">
+        <span class="category-rect-swatch progress-check-swatch">${selectedProgressStages.has(p.value) ? CHECK_SVG : ""}</span>${escapeHtml(p.label)}
+      </button>`
+  ).join("");
+  els.progressSubmenu.querySelectorAll(".category-rect-option").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = btn.dataset.value;
+      if (selectedProgressStages.has(v)) selectedProgressStages.delete(v);
+      else selectedProgressStages.add(v);
+      persistSelectedProgressStages();
+      renderProgressSubmenu();
+      renderTable();
+    });
+  });
+}
+renderProgressSubmenu();
+
+function positionProgressSubmenu() {
+  const rect = els.menuProgressBtn.getBoundingClientRect();
+  const submenuWidth = els.progressSubmenu.offsetWidth || 190;
+  let left = rect.right + 8;
+  if (left + submenuWidth > window.innerWidth) {
+    left = rect.left - submenuWidth - 8;
+  }
+  els.progressSubmenu.style.left = `${Math.max(8, left)}px`;
+  els.progressSubmenu.style.top = `${rect.top}px`;
+}
+
+els.menuProgressBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const opening = els.progressSubmenu.classList.contains("hidden");
+  els.categoriesSubmenu.classList.add("hidden");
+  els.progressSubmenu.classList.toggle("hidden");
+  if (opening) positionProgressSubmenu();
 });
 
 // ---------------------------------------------------------------------------
@@ -1067,6 +1190,7 @@ async function deleteClientEvent(eventId) {
   const { error } = await supabase.from("client_events").delete().eq("id", eventId);
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
+  await loadClientProgressStages(); // see toggleClientEventConfirmed's comment above
   renderModalBody();
 }
 
@@ -1083,6 +1207,11 @@ async function toggleClientEventConfirmed(eventId, newValue) {
   const { error } = await supabase.from("client_events").update({ confirmed: newValue }).eq("id", eventId);
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
+  // Un/confirming a PROGRESS_STEPS event can change this client's Progress
+  // filter stage (see clientProgressStage) — refresh the map now so the list
+  // is already correct once you close back out, rather than only on the
+  // next full loadClients().
+  await loadClientProgressStages();
   renderModalBody();
 }
 
@@ -1126,6 +1255,7 @@ async function confirmEventWithReport(eventId, reportText) {
   const { error } = await supabase.from("client_events").update({ confirmed: true, details }).eq("id", eventId);
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
+  await loadClientProgressStages(); // see toggleClientEventConfirmed's comment above
   renderModalBody();
 }
 
@@ -1422,7 +1552,7 @@ els.menuAddNewBtn.addEventListener("click", () => {
   openCreateModal();
 });
 els.clientModalClose.addEventListener("click", closeModal);
-wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.categoriesSubmenu });
+wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: [els.categoriesSubmenu, els.progressSubmenu] });
 
 // Settings gear popover — Sellers/Buyers toggle (see js/dealSide.js), visible
 // to admins and team leads. Hidden entirely for interns (it used to just be

@@ -549,6 +549,35 @@ function todayDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Same, one calendar day ahead — used only to set status_hide_effective_date
+// on a category change into a hide-Called-today status (see
+// updateDialStatus/isCalledTodayVisible below), so the button doesn't
+// actually disappear until the NEXT local day rather than the instant you
+// pick one of those 3 categories.
+function tomorrowDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Whether the "Called today" button should currently show for this dial —
+// always true for the 3 "active prospect" statuses (SHOW_CALLED_TODAY_STATUSES),
+// and ALSO true for the other 3 ("Not interested", "Unable to contact",
+// "Intro call scheduled") until status_hide_effective_date (set by
+// updateDialStatus whenever you switch INTO one of those 3) actually
+// arrives — so switching categories throughout the day never hides it
+// mid-day; it only hides starting the next day for whichever of those 3
+// categories the dial is still sitting in at that point. A dial with no
+// recorded date at all was already sitting in a hide category before this
+// column existed, so that's treated the same as "already effective"
+// (hidden) rather than suddenly reappearing for old data.
+function isCalledTodayVisible(dial) {
+  const status = dial.contact_status || "uncontacted";
+  if (SHOW_CALLED_TODAY_STATUSES.has(status)) return true;
+  if (!dial.status_hide_effective_date) return false;
+  return dial.status_hide_effective_date > todayDateStr();
+}
+
 // One row of a phone number with its "(Mobile)"/"(Company)" label + instant
 // buildPhoneNumbersHTML (the "Phone numbers" Mobile/Company display block)
 // now lives in contactIcons.js, shared with clients.js.
@@ -1735,7 +1764,7 @@ function renderDialModal() {
               </div>
             </div>
             ${
-              SHOW_CALLED_TODAY_STATUSES.has(dial.contact_status || "uncontacted")
+              isCalledTodayVisible(dial)
                 ? `<button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Called today</button>`
                 : ""
             }
@@ -1859,11 +1888,20 @@ async function updateDialStatus(newStatus) {
   // dial.contact_status while currentDial briefly held stale/partial data
   // from the race.
   await flushCallNotes();
-  const { error } = await supabase.from("dials").update({ contact_status: newStatus }).eq("id", currentDial.id);
+  const data = {
+    contact_status: newStatus,
+    // See isCalledTodayVisible's comment — switching TO one of the 3 hide
+    // categories only takes effect starting tomorrow (stays visible for the
+    // rest of today no matter how many times you flip between categories),
+    // while switching TO one of the 3 show categories un-hides it right
+    // away, so this clears the field immediately in that case.
+    status_hide_effective_date: SHOW_CALLED_TODAY_STATUSES.has(newStatus) ? null : tomorrowDateStr(),
+  };
+  const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
-  currentDial.contact_status = newStatus;
+  Object.assign(currentDial, data);
   const idx = dials.findIndex((d) => d.id === currentDial.id);
-  if (idx !== -1) dials[idx].contact_status = newStatus;
+  if (idx !== -1) Object.assign(dials[idx], data);
 
   renderDialModal();
   renderDialsTable();
