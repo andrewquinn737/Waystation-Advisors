@@ -474,10 +474,10 @@ async function loadTeams() {
     teamMembersByGroup[groupKeyForMember(m)].push(m);
   });
   // A team's lead (if it has one) always sorts to the top of its box — see
-  // memberCardHTML's divider line, drawn right after whichever card is
-  // role==='team_lead'. There's only ever at most one per box (promoting a
-  // 2nd swaps the 1st back to intern — see setMemberRole below), so this only
-  // ever moves at most one row per group; everyone else stays in the
+  // memberCardHTML's "is-team-lead" class, which highlights their card's
+  // border instead. There's only ever at most one per box (promoting a 2nd
+  // swaps the 1st back to intern — see setMemberAsTeamLead below), so this
+  // only ever moves at most one row per group; everyone else stays in the
   // alphabetical order the query above already returned.
   Object.keys(teamMembersByGroup).forEach((key) => {
     const members = teamMembersByGroup[key];
@@ -519,7 +519,7 @@ function renderTeams() {
         <div class="accordion-body team-group-body">
           ${
             members.length
-              ? `<div class="team-member-list">${members.map((m, i) => memberCardHTML(m, i, members)).join("")}</div>`
+              ? `<div class="team-member-list">${members.map(memberCardHTML).join("")}</div>`
               : `<div class="empty-state">No one here yet.</div>`
           }
         </div>
@@ -623,7 +623,7 @@ function renderTeams() {
   stopContactActionPropagation(els.teamsWrap);
 }
 
-function memberCardHTML(m, idx, groupMembers) {
+function memberCardHTML(m) {
   const isMemberAdmin = m.role === "admin";
   const positionLabel = memberPositionLabel(m);
   const positionHTML = isAdmin
@@ -638,12 +638,6 @@ function memberCardHTML(m, idx, groupMembers) {
     </div>`
     : `<div class="mc-sub">${escapeHtml(positionLabel)}</div>`;
 
-  // The team lead (if this box has one) always sorts to index 0 (see
-  // loadTeams()) — draw the divider right after their card, but only if
-  // there's actually someone else below it to separate from.
-  const leadDividerHTML =
-    m.role === "team_lead" && idx === 0 && groupMembers && groupMembers.length > 1 ? `<div class="team-lead-divider"></div>` : "";
-
   const rightHTML =
     editMode && !isMemberAdmin
       ? `<button type="button" class="team-trash-btn member-trash-btn" data-member-id="${m.id}" data-member-name="${escapeHtml(m.full_name)}" title="Remove account">&#128465;</button>`
@@ -656,7 +650,7 @@ function memberCardHTML(m, idx, groupMembers) {
   const pwRevealed = revealedPasswordMemberIds.has(m.id);
   return `
     <div class="team-member-card-wrap">
-      <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""}" data-member-id="${m.id}">
+      <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""} ${m.role === "team_lead" ? "is-team-lead" : ""}" data-member-id="${m.id}">
         <div class="mc-left">
           ${memberAvatarHTML(m)}
           <div class="mc-main">
@@ -667,8 +661,7 @@ function memberCardHTML(m, idx, groupMembers) {
         ${rightHTML}
       </div>
       ${pwRevealed ? tempPasswordRevealHTML(m.id) : ""}
-    </div>
-    ${leadDividerHTML}`;
+    </div>`;
 }
 
 // Small photo (or initials, if none uploaded) shown left of each member's

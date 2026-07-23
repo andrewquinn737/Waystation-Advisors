@@ -22,30 +22,20 @@ export function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-export function notesLabel() {
-  return "Notes";
-}
-
-// "What they're looking for" and "Other notes" used to be two separate boxes
-// (two separate DB columns: looking_for / other_notes). They're now presented
-// as a single "Notes" box everywhere. Rather than a schema migration, the
-// merged text is written back into `looking_for` on save and `other_notes` is
-// cleared out (see collectFormData below) — so there's one source of truth
-// going forward. This combines whatever's in both columns for display, so
-// nothing typed before the merge is lost, even on a client that hasn't been
-// re-saved yet.
-export function combinedNotes(client) {
-  const a = (client?.looking_for || "").trim();
-  const b = (client?.other_notes || "").trim();
-  if (a && b) return `${a}\n\n${b}`;
-  return a || b;
+// Briefly merged into a single "Notes" box (see project history) — reverted
+// back to two separate boxes per feedback. "What they're looking for in a
+// buyer" is a seller client's own counterpart; a buyer client (see
+// js/dealSide.js's Sellers/Buyers toggle, admin-only) is looking for a
+// seller instead, so the label flips based on client.client_type.
+export function lookingForLabel(clientType) {
+  return clientType === "buyer" ? "What they're looking for in a seller" : "What they're looking for in a buyer";
 }
 
 export function defaultClient(profile, overrides) {
   return Object.assign(
     {
       first_name: "", last_name: "", client_type: "seller", city: "", state: "",
-      email: "", phone: "", linkedin: "", company_name: "", industry: "",
+      email: "", mobile_phone: "", company_phone: "", linkedin: "", company_name: "", industry: "",
       annual_revenue: null, employee_count: null, founded_year: null, founded_month: null,
       looking_for: "", other_notes: "",
       intern_name: profile?.full_name || "",
@@ -105,8 +95,10 @@ export function buildEditableSections(client) {
       <div class="accordion-body">
         <div class="field-label-row"><label for="f_email">Email</label><span class="field-required-msg hidden" data-field="contact">required</span></div>
         <input id="f_email" type="email" value="${escapeHtml(client.email)}" />
-        <label for="f_phone">Phone number</label>
-        <input id="f_phone" type="tel" value="${escapeHtml(client.phone)}" />
+        <label for="f_mobile_phone">Mobile number</label>
+        <input id="f_mobile_phone" type="tel" value="${escapeHtml(client.mobile_phone)}" />
+        <label for="f_company_phone">Company number</label>
+        <input id="f_company_phone" type="tel" value="${escapeHtml(client.company_phone)}" />
         <label for="f_linkedin">LinkedIn</label>
         <input id="f_linkedin" value="${escapeHtml(client.linkedin)}" />
       </div>
@@ -148,11 +140,18 @@ export function buildEditableSections(client) {
       </div>
     </div>
 
-    <div class="accordion-section" data-section="notes">
-      <div class="accordion-header"><span>Notes</span><span class="chevron">&#9662;</span></div>
+    <div class="accordion-section" data-section="preferences">
+      <div class="accordion-header"><span>Preferences</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        <div class="field-label-row"><label for="f_notes">${notesLabel()}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
-        <textarea id="f_notes">${escapeHtml(combinedNotes(client))}</textarea>
+        <div class="field-label-row"><label for="f_looking_for">${lookingForLabel(client.client_type)}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
+        <textarea id="f_looking_for">${escapeHtml(client.looking_for || "")}</textarea>
+      </div>
+    </div>
+
+    <div class="accordion-section" data-section="notes">
+      <div class="accordion-header"><span>Other notes</span><span class="chevron">&#9662;</span></div>
+      <div class="accordion-body">
+        <textarea id="f_other_notes">${escapeHtml(client.other_notes || "")}</textarea>
       </div>
     </div>
   `;
@@ -174,14 +173,11 @@ export function collectFormData(container) {
     city: container.querySelector("#f_city").value.trim(),
     state: container.querySelector("#f_state").value,
     email: container.querySelector("#f_email").value.trim(),
-    phone: container.querySelector("#f_phone").value.trim(),
+    mobile_phone: container.querySelector("#f_mobile_phone").value.trim(),
+    company_phone: container.querySelector("#f_company_phone").value.trim(),
     linkedin: container.querySelector("#f_linkedin").value.trim(),
-    // Single "Notes" box now (see combinedNotes/notesLabel above) — the
-    // merged text is saved into looking_for, the sole DB column that still
-    // gets written to going forward; other_notes is cleared since its content
-    // (if any) was already folded into this same textarea on load.
-    looking_for: container.querySelector("#f_notes").value.trim(),
-    other_notes: "",
+    looking_for: container.querySelector("#f_looking_for").value.trim(),
+    other_notes: container.querySelector("#f_other_notes").value.trim(),
     intern_name: container.querySelector("#f_intern_name").value.trim(),
     company_name: container.querySelector("#f_company_name").value.trim(),
     industry: container.querySelector("#f_industry").value.trim(),
@@ -211,7 +207,7 @@ export function getMissingFields(data) {
 
   if (!data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
 
-  if (!data.email && !data.phone) { missing.push("contact"); popupLabels.push("Phone number and/or email"); }
+  if (!data.email && !data.mobile_phone && !data.company_phone) { missing.push("contact"); popupLabels.push("Phone number and/or email"); }
 
   let locMissing = false;
   if (!data.city) { missing.push("city"); locMissing = true; }
@@ -220,7 +216,7 @@ export function getMissingFields(data) {
 
   if (!data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
 
-  if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("Notes"); }
+  if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
 
   if (!data.intern_name) { missing.push("intern_name"); popupLabels.push("Intern's name"); }
 

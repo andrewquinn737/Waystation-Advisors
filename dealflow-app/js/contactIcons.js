@@ -40,6 +40,34 @@ export function rfContact(label, value, kind) {
     </div>`;
 }
 
+// One phone number's own labeled row (used by buildPhoneNumbersHTML below) —
+// same layout as rfContact but with a fixed "(Mobile)"/"(Company)" suffix
+// instead of a left-hand label, since both numbers share one "Phone numbers"
+// section instead of each getting their own readonly-field.
+function phoneNumberRow(number, kind) {
+  return `
+    <div class="rf-value-row" style="margin-bottom: 8px;">
+      <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
+      ${contactActionIcons({ phone: number })}
+    </div>`;
+}
+
+// Shared "Phone numbers" read-only section — shows whichever of
+// mobile_phone/company_phone are present on `entity` (a dial OR a client;
+// both use these same two column names), each with its own instant-contact
+// icons. Mobile is still the one used everywhere else for instant call/text
+// (list rows, cards) — this is only about what's displayed here.
+export function buildPhoneNumbersHTML(entity) {
+  const rows = [];
+  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, "Mobile"));
+  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company"));
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">Phone numbers</div>
+      ${rows.length ? rows.join("") : `<div class="rf-value empty">Not provided</div>`}
+    </div>`;
+}
+
 // Compact icon-only cluster (no label), for list/card rows. `phone` gets a
 // text + call icon; `email` gets a mail icon. Either can be omitted.
 export function contactActionIcons({ phone, email } = {}) {

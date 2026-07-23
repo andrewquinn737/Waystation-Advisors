@@ -2,7 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
@@ -550,27 +550,8 @@ function todayDateStr() {
 }
 
 // One row of a phone number with its "(Mobile)"/"(Company)" label + instant
-// contact icons — used inside the "Phone numbers" display block below.
-function phoneNumberRow(number, kind) {
-  return `
-    <div class="rf-value-row" style="margin-bottom: 8px;">
-      <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
-      ${contactActionIcons({ phone: number })}
-    </div>`;
-}
-
-// Display-mode "Phone numbers" section: shows whichever of mobile/company
-// are present, each with its own instant-contact icons.
-function buildPhoneNumbersHTML(dial) {
-  const rows = [];
-  if (dial.mobile_phone) rows.push(phoneNumberRow(dial.mobile_phone, "Mobile"));
-  if (dial.company_phone) rows.push(phoneNumberRow(dial.company_phone, "Company"));
-  return `
-    <div class="readonly-field">
-      <div class="rf-label">Phone numbers</div>
-      ${rows.length ? rows.join("") : `<div class="rf-value empty">Not provided</div>`}
-    </div>`;
-}
+// buildPhoneNumbersHTML (the "Phone numbers" Mobile/Company display block)
+// now lives in contactIcons.js, shared with clients.js.
 
 // Call notes are only ever shown in display mode, where they're directly
 // editable (autosaves on blur — see wireCallNotesAutosave).
@@ -2049,16 +2030,14 @@ els.dialModalBackdrop.addEventListener("touchend", (e) => {
 // ---------------------------------------------------------------------------
 // "Schedule intro call" from a dial — replaces the old "Create client"
 // button entirely. Only the info already on the dial is required (no
-// Notes step); once that's present, this creates the client silently (call
-// notes carry over into other_notes, which shows up merged into the single
-// "Notes" box the next time this client is opened/edited — see
-// combinedNotes() in clientForm.js) and immediately opens the Intro Call
-// scheduling popup for it — no separate review form.
+// preferences/looking-for step); once that's present, this creates the
+// client silently (call notes carry over into Other notes) and immediately
+// opens the Intro Call scheduling popup for it — no separate review form.
 // ---------------------------------------------------------------------------
 
-// Only checks fields that actually exist on a dial — "Notes" (from the full
-// client form) is intentionally not required here, since a dial has no such
-// field.
+// Only checks fields that actually exist on a dial — "looking_for" (from the
+// full client form) is intentionally not required here, since a dial has no
+// such field.
 function getMissingDialClientFields(dial) {
   const missing = [];
   const labels = [];
@@ -2111,15 +2090,15 @@ async function handleScheduleIntroCallFromDial(dial) {
         city: dial.city || "",
         state: dial.state || "",
         email: dial.email || "",
-        // Mobile number preferred; falls back to the company number if that's
-        // the only one on file.
-        phone: dial.mobile_phone || dial.company_phone || "",
+        // Both numbers transfer over as their own fields now (mobile stays
+        // the one used for instant call/text everywhere else in the app).
+        mobile_phone: dial.mobile_phone || "",
+        company_phone: dial.company_phone || "",
         linkedin: dial.linkedin || "",
         company_name: dial.company_name || "",
         industry: dial.industry || "",
-        // Call notes from the dial transfer straight into other_notes, which
-        // merges into the new client's single "Notes" box (see
-        // combinedNotes() in clientForm.js).
+        // Call notes from the dial transfer straight into the new client's
+        // Other notes field.
         other_notes: dial.call_notes || "",
       });
       data.assigned_to = profile.id;

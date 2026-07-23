@@ -2,15 +2,14 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import {
   escapeHtml,
-  notesLabel,
-  combinedNotes,
+  lookingForLabel,
   defaultClient,
   buildEditableSections,
   wireEditableFormEvents,
   collectFormData,
   getMissingFields,
 } from "./clientForm.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
@@ -92,9 +91,9 @@ loadPersistedClientsState();
 // options, so logging one there is what flips its Progress dot.
 const PROGRESS_STEPS = [
   { type: "intro_call", label: "Intro call" },
-  { type: "nda_financials", label: "NDA + financials" },
-  { type: "client_approval", label: "Client approval" },
   { type: "client_meeting", label: "Client meeting" },
+  { type: "client_approval", label: "Client approval" },
+  { type: "nda_financials", label: "NDA + financials" },
   { type: "loi", label: "LOI" },
   { type: "due_diligence", label: "Due diligence" },
   { type: "close", label: "Close" },
@@ -109,6 +108,12 @@ const EVENT_TYPE_LABELS = {
   ...Object.fromEntries(PROGRESS_STEPS.map((s) => [s.type, s.label])),
 };
 const CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+
+// Right-side-up triangle shown next to a CONFIRMED event's title (see
+// buildTimelineHTML/wireTimelineTab) — toggling it flips it upside down via
+// the .expanded CSS class (rotate 180deg) and reveals the connected report
+// box underneath. Collapsed = pointing up, expanded = pointing down.
+const TRIANGLE_SVG = `<svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M12 5 L20 19 L4 19 Z"/></svg>`;
 
 // Timeline's "+" menu is a 2-level picker: a top-level category, then (for
 // Meeting/Contract advancement) a specific sub-type shown as a dropdown in
@@ -203,11 +208,28 @@ const els = {
   counterpartList: document.getElementById("counterpartList"),
   counterpartConfirmBtn: document.getElementById("counterpartConfirmBtn"),
   counterpartCancelBtn: document.getElementById("counterpartCancelBtn"),
+  confirmDeleteTitle: document.getElementById("confirmDeleteTitle"),
+  eventReportModal: document.getElementById("eventReportModal"),
+  eventReportInput: document.getElementById("eventReportInput"),
+  eventReportConfirmBtn: document.getElementById("eventReportConfirmBtn"),
+  eventReportCancelBtn: document.getElementById("eventReportCancelBtn"),
+  editEventModal: document.getElementById("editEventModal"),
+  editEventDateInput: document.getElementById("editEventDateInput"),
+  editEventTimeInput: document.getElementById("editEventTimeInput"),
+  editEventReportWrap: document.getElementById("editEventReportWrap"),
+  editEventReportInput: document.getElementById("editEventReportInput"),
+  editEventSaveBtn: document.getElementById("editEventSaveBtn"),
+  editEventDeleteBtn: document.getElementById("editEventDeleteBtn"),
+  editEventCancelBtn: document.getElementById("editEventCancelBtn"),
 };
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
-function openConfirmDelete(onConfirm) {
+// `title` defaults to the original "Delete this client?" wording so the
+// existing client-delete call site (handleDelete) doesn't need to change;
+// the Timeline event-delete flow (openEditEventModal) passes its own.
+function openConfirmDelete(onConfirm, title) {
+  els.confirmDeleteTitle.textContent = title || "Delete this client?";
   els.confirmDeleteModal.classList.remove("hidden");
   const yesBtn = document.getElementById("confirmDeleteYesBtn");
   const noBtn = document.getElementById("confirmDeleteNoBtn");
@@ -315,7 +337,7 @@ function renderTable() {
             <div class="mc-name">${escapeHtml(clientDisplayName(c))}</div>
             <div class="mc-sub">${escapeHtml(clientCompanyAndLocation(c))}</div>
           </div>
-          ${contactActionIcons({ phone: c.phone, email: c.email })}
+          ${contactActionIcons({ phone: c.mobile_phone, email: c.email })}
         </div>`
         )
         .join("")}
@@ -527,14 +549,15 @@ function buildClientViewHTML(client) {
     ${categoryDropdownHTML(client)}
     ${rfLocation(client)}
     ${rfContact("Email", client.email, "email")}
-    ${rfContact("Phone number", client.phone, "phone")}
+    ${buildPhoneNumbersHTML(client)}
     ${rfLink("LinkedIn", client.linkedin)}
     ${rf("Intern's name", client.intern_name)}
     ${rf("Industry sector", client.industry)}
     ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
     ${rf("Employees", client.employee_count)}
     ${rf("Founded", founded)}
-    ${rf(notesLabel(), combinedNotes(client))}
+    ${rf(lookingForLabel(client.client_type), client.looking_for)}
+    ${rf("Notes", client.other_notes)}
   `;
 }
 
@@ -698,16 +721,29 @@ function buildTimelineHTML(events) {
 
       // "Client created" is auto-inserted and gets no controls at all — every
       // other event type was added manually via "+". Of those, all get the
-      // delete (x); only today-or-past ones additionally get the
+      // edit (pencil) button — which itself now hosts the Delete option, see
+      // openEditEventModal — and only today-or-past ones additionally get the
       // confirm-happened circle (future events haven't happened yet, so
       // there's nothing to confirm — see isFutureDate above).
       let actionsHTML = "";
+      let triangleHTML = "";
+      let reportBoxHTML = "";
       if (!isCreated) {
-        const deleteBtn = `<button type="button" class="timeline-delete-btn" data-event-id="${e.id}" title="Delete event">&times;</button>`;
+        const editBtn = `<button type="button" class="timeline-edit-btn" data-event-id="${e.id}" title="Edit event">&#9998;</button>`;
         const confirmBtn = future
           ? ""
           : `<button type="button" class="timeline-confirm-btn ${e.confirmed ? "confirmed" : ""}" data-event-id="${e.id}" data-confirmed="${e.confirmed ? "1" : "0"}" title="${e.confirmed ? "Mark as not happened" : "Mark as happened"}">${e.confirmed ? CHECK_SVG : ""}</button>`;
-        actionsHTML = `<div class="timeline-box-actions">${deleteBtn}${confirmBtn}</div>`;
+        actionsHTML = `<div class="timeline-box-actions">${editBtn}${confirmBtn}</div>`;
+
+        // Triangle toggle + connected report box — only exist at all once the
+        // event has been checked off (there's no report to show otherwise).
+        // Both start collapsed/hidden on every fresh render (see
+        // wireTimelineTab, which handles the expand/collapse purely in the
+        // DOM afterward, no re-render needed).
+        if (e.confirmed) {
+          triangleHTML = `<button type="button" class="timeline-triangle-btn" data-event-id="${e.id}" title="Show report">${TRIANGLE_SVG}</button>`;
+          reportBoxHTML = `<div class="timeline-report-box hidden" data-report-for="${e.id}">${escapeHtml(e.details?.report || "(No report written)")}</div>`;
+        }
       }
 
       const beforeDivider = i === lastFutureIndex;
@@ -718,10 +754,11 @@ function buildTimelineHTML(events) {
             <div class="timeline-box">
               <div>
                 <div class="tl-date">${escapeHtml(timelineEventDateStr(e))}</div>
-                <div class="tl-type">${escapeHtml(eventTypeDisplay(e))}</div>
+                <div class="tl-title-row"><span class="tl-type">${escapeHtml(eventTypeDisplay(e))}</span>${triangleHTML}</div>
               </div>
               ${actionsHTML}
             </div>
+            ${reportBoxHTML}
           </div>`;
       return beforeDivider ? itemHTML + `<div class="timeline-future-divider"></div>` : itemHTML;
     })
@@ -778,16 +815,39 @@ function wireTimelineTab() {
     });
   });
 
-  document.querySelectorAll(".timeline-delete-btn[data-event-id]").forEach((btn) => {
+  document.querySelectorAll(".timeline-edit-btn[data-event-id]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      deleteClientEvent(btn.dataset.eventId);
+      openEditEventModal(btn.dataset.eventId);
     });
   });
+  // Confirm circle: unconfirmed -> confirmed always goes through the "write a
+  // report" popup (prefilled with any report saved from a previous
+  // confirm/uncheck cycle, so it can be edited rather than re-typed from
+  // scratch — see openEventReportModal). Confirmed -> unconfirmed is a direct
+  // toggle with no popup; that's what hides the triangle/report box again
+  // (buildTimelineHTML only renders them at all when e.confirmed is true).
   document.querySelectorAll(".timeline-confirm-btn[data-event-id]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      toggleClientEventConfirmed(btn.dataset.eventId, btn.dataset.confirmed !== "1");
+      const eventId = btn.dataset.eventId;
+      if (btn.dataset.confirmed === "1") {
+        toggleClientEventConfirmed(eventId, false);
+      } else {
+        const existing = currentClientEvents.find((ev) => ev.id === eventId);
+        openEventReportModal(existing?.details?.report || "", (reportText) => confirmEventWithReport(eventId, reportText));
+      }
+    });
+  });
+  // Triangle expand/collapse — purely a DOM toggle, no data reload, so the
+  // confirmed report a user is mid-reading isn't disturbed by anything else
+  // happening on the page.
+  document.querySelectorAll(".timeline-triangle-btn[data-event-id]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const box = document.querySelector(`.timeline-report-box[data-report-for="${btn.dataset.eventId}"]`);
+      btn.classList.toggle("expanded");
+      if (box) box.classList.toggle("hidden");
     });
   });
 }
@@ -1012,14 +1072,121 @@ async function deleteClientEvent(eventId) {
 
 // Toggles the "confirm this happened" circle — only ever called for
 // today-or-past events (future ones never render the control at all, see
-// buildTimelineHTML). Purely a manual confirmation flag; doesn't affect the
-// Progress tab's checkmarks, which are still based on the event simply
-// existing, regardless of date or confirmed status.
+// buildTimelineHTML). This is what the Progress tab's checkmarks are
+// actually keyed off of (see buildProgressHTML's doneTypes) — merely logging
+// an event via Timeline's "+" menu is NOT enough on its own to check a
+// Progress dot; it also has to be confirmed here first. Used directly for
+// un-confirming (no popup needed); confirming FOR THE FIRST TIME goes through
+// confirmEventWithReport instead, since that also needs to save the report
+// text written in openEventReportModal.
 async function toggleClientEventConfirmed(eventId, newValue) {
   const { error } = await supabase.from("client_events").update({ confirmed: newValue }).eq("id", eventId);
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   renderModalBody();
+}
+
+// ---------------------------------------------------------------------------
+// "Write a report" popup — shown when the confirm circle is pressed on an
+// unconfirmed event (see wireTimelineTab). `existingReport` prefills it with
+// whatever was last saved, so re-confirming after an uncheck lets you edit
+// the old report rather than starting over.
+// ---------------------------------------------------------------------------
+function openEventReportModal(existingReport, onConfirm) {
+  const modal = els.eventReportModal;
+  const input = els.eventReportInput;
+  const confirmBtn = els.eventReportConfirmBtn;
+  const cancelBtn = els.eventReportCancelBtn;
+
+  input.value = existingReport || "";
+  modal.classList.remove("hidden");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    confirmBtn.removeEventListener("click", onConfirmClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onConfirmClick = () => {
+    const text = input.value.trim();
+    cleanup();
+    onConfirm(text);
+  };
+  const onCancelClick = () => cleanup();
+  confirmBtn.addEventListener("click", onConfirmClick);
+  cancelBtn.addEventListener("click", onCancelClick);
+}
+
+// Marks an event confirmed AND saves its report text in one update — the
+// report lives in the existing `details` jsonb column (details.report) right
+// alongside details.time/etc, so the other keys already on the event are
+// preserved rather than clobbered by a full-column replace.
+async function confirmEventWithReport(eventId, reportText) {
+  const existing = currentClientEvents.find((e) => e.id === eventId);
+  const details = { ...(existing?.details || {}), report: reportText };
+  const { error } = await supabase.from("client_events").update({ confirmed: true, details }).eq("id", eventId);
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  await loadClientEvents();
+  renderModalBody();
+}
+
+// ---------------------------------------------------------------------------
+// Edit-event popup — replaces the old standalone delete ("x") button. Always
+// lets you change the date/time; the report field only appears if the event
+// is currently confirmed (nothing to edit otherwise — see the "but only edit
+// the report if you've checked the event" requirement). Also hosts Delete.
+// ---------------------------------------------------------------------------
+function openEditEventModal(eventId) {
+  const e = currentClientEvents.find((ev) => ev.id === eventId);
+  if (!e) return;
+
+  const modal = els.editEventModal;
+  const dateInput = els.editEventDateInput;
+  const timeSelect = els.editEventTimeInput;
+  const reportWrap = els.editEventReportWrap;
+  const reportInput = els.editEventReportInput;
+  const saveBtn = els.editEventSaveBtn;
+  const deleteBtn = els.editEventDeleteBtn;
+  const cancelBtn = els.editEventCancelBtn;
+
+  const d = new Date(e.event_date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  dateInput.value = d.toISOString().slice(0, 10);
+  timeSelect.innerHTML = timeOptionsHTML();
+  timeSelect.value = e.details?.time || "";
+
+  reportWrap.classList.toggle("hidden", !e.confirmed);
+  reportInput.value = e.details?.report || "";
+
+  modal.classList.remove("hidden");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    saveBtn.removeEventListener("click", onSaveClick);
+    deleteBtn.removeEventListener("click", onDeleteClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onSaveClick = async () => {
+    const val = dateInput.value;
+    if (!val) return;
+    cleanup();
+    // Same noon-UTC-relative anchoring as openEventDetailsModal, so this can
+    // never accidentally roll the date back a day in a timezone behind UTC.
+    const eventDate = new Date(`${val}T12:00:00`).toISOString();
+    const details = { ...(e.details || {}), time: timeSelect.value || null };
+    if (e.confirmed) details.report = reportInput.value.trim();
+    const { error } = await supabase.from("client_events").update({ event_date: eventDate, details }).eq("id", eventId);
+    if (error) return showError(document.getElementById("clientModalError"), error);
+    await loadClientEvents();
+    renderModalBody();
+  };
+  const onDeleteClick = () => {
+    cleanup();
+    openConfirmDelete(() => deleteClientEvent(eventId), "Delete this event?");
+  };
+  const onCancelClick = () => cleanup();
+  saveBtn.addEventListener("click", onSaveClick);
+  deleteBtn.addEventListener("click", onDeleteClick);
+  cancelBtn.addEventListener("click", onCancelClick);
 }
 
 // Same shared "Schedule Intro Call" form the Dials page uses (js/introCall.js)
@@ -1114,7 +1281,7 @@ function renderModalBody() {
     els.clientModalSubtitle.classList.add("hidden");
     els.clientModalBody.innerHTML = `
       <div id="clientModalError" class="error-msg hidden"></div>
-      ${buildEditableSections(defaultClient(profile))}
+      ${buildEditableSections(defaultClient(profile, { client_type: getDealSide() }))}
       <div class="form-actions">
         <button type="button" class="btn" id="saveClientBtn">Save</button>
         <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
