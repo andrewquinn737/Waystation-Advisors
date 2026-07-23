@@ -594,6 +594,12 @@ html.is-desktop-device .contact-action-tel { display: none; }
    (and the popup's own padding) instead of just letting it render at its
    natural size within the wider box. */
 #eventDateModal .modal { max-width: 320px; overflow-x: visible; }
+/* The native date-input control's real rendered width can still run a few
+   pixels past a plain width:100% on some browsers even inside the wider
+   320px modal above (see comment on that rule) — trimming it back to 92%
+   keeps its right edge safely inside the popup's padding instead of poking
+   past it. */
+#eventDateModal #eventDateInput { width: 92%; }
 
 /* ---- Client "Categories" pipeline-status dropdown (Profile tab) ----
    Reuses the dial popup's .dial-status-* classes (see js/dials.js) directly
