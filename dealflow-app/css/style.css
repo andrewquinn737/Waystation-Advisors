@@ -585,8 +585,15 @@ html.is-desktop-device .contact-action-tel { display: none; }
 
 /* Small "pick the date this happened" step shown before an event actually
    gets logged (see openEventDateModal in js/clients.js) — reuses the regular
-   .modal-backdrop/.modal shell, just narrower. */
-#eventDateModal .modal { max-width: 280px; }
+   .modal-backdrop/.modal shell, just narrower. A little wider than before
+   (280 -> 320px) with overflow-x switched to visible instead of the base
+   .modal's hidden — on some mobile browsers the native <input type="date">
+   control's real rendered width doesn't perfectly respect width:100% (a
+   known quirk, see the min-width:0 comment on the global input rule above),
+   and overflow-x:hidden was silently clipping the right edge of that input
+   (and the popup's own padding) instead of just letting it render at its
+   natural size within the wider box. */
+#eventDateModal .modal { max-width: 320px; overflow-x: visible; }
 
 /* ---- Client "Categories" pipeline-status dropdown (Profile tab) ----
    Reuses the dial popup's .dial-status-* classes (see js/dials.js) directly
@@ -599,7 +606,12 @@ html.is-desktop-device .contact-action-tel { display: none; }
 
 /* ---- Client Progress tab: vertical stepper of 7 fixed milestones ---- */
 .progress-stepper { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 6px 0 6px 34px; }
-.progress-stepper-line { position: absolute; left: 15px; top: 10px; bottom: 10px; width: 2px; background: var(--border); }
+/* Short connectors drawn only BETWEEN adjacent dots (never above the first
+   or below the last) — replaces the old single rail that ran the full
+   height of the stepper regardless of how many dots existed. Positioned via
+   JS (see positionProgressConnectors in js/clients.js), which measures each
+   dot's real rendered position rather than relying on flexbox math here. */
+.progress-connector { position: absolute; width: 2px; background: var(--border); transform: translateX(-50%); }
 .progress-step { position: relative; display: flex; align-items: center; gap: 14px; }
 .progress-step-dot {
   position: absolute; left: -34px; width: 18px; height: 18px; border-radius: 50%;
@@ -1010,6 +1022,13 @@ html.is-mobile-device .mobile-list { display: block; }
      visible (and unwanted) during the hold-and-drag gesture used to move a
      member between team boxes (see wireMemberDrag in js/profile.js). */
   -webkit-tap-highlight-color: transparent;
+  /* On top of the tap-highlight fix above, a long-press on mobile can also
+     trigger the browser's native text-selection UI (blue selection highlight
+     + selection handles) on the card's text — same class of issue as the
+     dial tab long-press-drag on the Dials page (see .dial-tab), fixed the
+     same way here. */
+  user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; -webkit-user-drag: none;
 }
 @media (hover: hover) { .team-member-card:hover { background: var(--bg); } }
 .team-member-card .contact-actions { flex-shrink: 0; }
