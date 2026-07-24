@@ -15,9 +15,9 @@ const internEmail = user?.email || "";
 const isAdmin = profile?.role === "admin";
 // Team leads get the settings gear (Sellers/Buyers + Accounts visible) like
 // admins do, but Accounts visible only ever lists their own teammates (see
-// getAllAccounts near the bottom of this file). CSV import and Transfer stay
-// admin-only (isAdmin alone gates those) — a team lead is otherwise treated
-// like an intern.
+// getAllAccounts near the bottom of this file). CSV import is also available
+// to team leads; Transfer stays admin-only (isAdmin alone gates it) — a team
+// lead is otherwise treated like an intern.
 const isTeamLead = profile?.role === "team_lead";
 // First-ever use of the shared Accounts visible setting defaults to "just
 // me" instead of "Select all" — a no-op every subsequent load (see
@@ -217,9 +217,10 @@ const els = {
   massContactWarningCancelBtn: document.getElementById("massContactWarningCancelBtn"),
 };
 
-// CSV import and Transfer stay strictly admin-only — team leads don't get
-// either (see isTeamLead comment above).
-if (isAdmin) els.menuImportBtn.classList.remove("hidden");
+// Transfer stays strictly admin-only. CSV import is now also available to
+// team leads (see isTeamLead comment above) — only Transfer remains gated to
+// isAdmin alone.
+if (isAdmin || isTeamLead) els.menuImportBtn.classList.remove("hidden");
 if (isAdmin) els.dialTabTransferBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
 
@@ -311,7 +312,7 @@ function emptyDial() {
 }
 
 // ---------------------------------------------------------------------------
-// CSV import (admin-only, "Import" menu item — see els.menuImportBtn below).
+// CSV import (admin/team-lead, "Import" menu item — see els.menuImportBtn below).
 // Parses the file entirely client-side (no server round-trip needed for
 // something this small), matches column headers to dial fields by name, and
 // bulk-inserts one dials row per data row into a brand-new tab named after
@@ -1250,8 +1251,9 @@ els.menuAddNewBtn.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Import dials from CSV (admin-only — els.menuImportBtn is only unhidden for
-// admins, see the `if (isAdmin)` line near the top of this file).
+// Import dials from CSV (admin/team-lead — els.menuImportBtn is only
+// unhidden for those roles, see the `if (isAdmin || isTeamLead)` line near
+// the top of this file).
 // ---------------------------------------------------------------------------
 let selectedImportFile = null;
 
@@ -1646,25 +1648,33 @@ function renderDialsTable() {
 // Dial detail / create popup
 // ---------------------------------------------------------------------------
 
+// Company name / Industry sector / Website are seller-only fields on a dial
+// (currentType — the active Sellers/Buyers toggle, see js/dealSide.js) — for
+// buyer dials, hiding these boxes entirely (view, edit form, and validation
+// below) means a client created from a buyer dial never picks up stray
+// company data that doesn't apply to buyers (see clientForm.js's buyer
+// branch, which has no company fields at all).
 function buildDialViewHTML(dial) {
+  const isBuyer = currentType === "buyer";
   return `
     ${rfContact("Email", dial.email, "email")}
     ${buildPhoneNumbersHTML(dial)}
     ${rfWebsite("LinkedIn", dial.linkedin)}
-    ${rfWebsite("Website", dial.website)}
-    ${rf("Industry sector", dial.industry)}
+    ${isBuyer ? "" : rfWebsite("Website", dial.website)}
+    ${isBuyer ? "" : rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
     ${buildCallNotesLiveHTML(dial)}
   `;
 }
 
 function buildDialEditHTML(dial) {
+  const isBuyer = currentType === "buyer";
   return `
     <div class="form-row">
       <div><label for="d_first_name">First name</label><input id="d_first_name" value="${escapeHtml(dial.first_name)}" /></div>
       <div><label for="d_last_name">Last name</label><input id="d_last_name" value="${escapeHtml(dial.last_name)}" /></div>
     </div>
-    <label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />
+    ${isBuyer ? "" : `<label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />`}
     <div class="form-row">
       <div><label for="d_city">City</label><input id="d_city" value="${escapeHtml(dial.city)}" /></div>
       <div>
@@ -1683,9 +1693,8 @@ function buildDialEditHTML(dial) {
     </div>
     <label for="d_linkedin">LinkedIn</label>
     <input id="d_linkedin" value="${escapeHtml(dial.linkedin)}" />
-    <label for="d_website">Website</label><input id="d_website" value="${escapeHtml(dial.website)}" />
-    <label for="d_industry">Industry sector</label>
-    <input id="d_industry" value="${escapeHtml(dial.industry)}" />
+    ${isBuyer ? "" : `<label for="d_website">Website</label><input id="d_website" value="${escapeHtml(dial.website)}" />`}
+    ${isBuyer ? "" : `<label for="d_industry">Industry sector</label><input id="d_industry" value="${escapeHtml(dial.industry)}" />`}
     <label for="d_summary">Summary</label>
     <textarea id="d_summary">${escapeHtml(dial.summary || "")}</textarea>
   `;
@@ -1696,6 +1705,7 @@ function collectDialFormData() {
   // directly in display mode (autosaves on blur, see wireCallNotesAutosave)
   // and is not part of the edit form, so leaving it out of this object means
   // saving other fields never touches/overwrites it.
+  const isBuyer = currentType === "buyer";
   const data = {
     first_name: document.getElementById("d_first_name").value.trim() || null,
     last_name: document.getElementById("d_last_name").value.trim() || null,
@@ -1705,10 +1715,13 @@ function collectDialFormData() {
     mobile_phone: document.getElementById("d_mobile_phone").value.trim() || null,
     company_phone: document.getElementById("d_company_phone").value.trim() || null,
     linkedin: document.getElementById("d_linkedin").value.trim() || null,
-    industry: document.getElementById("d_industry").value.trim() || null,
     summary: document.getElementById("d_summary").value.trim() || null,
-    company_name: document.getElementById("d_company_name").value.trim() || null,
-    website: document.getElementById("d_website").value.trim() || null,
+    // Company name / Industry / Website boxes don't exist in the edit form
+    // at all for buyer dials (see buildDialEditHTML) — explicitly null them
+    // out rather than reading nonexistent DOM elements.
+    industry: isBuyer ? null : document.getElementById("d_industry").value.trim() || null,
+    company_name: isBuyer ? null : document.getElementById("d_company_name").value.trim() || null,
+    website: isBuyer ? null : document.getElementById("d_website").value.trim() || null,
   };
   return data;
 }
@@ -2106,17 +2119,20 @@ els.dialModalBackdrop.addEventListener("touchend", (e) => {
 
 // Only checks fields that actually exist on a dial — "looking_for" (from the
 // full client form) is intentionally not required here, since a dial has no
-// such field.
+// such field. Company name / Industry sector are seller-only boxes (see
+// buildDialEditHTML) — never required for a buyer dial, since they're never
+// even shown/collected for one.
 function getMissingDialClientFields(dial) {
   const missing = [];
   const labels = [];
+  const isBuyer = currentType === "buyer";
 
   let nameMissing = false;
   if (!dial.first_name) { missing.push("first_name"); nameMissing = true; }
   if (!dial.last_name) { missing.push("last_name"); nameMissing = true; }
   if (nameMissing) labels.push("Name");
 
-  if (!dial.company_name) { missing.push("company_name"); labels.push("Company name"); }
+  if (!isBuyer && !dial.company_name) { missing.push("company_name"); labels.push("Company name"); }
 
   if (!dial.email && !dial.mobile_phone && !dial.company_phone) {
     missing.push("contact");
@@ -2128,7 +2144,7 @@ function getMissingDialClientFields(dial) {
   if (!dial.state) { missing.push("state"); locMissing = true; }
   if (locMissing) labels.push("Location");
 
-  if (!dial.industry) { missing.push("industry"); labels.push("Industry sector"); }
+  if (!isBuyer && !dial.industry) { missing.push("industry"); labels.push("Industry sector"); }
 
   return { missing, labels };
 }
@@ -2153,7 +2169,16 @@ async function handleScheduleIntroCallFromDial(dial) {
     internEmail,
     userId: profile.id,
     createClient: async () => {
+      // client_type must match whichever side (Sellers/Buyers toggle) this
+      // dial actually belongs to — defaultClient()'s own default is
+      // "seller", which used to apply even from a buyer dial since nothing
+      // here ever overrode it. Company name / Industry never transfer for a
+      // buyer dial since they're never collected on one in the first place
+      // (see buildDialEditHTML/getMissingDialClientFields above) — clean,
+      // since clientForm.js's buyer branch has no company fields at all.
+      const isBuyer = currentType === "buyer";
       const data = defaultClient(profile, {
+        client_type: currentType,
         first_name: dial.first_name || "",
         last_name: dial.last_name || "",
         city: dial.city || "",
@@ -2164,8 +2189,7 @@ async function handleScheduleIntroCallFromDial(dial) {
         mobile_phone: dial.mobile_phone || "",
         company_phone: dial.company_phone || "",
         linkedin: dial.linkedin || "",
-        company_name: dial.company_name || "",
-        industry: dial.industry || "",
+        ...(isBuyer ? {} : { company_name: dial.company_name || "", industry: dial.industry || "" }),
         // Call notes from the dial transfer straight into the new client's
         // Other notes field.
         other_notes: dial.call_notes || "",
@@ -2266,20 +2290,4 @@ if (isAdmin || isTeamLead) {
       // session could never fetch a teammate's tabs/dials in the first
       // place, filter or no filter.
       if (isAdmin) {
-        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
-        return error ? [] : data || [];
-      }
-      if (!profile.team_id) return [];
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .eq("team_id", profile.team_id)
-        .order("full_name", { ascending: true });
-      return error ? [] : data || [];
-    },
-    onChange: renderTabs,
-    escapeHtml,
-  });
-}
-
-await loadLists();
+        const { data, error } = await supabase.from("profiles").select("id, full_name").o

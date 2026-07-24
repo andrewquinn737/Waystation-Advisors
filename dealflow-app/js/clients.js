@@ -55,6 +55,7 @@ function clientStatusInfo(value) {
 // instead of reading `s.label`/`info.label` directly.
 function statusLabel(s) {
   if (s.value === "connected_to_buyer" && getDealSide() === "buyer") return "In cahoots";
+  if (s.value === "sold" && getDealSide() === "buyer") return "Bought company";
   return s.label;
 }
 
@@ -106,36 +107,78 @@ function persistSelectedProgressStages() {
 }
 loadPersistedClientsState();
 
-// The 7 fixed Progress-tab milestones — checked off (green check) once a
-// client_events row with the matching event_type exists (see
-// buildProgressHTML). Timeline's "+" add-menu offers exactly these same 7
-// options, so logging one there is what flips its Progress dot.
-const PROGRESS_STEPS = [
+// Sellers and buyers now run separate Progress-tab milestone lists (Round
+// G) — checked off (green check) once a client_events row with the matching
+// event_type exists (see buildProgressHTML). Timeline's "+" add-menu offers
+// exactly these same options split across Meeting/Contract advancement (see
+// meetingSubtypesFor/contractSubtypesFor below), so logging one there is
+// what flips its Progress dot.
+//
+// Seller order: Intro call, Client approval, Client meeting, NDA +
+// financials, LOI, Due diligence, Close.
+const SELLER_PROGRESS_STEPS = [
   { type: "intro_call", label: "Intro call" },
-  { type: "client_meeting", label: "Client meeting" },
   { type: "client_approval", label: "Client approval" },
+  { type: "client_meeting", label: "Client meeting" },
   { type: "nda_financials", label: "NDA + financials" },
   { type: "loi", label: "LOI" },
   { type: "due_diligence", label: "Due diligence" },
   { type: "close", label: "Close" },
 ];
+// Buyer order: a longer, 9-step process — Intro call, Negotiations, Contract
+// signed, Client approval, Client meeting, LOI, Secured financing, Due
+// diligence, Close.
+const BUYER_PROGRESS_STEPS = [
+  { type: "intro_call", label: "Intro call" },
+  { type: "negotiations", label: "Negotiations" },
+  { type: "contract_signed", label: "Contract signed" },
+  { type: "client_approval", label: "Client approval" },
+  { type: "client_meeting", label: "Client meeting" },
+  { type: "loi", label: "LOI" },
+  { type: "secured_financing", label: "Secured financing" },
+  { type: "due_diligence", label: "Due diligence" },
+  { type: "close", label: "Close" },
+];
+function progressStepsFor(clientType) {
+  return clientType === "buyer" ? BUYER_PROGRESS_STEPS : SELLER_PROGRESS_STEPS;
+}
+
+// client_approval, client_meeting, loi, due_diligence, and close are the 5
+// milestone names common to BOTH sides' lists above — these are the ones
+// that represent a single real-world event shared between a specific buyer
+// and a specific seller (a meeting they both attended, an LOI covering both
+// of them, etc.), so logging one requires picking the other party (see
+// openCounterpartPicker/logSharedClientEvent) and mirrors onto both clients'
+// Timelines/Progress at once. Every other milestone (Intro call, NDA +
+// financials, Negotiations, Contract signed, Secured financing) only ever
+// happens on one side and is logged normally, no counterpart involved.
+const SHARED_EVENT_TYPES = new Set(["client_approval", "client_meeting", "loi", "due_diligence", "close"]);
+
 // "general_meeting" and "task" are Timeline-only — they're logged the same
-// way as the 7 PROGRESS_STEPS types, but deliberately excluded from that list
-// so they never affect the Progress tab's checkmarks.
+// way as the PROGRESS_STEPS types, but deliberately excluded from either
+// list above so they never affect the Progress tab's checkmarks. A given
+// event_type string (e.g. "client_approval") always means the same thing on
+// both sides, so one combined label map covers every type from either list.
+const ALL_PROGRESS_STEPS = [...SELLER_PROGRESS_STEPS, ...BUYER_PROGRESS_STEPS].filter(
+  (s, i, arr) => arr.findIndex((s2) => s2.type === s.type) === i
+);
 const EVENT_TYPE_LABELS = {
   created: "Client created",
   general_meeting: "Meeting",
   task: "Task",
-  ...Object.fromEntries(PROGRESS_STEPS.map((s) => [s.type, s.label])),
+  ...Object.fromEntries(ALL_PROGRESS_STEPS.map((s) => [s.type, s.label])),
 };
 
-// The "Progress" filter's 8 options — "No meetings yet" plus the same 7
-// PROGRESS_STEPS milestones shown on the Progress tab. A client's filtering
-// "stage" is whichever of these is its FURTHEST confirmed milestone (the
-// highest-index PROGRESS_STEPS entry with a confirmed client_events row, or
-// "no_meetings" if it has none at all) — see loadClientProgressStages() /
-// clientProgressStage() and renderProgressSubmenu() further down.
-const PROGRESS_STAGES = [{ value: "no_meetings", label: "No meetings yet" }, ...PROGRESS_STEPS.map((s) => ({ value: s.type, label: s.label }))];
+// The "Progress" filter's options — "No meetings yet" plus whichever side's
+// milestone list is currently showing (see getDealSide()/progressStepsFor).
+// A client's filtering "stage" is whichever of these is its FURTHEST
+// confirmed milestone (the highest-index entry in ITS OWN side's list with a
+// confirmed client_events row, or "no_meetings" if it has none at all) — see
+// loadClientProgressStages() / clientProgressStage() and
+// renderProgressSubmenu() further down.
+function progressStagesFor(clientType) {
+  return [{ value: "no_meetings", label: "No meetings yet" }, ...progressStepsFor(clientType).map((s) => ({ value: s.type, label: s.label }))];
+}
 const CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
 
 // Right-side-up triangle shown next to a CONFIRMED event's title (see
@@ -146,22 +189,39 @@ const TRIANGLE_SVG = `<svg viewBox="0 0 24 24" width="10" height="10" fill="curr
 
 // Timeline's "+" menu is a 2-level picker: a top-level category, then (for
 // Meeting/Contract advancement) a specific sub-type shown as a dropdown in
-// the same date/time details popup — see openEventDetailsModal. Contract
-// advancement's sub-types are 5 of the 7 PROGRESS_STEPS (everything except
-// Intro call and Client meeting, which live under Meeting instead — Intro
-// call keeps the existing Calendly hand-off, Client meeting additionally
-// requires picking a counterpart client, see openCounterpartPicker).
+// the same date/time details popup — see openEventDetailsModal. Which
+// sub-types show up under each category now depends on the client's own
+// side (see meetingSubtypesFor/contractSubtypesFor) — Intro call always
+// keeps the existing Calendly hand-off, and any SHARED_EVENT_TYPES sub-type
+// additionally requires picking a counterpart client first (see
+// openCounterpartPicker).
 const TIMELINE_CATEGORIES = [
   { value: "meeting", label: "Meeting" },
   { value: "contract_advancement", label: "Contract advancement" },
   { value: "task", label: "Task" },
 ];
-const MEETING_SUBTYPES = [
+const SELLER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
   { value: "intro_call", label: "Intro call" },
   { value: "client_meeting", label: "Client meeting" },
 ];
-const CONTRACT_SUBTYPES = PROGRESS_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "client_meeting");
+const SELLER_CONTRACT_SUBTYPES = SELLER_PROGRESS_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "client_meeting");
+const BUYER_MEETING_SUBTYPES = [
+  { value: "general_meeting", label: "General" },
+  { value: "intro_call", label: "Intro call" },
+  { value: "negotiations", label: "Negotiations" },
+  { value: "client_approval", label: "Client approval" },
+  { value: "client_meeting", label: "Client meeting" },
+];
+const BUYER_CONTRACT_SUBTYPES = BUYER_PROGRESS_STEPS.filter((s) =>
+  ["contract_signed", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
+);
+function meetingSubtypesFor(clientType) {
+  return clientType === "buyer" ? BUYER_MEETING_SUBTYPES : SELLER_MEETING_SUBTYPES;
+}
+function contractSubtypesFor(clientType) {
+  return clientType === "buyer" ? BUYER_CONTRACT_SUBTYPES : SELLER_CONTRACT_SUBTYPES;
+}
 
 // Every half hour, midnight to 11:30pm — the "choose a time (optional)"
 // dropdown shared by every Timeline "+" category (see openEventDetailsModal).
@@ -313,27 +373,30 @@ async function loadClients() {
   renderTable();
 }
 
-// client_id -> furthest confirmed PROGRESS_STEPS milestone (see
-// PROGRESS_STAGES above), used solely by the "Progress" filter. Recomputed
-// whenever the client list itself reloads, plus after any action that can
-// change a client_events row's confirmed state (see toggleClientEventConfirmed,
+// client_id -> furthest confirmed progress milestone (see progressStagesFor
+// above), used solely by the "Progress" filter. Recomputed whenever the
+// client list itself reloads, plus after any action that can change a
+// client_events row's confirmed state (see toggleClientEventConfirmed,
 // confirmEventWithReport, deleteClientEvent below) so the filter doesn't go
 // stale while you're viewing someone's Timeline. RLS already scopes which
 // rows come back (own account, or admin/team-lead viewing a teammate's —
 // same as client_events_select_own), so no extra client_id filtering is
-// needed here.
+// needed here. Each client's furthest-stage index is computed against ITS
+// OWN side's step list (seller vs buyer), since the two lists differ.
 let clientProgressStages = new Map();
 async function loadClientProgressStages() {
-  const stepIndex = Object.fromEntries(PROGRESS_STEPS.map((s, i) => [s.type, i]));
+  const clientTypeById = new Map(clients.map((c) => [c.id, c.client_type]));
   const { data, error } = await supabase
     .from("client_events")
     .select("client_id, event_type")
     .eq("confirmed", true)
-    .in("event_type", PROGRESS_STEPS.map((s) => s.type));
+    .in("event_type", ALL_PROGRESS_STEPS.map((s) => s.type));
   if (error) return; // best-effort — Progress filter just won't narrow anything down
   const next = new Map();
   (data || []).forEach((row) => {
+    const stepIndex = Object.fromEntries(progressStepsFor(clientTypeById.get(row.client_id)).map((s, i) => [s.type, i]));
     const idx = stepIndex[row.event_type];
+    if (idx === undefined) return; // not one of this client's own side's milestones
     const currentType = next.get(row.client_id);
     const currentIdx = currentType !== undefined ? stepIndex[currentType] : -1;
     if (idx > currentIdx) next.set(row.client_id, row.event_type);
@@ -472,16 +535,17 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
 // menuProgressBtn in clients.html). Same fixed-position escape-the-clip
 // pattern as Categories just above, but ADDITIVE rather than subtractive:
 // with nothing selected every client shows (no filter active, same as
-// Categories' all-visible default); selecting one or more of the 8
-// PROGRESS_STAGES narrows the list down to clients whose furthest confirmed
-// milestone (loadClientProgressStages/clientProgressStage above) matches one
-// of the selections. Reuses .category-rect-option's rectangle-row styling,
-// with an ".is-selected" checkbox look instead of Categories' ".is-hidden"
-// dimming (see css/style.css).
+// Categories' all-visible default); selecting one or more of the options
+// (see progressStagesFor — differs by seller/buyer, re-rendered whenever the
+// deal-side toggle flips) narrows the list down to clients whose furthest
+// confirmed milestone (loadClientProgressStages/clientProgressStage above)
+// matches one of the selections. Reuses .category-rect-option's
+// rectangle-row styling, with an ".is-selected" checkbox look instead of
+// Categories' ".is-hidden" dimming (see css/style.css).
 // ---------------------------------------------------------------------------
 
 function renderProgressSubmenu() {
-  els.progressSubmenu.innerHTML = PROGRESS_STAGES.map(
+  els.progressSubmenu.innerHTML = progressStagesFor(getDealSide()).map(
     (p) => `
       <button type="button" class="category-rect-option ${selectedProgressStages.has(p.value) ? "is-selected" : ""}" data-value="${p.value}">
         <span class="category-rect-swatch progress-check-swatch">${selectedProgressStages.has(p.value) ? CHECK_SVG : ""}</span>${escapeHtml(p.label)}
@@ -663,7 +727,21 @@ async function updateClientStatus(newStatus) {
 // header (see renderModalBody) — company name lives in the header subtitle,
 // but location has moved down here (above Email) instead of being in that
 // subtitle too.
+// "$min - $max" (falling back to just whichever side is actually set, or ""
+// if neither is) — the read-only display counterpart to the buyer Notes
+// tab's Price range desired min/max inputs (see buildEditableSections in
+// js/clientForm.js).
+function priceRangeDisplay(client) {
+  const hasMin = client.money_to_spend_min != null;
+  const hasMax = client.money_to_spend_max != null;
+  if (!hasMin && !hasMax) return "";
+  const fmt = (v) => `$${Number(v).toLocaleString()}`;
+  if (hasMin && hasMax) return `${fmt(client.money_to_spend_min)} - ${fmt(client.money_to_spend_max)}`;
+  return fmt(hasMin ? client.money_to_spend_min : client.money_to_spend_max);
+}
+
 function buildClientViewHTML(client) {
+  const isBuyer = client.client_type === "buyer";
   // founded_month can now be blank while founded_year is set (see
   // clientForm.js's separate month/year selects) — filter(Boolean) avoids a
   // stray leading space in that case instead of assuming both are present.
@@ -675,17 +753,19 @@ function buildClientViewHTML(client) {
     ${buildPhoneNumbersHTML(client)}
     ${rfLink("LinkedIn", client.linkedin)}
     ${rf("Intern's name", client.intern_name)}
-    ${rf("Industry sector", client.industry)}
-    ${rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
-    ${rf("Employees", client.employee_count)}
-    ${rf("Founded", founded)}
+    ${isBuyer ? "" : rf("Industry sector", client.industry)}
+    ${isBuyer ? "" : rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
+    ${isBuyer ? "" : rf("Employees", client.employee_count)}
+    ${isBuyer ? "" : rf("Founded", founded)}
+    ${isBuyer ? rf("Price range desired", priceRangeDisplay(client)) : ""}
     ${rf(lookingForLabel(client.client_type), client.looking_for)}
     ${rf("Notes", client.other_notes)}
   `;
 }
 
 // ---------------------------------------------------------------------------
-// Progress tab — vertical stepper of the 7 fixed milestones (PROGRESS_STEPS),
+// Progress tab — vertical stepper of the client's own side's milestones (see
+// progressStepsFor — sellers and buyers now have different lists/orders),
 // each checked off green only once a client_events row with the matching
 // event_type has actually been confirmed (checked off) on the Timeline tab —
 // see the timeline-confirm-btn / toggleClientEventConfirmed. Merely logging
@@ -694,9 +774,10 @@ function buildClientViewHTML(client) {
 // ---------------------------------------------------------------------------
 function buildProgressHTML(events) {
   const doneTypes = new Set(events.filter((e) => e.confirmed).map((e) => e.event_type));
+  const steps = progressStepsFor(currentClient?.client_type);
 
   // "Buyers/Sellers met with" — the counterpart names from every CONFIRMED,
-  // not-in-the-future Client meeting (see logClientMeeting/openCounterpartPicker
+  // not-in-the-future Client meeting (see logSharedClientEvent/openCounterpartPicker
   // in the Timeline section above), filling the empty space below the
   // stepper. A seller's clients met with buyers, so its label/list names
   // buyers, and vice versa — each name deep-links straight into that
@@ -718,7 +799,7 @@ function buildProgressHTML(events) {
 
   return `
     <div class="progress-stepper" id="progressStepper">
-      ${PROGRESS_STEPS.map((s) => {
+      ${steps.map((s) => {
         const done = doneTypes.has(s.type);
         return `
           <div class="progress-step ${done ? "done" : ""}">
@@ -796,7 +877,7 @@ function timelineEventDateStr(e) {
 
 // What shows on the Timeline row's 2nd line — normally just the type label,
 // but a Client meeting names its counterpart (see openCounterpartPicker /
-// logClientMeeting) and a Task shows its own description instead of the
+// logSharedClientEvent) and a Task shows its own description instead of the
 // generic "Task" label.
 function eventTypeDisplay(e) {
   if (e.event_type === "client_meeting" && e.details?.counterpart_name) {
@@ -977,27 +1058,26 @@ function wireTimelineTab() {
 
 // ---------------------------------------------------------------------------
 // Timeline "+" flow — after picking a top-level category (Meeting/Contract
-// advancement/Task) this shows the date/time/sub-type details popup, then
-// branches by category+sub-type: Intro call keeps the existing Calendly
-// hand-off; Client meeting additionally requires picking a counterpart
-// client before it's logged (on BOTH sides — see logClientMeeting); every
-// other combination just logs the one client_events row directly.
+// advancement/Task) this shows the date/time/sub-type details popup (options
+// depend on the client's own side — see meetingSubtypesFor/contractSubtypesFor),
+// then branches by sub-type: Intro call keeps the existing Calendly hand-off;
+// any SHARED_EVENT_TYPES sub-type (client_approval, client_meeting, loi,
+// due_diligence, close — same 5 names on both sides' lists) additionally
+// requires picking a counterpart client before it's logged (on BOTH sides —
+// see logSharedClientEvent); every other combination just logs the one
+// client_events row directly.
 // ---------------------------------------------------------------------------
 function openTimelineAddFlow(category) {
-  openEventDetailsModal(category, ({ eventDate, time, subtype, taskDescription }) => {
+  openEventDetailsModal(category, currentClient.client_type, ({ eventDate, time, subtype, taskDescription }) => {
     const details = time ? { time } : null;
-    if (category === "meeting") {
-      if (subtype === "intro_call") {
-        openTimelineIntroCall(eventDate, time);
-      } else if (subtype === "client_meeting") {
-        openCounterpartPicker((counterpart) => logClientMeeting(eventDate, time, counterpart));
-      } else {
-        logClientEvent("general_meeting", eventDate, details);
-      }
-    } else if (category === "contract_advancement") {
-      logClientEvent(subtype, eventDate, details);
-    } else if (category === "task") {
+    if (category === "task") {
       logClientEvent("task", eventDate, { ...(details || {}), task_description: taskDescription });
+    } else if (subtype === "intro_call") {
+      openTimelineIntroCall(eventDate, time);
+    } else if (SHARED_EVENT_TYPES.has(subtype)) {
+      openCounterpartPicker((counterpart) => logSharedClientEvent(subtype, eventDate, time, counterpart));
+    } else {
+      logClientEvent(subtype, eventDate, details);
     }
   });
 }
@@ -1009,7 +1089,7 @@ function openTimelineAddFlow(category) {
 // description field. Same show/confirm/cancel/cleanup shape as
 // openConfirmModal-style helpers elsewhere in the app.
 // ---------------------------------------------------------------------------
-function openEventDetailsModal(category, onConfirm) {
+function openEventDetailsModal(category, clientType, onConfirm) {
   const modal = els.eventDateModal;
   const input = els.eventDateInput;
   const timeSelect = els.eventTimeInput;
@@ -1030,7 +1110,7 @@ function openEventDetailsModal(category, onConfirm) {
 
   const showSubtype = category === "meeting" || category === "contract_advancement";
   subtypeWrap.classList.toggle("hidden", !showSubtype);
-  const subtypeOptions = category === "meeting" ? MEETING_SUBTYPES : CONTRACT_SUBTYPES;
+  const subtypeOptions = category === "meeting" ? meetingSubtypesFor(clientType) : contractSubtypesFor(clientType);
   if (showSubtype) {
     subtypeSelect.innerHTML = subtypeOptions.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join("");
     subtypeSelect.value = subtypeOptions[0].value;
@@ -1069,25 +1149,53 @@ function openEventDetailsModal(category, onConfirm) {
 }
 
 // ---------------------------------------------------------------------------
-// "Who's the meeting with?" step — only for Meeting > Client meeting. Lists
-// every opposite-side ("in cahoots"/connected_to_buyer) client this account
-// can currently see (same Sellers/Buyers + Accounts visible scoping used
-// everywhere else — see js/dealSide.js, js/accountsVisible.js), searchable,
-// and requires picking exactly one before Continue is enabled.
+// "Who's the meeting with?" step — shown for any SHARED_EVENT_TYPES milestone
+// (client_approval, client_meeting, loi, due_diligence, close — see
+// openTimelineAddFlow), not just Client meeting. Lists every
+// opposite-side client this account can currently see (same Sellers/Buyers +
+// Accounts visible scoping used everywhere else — see js/dealSide.js,
+// js/accountsVisible.js) who's ELIGIBLE to have a shared event logged against
+// them: from a seller, only buyers with a confirmed Contract signed
+// milestone; from a buyer, only sellers with a confirmed Intro call
+// milestone (per spec). Searchable, requires picking exactly one before
+// Continue is enabled.
 // ---------------------------------------------------------------------------
 function counterpartDisplayName(c) {
   return c.client_type === "seller" && c.company_name ? c.company_name : clientDisplayName(c);
 }
 
+// Search matches against BOTH the person's name and the company name,
+// regardless of which one counterpartDisplayName happens to show for that
+// row — a seller is displayed by company name when it has one, but someone
+// typing the actual contact's name (e.g. "Curtis Pittman") expects that to
+// find "Pitts Oilfield Products & Services, LLC" too. Previously the search
+// filter matched only against counterpartDisplayName's return value, so
+// typing a seller's real name never matched anything when that seller also
+// had a company name on file — this fixes that.
+function counterpartSearchText(c) {
+  return [clientDisplayName(c), c.company_name].filter(Boolean).join(" ").toLowerCase();
+}
+
 async function openCounterpartPicker(onSelect) {
-  const counterpartType = currentClient.client_type === "seller" ? "buyer" : "seller";
-  const { data, error } = await supabase
-    .from("clients")
-    .select("id, first_name, last_name, company_name, client_type, created_by")
-    .eq("client_type", counterpartType)
-    .eq("pipeline_status", "connected_to_buyer")
-    .order("first_name", { ascending: true });
-  let options = error ? [] : data || [];
+  const isSeller = currentClient.client_type !== "buyer";
+  const counterpartType = isSeller ? "buyer" : "seller";
+  const eligibleEventType = isSeller ? "contract_signed" : "intro_call";
+  const { data: eventRows, error: eventsError } = await supabase
+    .from("client_events")
+    .select("client_id")
+    .eq("event_type", eligibleEventType)
+    .eq("confirmed", true);
+  const eligibleIds = Array.from(new Set((eventRows || []).map((r) => r.client_id)));
+  let options = [];
+  if (!eventsError && eligibleIds.length) {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("id, first_name, last_name, company_name, client_type, created_by")
+      .eq("client_type", counterpartType)
+      .in("id", eligibleIds)
+      .order("first_name", { ascending: true });
+    options = error ? [] : data || [];
+  }
   const visibleAccountIds = getVisibleAccountIds();
   if (visibleAccountIds) options = options.filter((c) => visibleAccountIds.has(c.created_by));
 
@@ -1101,7 +1209,7 @@ async function openCounterpartPicker(onSelect) {
 
   function render() {
     const q = searchInput.value.trim().toLowerCase();
-    const filtered = options.filter((c) => counterpartDisplayName(c).toLowerCase().includes(q));
+    const filtered = options.filter((c) => counterpartSearchText(c).includes(q));
     listEl.innerHTML = filtered.length
       ? filtered
           .map(
@@ -1164,19 +1272,21 @@ async function logClientEvent(eventType, eventDate, details = null) {
   renderModalBody();
 }
 
-// Client meeting is the one Timeline entry that's mirrored onto a SECOND
-// client's Timeline too (the counterpart picked in openCounterpartPicker) —
-// "client meeting with (buyer name)" on the seller's side, and the reverse
-// ("... with (seller name)") on the buyer's side, per spec. A plain insert
-// can't do the counterpart's half when that client belongs to a different
-// account (client_events_insert_own is still strictly own-client-only, same
-// as everywhere else in this file — see supabase/schema.sql), so this calls
-// the log_client_meeting() security-definer function instead, which checks
-// the caller actually owns `currentClient` and then inserts both sides.
-async function logClientMeeting(eventDate, time, counterpart) {
-  const { error } = await supabase.rpc("log_client_meeting", {
+// Any SHARED_EVENT_TYPES milestone (client_approval, client_meeting, loi,
+// due_diligence, close) is mirrored onto a SECOND client's Timeline too (the
+// counterpart picked in openCounterpartPicker) — it appears checked under
+// Progress for both once each side confirms its own copy, per spec. A plain
+// insert can't do the counterpart's half when that client belongs to a
+// different account (client_events_insert_own is still strictly
+// own-client-only, same as everywhere else in this file — see
+// supabase/schema.sql), so this calls the log_shared_client_event()
+// security-definer function instead, which checks the caller actually owns
+// `currentClient` and then inserts both sides.
+async function logSharedClientEvent(eventType, eventDate, time, counterpart) {
+  const { error } = await supabase.rpc("log_shared_client_event", {
     p_client_id: currentClient.id,
     p_counterpart_client_id: counterpart.id,
+    p_event_type: eventType,
     p_event_date: eventDate,
     p_time: time || null,
     p_created_by: profile.id,
@@ -1379,7 +1489,14 @@ function clearFieldErrors() {
 }
 
 function validateAndCollect() {
-  const data = collectFormData(els.clientModalBody);
+  // Which side's fields actually exist in the form right now (see
+  // buildEditableSections/collectFormData in js/clientForm.js) — the active
+  // deal-side toggle while creating a brand-new client (currentClient is
+  // still null then), or the existing client's own client_type while
+  // editing. Editing must never let this drift to whatever getDealSide()
+  // happens to be at save time — a client's side is fixed at creation.
+  const clientType = currentMode === "create" ? getDealSide() : currentClient.client_type;
+  const data = collectFormData(els.clientModalBody, clientType);
   clearFieldErrors();
   const { missing, popupLabels } = getMissingFields(data);
   if (missing.length) {
@@ -1484,10 +1601,9 @@ async function handleCreateSave() {
   const data = validateAndCollect();
   if (!data) return;
   data.assigned_to = profile.id;
-  // Overrides whatever defaultClient() filled in (always "seller") with
-  // whichever side is actually active right now — see js/dealSide.js. Every
-  // non-admin is always on "seller", so this is a no-op for them.
-  data.client_type = getDealSide();
+  // client_type is already set correctly on `data` — validateAndCollect
+  // passes getDealSide() through to collectFormData() for create mode (see
+  // js/clientForm.js), so no separate override is needed here anymore.
   const { error } = await supabase.from("clients").insert(data);
   if (error) return showError(document.getElementById("clientModalError"), error);
   closeModal();
@@ -1568,6 +1684,12 @@ if (isAdmin || isTeamLead) {
     // "In cahoots" — see statusLabel()) immediately on toggle, not just
     // after a full reload.
     renderCategoriesSubmenu();
+    // Sellers and buyers have different Progress milestone lists (see
+    // progressStagesFor) — any selections made under one side's options
+    // wouldn't mean anything under the other's, so clear them on toggle.
+    selectedProgressStages.clear();
+    persistSelectedProgressStages();
+    renderProgressSubmenu();
     await loadClients();
     renderTable();
   });

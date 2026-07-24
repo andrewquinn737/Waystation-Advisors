@@ -2,10 +2,13 @@
 // Clients page itself) and dials.js (the "Create client" shortcut, which
 // pre-fills this same form from a dial's info).
 //
-// Buyer support has been removed (not just hidden) — the app is sellers-only
-// for now. The underlying `clients.client_type` column still exists in the
-// database (always set to "seller" below) since dropping it isn't necessary,
-// but there's no more buyer-facing UI, fields, or branching logic.
+// Buyer-specific fields are back (Round G): a buyer client gets NO "Company
+// details" section at all (that's a seller-only concept), and its
+// Preferences/Other notes sections collapse into a single "Notes" section
+// containing Price range desired (money_to_spend_min/max) + the looking_for
+// textarea + Other notes. Every function below that behaves differently per
+// side takes/derives a clientType ("buyer" | "seller") rather than assuming
+// "seller" like before.
 
 export const STATES = [
   "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
@@ -37,6 +40,7 @@ export function defaultClient(profile, overrides) {
       first_name: "", last_name: "", client_type: "seller", city: "", state: "",
       email: "", mobile_phone: "", company_phone: "", linkedin: "", company_name: "", industry: "",
       annual_revenue: null, employee_count: null, founded_year: null, founded_month: null,
+      money_to_spend_min: null, money_to_spend_max: null,
       looking_for: "", other_notes: "",
       intern_name: profile?.full_name || "",
     },
@@ -57,7 +61,9 @@ function foundedYearOptions(selectedYear) {
   return years.map((y) => `<option value="${y}" ${selectedYear === y ? "selected" : ""}>${y}</option>`).join("");
 }
 
-export function buildEditableSections(client) {
+// Personal information + Contact information — identical for both sides, so
+// factored out and shared by both branches of buildEditableSections below.
+function personalAndContactSectionsHTML(client) {
   return `
     <div class="accordion-section open" data-section="personal">
       <div class="accordion-header"><span>Personal information</span><span class="chevron">&#9662;</span></div>
@@ -103,6 +109,41 @@ export function buildEditableSections(client) {
         <input id="f_linkedin" value="${escapeHtml(client.linkedin)}" />
       </div>
     </div>
+  `;
+}
+
+export function buildEditableSections(client) {
+  if (client.client_type === "buyer") {
+    // Buyer clients get no "Company details" section at all (that's a
+    // seller-only concept) — Preferences and Other notes also collapse into
+    // one combined "Notes" section, with money_to_spend_min/max ("Price
+    // range desired") added alongside looking_for/other_notes.
+    return `
+      ${personalAndContactSectionsHTML(client)}
+      <div class="accordion-section" data-section="notes">
+        <div class="accordion-header"><span>Notes</span><span class="chevron">&#9662;</span></div>
+        <div class="accordion-body">
+          <div class="form-row">
+            <div>
+              <label for="f_money_min">Price range desired (min $)</label>
+              <input id="f_money_min" type="number" step="0.1" min="0" value="${client.money_to_spend_min ?? ""}" />
+            </div>
+            <div>
+              <label for="f_money_max">Price range desired (max $)</label>
+              <input id="f_money_max" type="number" step="0.1" min="0" value="${client.money_to_spend_max ?? ""}" />
+            </div>
+          </div>
+          <div class="field-label-row"><label for="f_looking_for">${lookingForLabel(client.client_type)}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
+          <textarea id="f_looking_for">${escapeHtml(client.looking_for || "")}</textarea>
+          <label for="f_other_notes">Other notes</label>
+          <textarea id="f_other_notes">${escapeHtml(client.other_notes || "")}</textarea>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    ${personalAndContactSectionsHTML(client)}
 
     <div class="accordion-section" data-section="company">
       <div class="accordion-header"><span>Company details</span><span class="chevron">&#9662;</span></div>
@@ -165,11 +206,21 @@ export function wireEditableFormEvents(container) {
   });
 }
 
-export function collectFormData(container) {
+// clientType ("buyer" | "seller") tells this which set of fields actually
+// exist in `container` right now (see buildEditableSections) — a buyer form
+// has no #f_company_name/#f_industry/#f_revenue/etc at all, and has
+// #f_money_min/#f_money_max instead, which a seller form doesn't. Passed
+// explicitly rather than read back off the DOM so callers (validateAndCollect
+// in clients.js) can supply it once from whichever is authoritative: the
+// deal-side toggle while creating, or the existing client's own client_type
+// while editing (never re-derived from the form itself, since editing must
+// never change what side a client is on).
+export function collectFormData(container, clientType) {
+  const isBuyer = clientType === "buyer";
   const data = {
     first_name: container.querySelector("#f_first_name").value.trim(),
     last_name: container.querySelector("#f_last_name").value.trim(),
-    client_type: "seller",
+    client_type: clientType,
     city: container.querySelector("#f_city").value.trim(),
     state: container.querySelector("#f_state").value,
     email: container.querySelector("#f_email").value.trim(),
@@ -179,33 +230,56 @@ export function collectFormData(container) {
     looking_for: container.querySelector("#f_looking_for").value.trim(),
     other_notes: container.querySelector("#f_other_notes").value.trim(),
     intern_name: container.querySelector("#f_intern_name").value.trim(),
-    company_name: container.querySelector("#f_company_name").value.trim(),
-    industry: container.querySelector("#f_industry").value.trim(),
   };
-  const rev = container.querySelector("#f_revenue").value;
-  const emp = container.querySelector("#f_employees").value;
-  data.annual_revenue = rev === "" ? null : Number(rev);
-  data.employee_count = emp === "" ? null : Number(emp);
-  // Month and year are independent selects now (see buildEditableSections) —
-  // a year can be saved on its own with no month chosen, unlike the old
-  // single <input type="month"> which forced both or neither.
-  const foundedMonth = container.querySelector("#f_founded_month").value;
-  const foundedYear = container.querySelector("#f_founded_year").value;
-  data.founded_year = foundedYear ? Number(foundedYear) : null;
-  data.founded_month = foundedMonth ? Number(foundedMonth) : null;
+  if (isBuyer) {
+    const min = container.querySelector("#f_money_min").value;
+    const max = container.querySelector("#f_money_max").value;
+    data.money_to_spend_min = min === "" ? null : Number(min);
+    data.money_to_spend_max = max === "" ? null : Number(max);
+    // Seller-only columns — explicitly nulled rather than left untouched, so
+    // switching company-details data never lingers on a client that no
+    // longer has anywhere in the UI to show or edit it.
+    data.company_name = null;
+    data.industry = null;
+    data.annual_revenue = null;
+    data.employee_count = null;
+    data.founded_year = null;
+    data.founded_month = null;
+  } else {
+    data.company_name = container.querySelector("#f_company_name").value.trim();
+    data.industry = container.querySelector("#f_industry").value.trim();
+    const rev = container.querySelector("#f_revenue").value;
+    const emp = container.querySelector("#f_employees").value;
+    data.annual_revenue = rev === "" ? null : Number(rev);
+    data.employee_count = emp === "" ? null : Number(emp);
+    // Month and year are independent selects now (see buildEditableSections) —
+    // a year can be saved on its own with no month chosen, unlike the old
+    // single <input type="month"> which forced both or neither.
+    const foundedMonth = container.querySelector("#f_founded_month").value;
+    const foundedYear = container.querySelector("#f_founded_year").value;
+    data.founded_year = foundedYear ? Number(foundedYear) : null;
+    data.founded_month = foundedMonth ? Number(foundedMonth) : null;
+    // money_to_spend_min/max are buyer-only — nulled here for the same
+    // reason company_name/etc are nulled in the buyer branch above.
+    data.money_to_spend_min = null;
+    data.money_to_spend_max = null;
+  }
   return data;
 }
 
 export function getMissingFields(data) {
   const missing = [];
   const popupLabels = [];
+  const isBuyer = data.client_type === "buyer";
 
   let nameMissing = false;
   if (!data.first_name) { missing.push("first_name"); nameMissing = true; }
   if (!data.last_name) { missing.push("last_name"); nameMissing = true; }
   if (nameMissing) popupLabels.push("Name");
 
-  if (!data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
+  // Company name/industry only exist on a seller's form at all (see
+  // buildEditableSections) — never required for a buyer.
+  if (!isBuyer && !data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
 
   if (!data.email && !data.mobile_phone && !data.company_phone) { missing.push("contact"); popupLabels.push("Phone number and/or email"); }
 
@@ -214,7 +288,7 @@ export function getMissingFields(data) {
   if (!data.state) { missing.push("state"); locMissing = true; }
   if (locMissing) popupLabels.push("Location");
 
-  if (!data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
+  if (!isBuyer && !data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
 
   if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
 
