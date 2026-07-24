@@ -2290,4 +2290,20 @@ if (isAdmin || isTeamLead) {
       // session could never fetch a teammate's tabs/dials in the first
       // place, filter or no filter.
       if (isAdmin) {
-        const { data, error } = await supabase.from("profiles").select("id, full_name").o
+        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+        return error ? [] : data || [];
+      }
+      if (!profile.team_id) return [];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("team_id", profile.team_id)
+        .order("full_name", { ascending: true });
+      return error ? [] : data || [];
+    },
+    onChange: renderTabs,
+    escapeHtml,
+  });
+}
+
+await loadLists();
