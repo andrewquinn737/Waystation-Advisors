@@ -1,0 +1,1253 @@
+-- ============================================================================
+-- Deal Flow App — Database Schema
+-- Run this in the Supabase SQL Editor (Project > SQL Editor > New query)
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. PROFILES
+-- Every logged-in user (intern or team lead) gets a row here, created
+-- automatically when they sign up (see trigger at the bottom).
+-- ----------------------------------------------------------------------------
+create table profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  full_name text not null,
+  -- 'admin' was added later (see the ADMIN ROLE / TEAMS section near the
+  -- bottom of this file) — every account starts as 'intern' and an existing
+  -- admin promotes people from the Teams popup.
+  role text not null check (role in ('intern', 'team_lead', 'admin')) default 'intern',
+  phone text,                      -- required at signup (see login.html)
+  email text,                      -- copied from auth.users at signup so the
+                                    -- Teams popup can show it without needing
+                                    -- access to the auth schema
+  -- Which Teams-popup group this person shows up under. Superseded by the
+  -- nullable `team_id` (references teams(id)) added in the ADMIN ROLE / TEAMS
+  -- section below — admins can now create/rename/delete teams instead of
+  -- picking from 3 fixed names. Left here (commented) only as a historical
+  -- note of the original column; the live migration actually DROPS this
+  -- column and ADDS team_id.
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 2. SELLERS (leads found by interns)
+-- ----------------------------------------------------------------------------
+create table sellers (
+  id uuid primary key default gen_random_uuid(),
+  business_name text not null,
+  contact_name text,
+  contact_email text,
+  contact_phone text,
+  industry text,
+  asking_price numeric,
+  notes text,
+  status text not null check (status in ('new', 'vetted', 'dead')) default 'new',
+  found_by uuid references profiles(id),        -- which intern sourced this lead
+  assigned_to uuid references profiles(id),      -- which intern currently owns/updates it
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 3. BUYERS (paying clients)
+-- ----------------------------------------------------------------------------
+create table buyers (
+  id uuid primary key default gen_random_uuid(),
+  company_name text not null,
+  contact_name text,
+  contact_email text,
+  contact_phone text,
+  subscription_status text not null check (subscription_status in ('active', 'paused', 'cancelled')) default 'active',
+  monthly_fee numeric not null default 0,
+  assigned_to uuid references profiles(id),      -- which intern manages this buyer's profile
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 4. DEALS (a seller lead pitched to a buyer)
+-- ----------------------------------------------------------------------------
+create table deals (
+  id uuid primary key default gen_random_uuid(),
+  seller_id uuid not null references sellers(id) on delete cascade,
+  buyer_id uuid not null references buyers(id) on delete cascade,
+  status text not null check (
+    status in ('pitched', 'interested', 'negotiating', 'closed_won', 'closed_lost')
+  ) default 'pitched',
+  sale_price numeric,          -- filled in once closed_won
+  commission_rate numeric,     -- e.g. 0.05 for 5%, filled in once closed_won
+  closed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 5. SUBSCRIPTION PAYMENTS (buyer's recurring monthly fee — financial, team leads only)
+-- ----------------------------------------------------------------------------
+create table subscription_payments (
+  id uuid primary key default gen_random_uuid(),
+  buyer_id uuid not null references buyers(id) on delete cascade,
+  period_month date not null,   -- first of the month this payment covers
+  amount numeric not null,
+  paid boolean not null default false,
+  paid_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 6. COMMISSIONS (owed once a deal closes — financial, team leads only)
+-- ----------------------------------------------------------------------------
+create table commissions (
+  id uuid primary key default gen_random_uuid(),
+  deal_id uuid not null references deals(id) on delete cascade,
+  amount numeric not null,
+  status text not null check (status in ('owed', 'invoiced', 'paid')) default 'owed',
+  paid_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- ============================================================================
+-- ROW LEVEL SECURITY
+-- Interns: can read/write only buyers & sellers assigned to them, and deals
+--          that involve those records. No access to subscriptions/commissions.
+-- Team leads: full access to everything.
+-- ============================================================================
+
+alter table profiles enable row level security;
+alter table sellers enable row level security;
+alter table buyers enable row level security;
+alter table deals enable row level security;
+alter table subscription_payments enable row level security;
+alter table commissions enable row level security;
+
+-- Helper: is the current user a team lead?
+-- TEAM LEADS ARE TEMPORARILY DISABLED — every intern account is treated as
+-- full-access for now (per product decision to keep the roster flat while
+-- the org is small). This is the one place to flip that back on later: swap
+-- the body back to the real role check below (kept here, commented out) once
+-- team leads are reintroduced, no other code needs to change.
+--   select exists (
+--     select 1 from profiles
+--     where id = auth.uid() and role = 'team_lead'
+--   );
+create or replace function is_team_lead()
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select true;
+$$;
+
+-- PROFILES: everyone can read all profiles (needed to show "assigned to" names);
+-- only the user themself or a team lead can update.
+create policy "profiles_select_all" on profiles
+  for select using (true);
+create policy "profiles_update_self_or_lead" on profiles
+  for update using (auth.uid() = id or is_team_lead());
+
+-- SELLERS
+create policy "sellers_select" on sellers
+  for select using (is_team_lead() or assigned_to = auth.uid() or found_by = auth.uid());
+create policy "sellers_insert" on sellers
+  for insert with check (is_team_lead() or found_by = auth.uid());
+create policy "sellers_update" on sellers
+  for update using (is_team_lead() or assigned_to = auth.uid());
+create policy "sellers_delete" on sellers
+  for delete using (is_team_lead());
+
+-- BUYERS
+create policy "buyers_select" on buyers
+  for select using (is_team_lead() or assigned_to = auth.uid());
+create policy "buyers_insert" on buyers
+  for insert with check (is_team_lead());
+create policy "buyers_update" on buyers
+  for update using (is_team_lead() or assigned_to = auth.uid());
+create policy "buyers_delete" on buyers
+  for delete using (is_team_lead());
+
+-- DEALS: visible if you can see either side of the deal
+create policy "deals_select" on deals
+  for select using (
+    is_team_lead()
+    or exists (select 1 from sellers s where s.id = seller_id and (s.assigned_to = auth.uid() or s.found_by = auth.uid()))
+    or exists (select 1 from buyers b where b.id = buyer_id and b.assigned_to = auth.uid())
+  );
+create policy "deals_insert" on deals
+  for insert with check (
+    is_team_lead()
+    or exists (select 1 from sellers s where s.id = seller_id and (s.assigned_to = auth.uid() or s.found_by = auth.uid()))
+  );
+create policy "deals_update" on deals
+  for update using (
+    is_team_lead()
+    or exists (select 1 from sellers s where s.id = seller_id and s.assigned_to = auth.uid())
+    or exists (select 1 from buyers b where b.id = buyer_id and b.assigned_to = auth.uid())
+  );
+create policy "deals_delete" on deals
+  for delete using (is_team_lead());
+
+-- SUBSCRIPTION PAYMENTS: team leads only
+create policy "subscriptions_all" on subscription_payments
+  for all using (is_team_lead()) with check (is_team_lead());
+
+-- COMMISSIONS: team leads only
+create policy "commissions_all" on commissions
+  for all using (is_team_lead()) with check (is_team_lead());
+
+-- ============================================================================
+-- COLUMN-LEVEL PROTECTION
+-- RLS above controls which ROWS an intern can touch. These triggers stop
+-- interns from editing specific FINANCIAL columns even on rows they own —
+-- e.g. an intern can update a buyer's contact info, but not their monthly
+-- fee; they can move a deal through the pipeline, but only a team lead can
+-- close it and set the sale price / commission.
+-- ============================================================================
+
+create or replace function protect_buyer_financials()
+returns trigger language plpgsql as $$
+begin
+  if not is_team_lead() then
+    if new.monthly_fee is distinct from old.monthly_fee
+       or new.subscription_status is distinct from old.subscription_status then
+      raise exception 'Only team leads can edit subscription/financial fields';
+    end if;
+  end if;
+  new.updated_at = now();
+  return new;
+end;
+$$;
+create trigger buyers_protect_financials
+  before update on buyers
+  for each row execute function protect_buyer_financials();
+
+create or replace function protect_seller_financials()
+returns trigger language plpgsql as $$
+begin
+  if not is_team_lead() then
+    if new.asking_price is distinct from old.asking_price then
+      raise exception 'Only team leads can edit asking price';
+    end if;
+  end if;
+  new.updated_at = now();
+  return new;
+end;
+$$;
+create trigger sellers_protect_financials
+  before update on sellers
+  for each row execute function protect_seller_financials();
+
+create or replace function protect_deal_closing()
+returns trigger language plpgsql as $$
+begin
+  if not is_team_lead() then
+    if new.sale_price is distinct from old.sale_price
+       or new.commission_rate is distinct from old.commission_rate
+       or new.status in ('closed_won', 'closed_lost') then
+      raise exception 'Only team leads can close a deal or set sale price / commission';
+    end if;
+  end if;
+  new.updated_at = now();
+  return new;
+end;
+$$;
+create trigger deals_protect_closing
+  before update on deals
+  for each row execute function protect_deal_closing();
+
+-- ============================================================================
+-- CLIENTS (unified buyer/seller record — replaces the separate buyers/sellers
+-- tables for the new "Clients" tab). The old buyers/sellers/deals tables
+-- above are left in place since Finance still reads from them.
+-- ============================================================================
+create table clients (
+  id uuid primary key default gen_random_uuid(),
+  first_name text not null,
+  last_name text not null,
+  client_type text not null check (client_type in ('buyer', 'seller')),
+  company_name text,               -- sellers only
+  email text,
+  phone text,
+  linkedin text,
+  city text,
+  state text,                      -- one of the 50 US states, or 'Not in the US'
+  industry text,                   -- sellers only
+  annual_revenue numeric,          -- sellers only
+  employee_count integer,          -- sellers only
+  founded_year integer,            -- sellers only
+  founded_month integer check (founded_month between 1 and 12), -- sellers only
+  money_to_spend_min numeric,      -- buyers only
+  money_to_spend_max numeric,      -- buyers only
+  looking_for text,                -- what they're looking for in a buyer/seller
+  other_notes text,
+  intern_name text,                -- auto-filled with the creating intern's name
+  assigned_to uuid references profiles(id), -- auto-set to the creating intern
+  created_by uuid references profiles(id) default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table clients enable row level security;
+
+-- Each intern only sees/edits/deletes the clients THEY created — not each
+-- other's. created_by defaults to auth.uid() at insert time (see the column
+-- default above), so this needs no extra app-side wiring: whoever is signed
+-- in when a client is created automatically becomes the only one who can see
+-- it afterward.
+create policy "clients_select_own" on clients
+  for select using (created_by = auth.uid());
+create policy "clients_insert_own" on clients
+  for insert with check (created_by = auth.uid());
+create policy "clients_update_own" on clients
+  for update using (created_by = auth.uid());
+create policy "clients_delete_own" on clients
+  for delete using (created_by = auth.uid());
+
+-- ============================================================================
+-- CLIENT EVENTS (the Timeline tab on a client's profile). A "created" event
+-- is inserted automatically whenever a client row is inserted.
+-- ============================================================================
+create table client_events (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references clients(id) on delete cascade,
+  event_type text not null,        -- 'created', 'intro_call', ...
+  event_date timestamptz not null default now(),
+  details jsonb,
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now()
+);
+
+alter table client_events enable row level security;
+-- Scoped through the parent client's ownership, same as clients itself —
+-- you can only see/log events for a client you created.
+create policy "client_events_select_own" on client_events
+  for select using (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  );
+create policy "client_events_insert_own" on client_events
+  for insert with check (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  );
+create policy "client_events_delete_lead_only" on client_events
+  for delete using (is_team_lead());
+
+create or replace function create_client_created_event()
+returns trigger language plpgsql security definer as $$
+begin
+  insert into client_events (client_id, event_type, event_date, created_by)
+  values (new.id, 'created', new.created_at, new.created_by);
+  return new;
+end;
+$$;
+create trigger trg_client_created_event
+  after insert on clients
+  for each row execute function create_client_created_event();
+
+-- ============================================================================
+-- DIALS (the "Dials" tab). A dial_list is a named tab, scoped to a
+-- buyer/seller category and a current/archived status. Dials are the raw
+-- call-list contacts within a given tab — lighter-weight than a full Client.
+-- ============================================================================
+create table dial_lists (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  dial_type text not null check (dial_type in ('buyer', 'seller')),
+  status text not null check (status in ('current', 'archived')) default 'current',
+  sort_order integer not null default 0,
+  created_by uuid references profiles(id) default auth.uid(),
+  created_at timestamptz not null default now()
+);
+
+alter table dial_lists enable row level security;
+-- Each intern only sees/edits/deletes their own tabs — not each other's.
+-- created_by defaults to auth.uid() at insert time (see column default
+-- above).
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid());
+create policy "dial_lists_insert_own" on dial_lists
+  for insert with check (created_by = auth.uid());
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid());
+create policy "dial_lists_delete_own" on dial_lists
+  for delete using (created_by = auth.uid());
+
+create table dials (
+  id uuid primary key default gen_random_uuid(),
+  list_id uuid not null references dial_lists(id) on delete cascade,
+  first_name text,
+  last_name text,
+  company_name text,          -- sellers only (their business name)
+  email text,
+  mobile_phone text,
+  company_phone text,
+  linkedin text,
+  city text,
+  state text,
+  website text,               -- sellers only (their business website link)
+  industry text,
+  summary text,
+  call_notes text,
+  -- Quick-access call outcome, set from the dial popup's status dropdown
+  -- (not part of the edit form) — also used to color-code list rows/cards
+  -- and to drive the header's "hide dials by status" filter.
+  contact_status text not null default 'uncontacted' check (
+    contact_status in ('uncontacted', 'unable_to_contact', 'not_interested', 'no_response', 'callback_interested', 'intro_call_scheduled')
+  ),
+  -- "Did call today" toggle on the dial popup — set to today's date when
+  -- checked, cleared when unchecked. Rendering just compares this to the
+  -- current local date, so the button visually "resets" at the start of a
+  -- new day with no cron job needed; it never touches historical
+  -- call_status_changes rows, only the ones it itself inserts/deletes.
+  called_today_date date,
+  created_by uuid references profiles(id) default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table dials enable row level security;
+-- Same per-user scoping as dial_lists — each intern only sees/edits/deletes
+-- their own dials.
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid());
+create policy "dials_insert_own" on dials
+  for insert with check (created_by = auth.uid());
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid());
+create policy "dials_delete_own" on dials
+  for delete using (created_by = auth.uid());
+
+-- ============================================================================
+-- TEAMS (shown in the Profile page's "Teams" popup). Admin-creatable — see
+-- the ADMIN ROLE / TEAMS section further down for sort_order + RLS.
+-- ============================================================================
+create table teams (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table teams enable row level security;
+
+-- ============================================================================
+-- CALL STATUS CHANGES (feeds the Profile page's "X people called this week"
+-- stat + 6-week chart). One row is inserted whenever a dial moves off its
+-- default "Uncontacted" status for the first time (see updateDialStatus() in
+-- js/dials.js) — i.e. this counts *dials contacted*, not every status edit.
+-- ============================================================================
+create table call_status_changes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id) on delete cascade,
+  dial_id uuid references dials(id) on delete set null,
+  changed_at timestamptz not null default now()
+);
+
+alter table call_status_changes enable row level security;
+create policy "call_status_changes_select_all" on call_status_changes
+  for select using (auth.uid() is not null);
+create policy "call_status_changes_insert_all" on call_status_changes
+  for insert with check (auth.uid() is not null);
+-- Needed for the "Did call today" toggle's un-select action (js/dials.js
+-- toggleDidCallToday()), which deletes its own just-inserted row under the
+-- calling user's own JWT — without this, the delete silently no-ops (RLS
+-- defaults to deny) and unselecting never actually removes the row.
+create policy "call_status_changes_delete_own" on call_status_changes
+  for delete using (user_id = auth.uid());
+
+-- ============================================================================
+-- Auto-create a profile row whenever someone signs up.
+-- New users default to 'intern' — a team lead must promote them in the
+-- profiles table (or via the app, if you add an admin screen for it).
+-- ============================================================================
+create or replace function handle_new_user()
+returns trigger
+language plpgsql
+security definer
+as $$
+begin
+  insert into public.profiles (id, full_name, role, phone, email)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'full_name', new.email),
+    'intern',
+    new.raw_user_meta_data->>'phone',
+    new.email
+  );
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_user();
+
+-- ============================================================================
+-- ADMIN ROLE / TEAMS
+-- Adds a real 'admin' role and admin-manageable teams (replacing the old 3
+-- fixed team names). Run this whole block once against a database that
+-- already has the schema above (it ALTERs profiles/teams rather than
+-- re-creating them).
+--
+--   * Admins box + Unassigned interns box are virtual — not rows in `teams`
+--     — derived purely from role='admin' / team_id is null. Only the custom
+--     team rows an admin creates actually live in the `teams` table.
+--   * profiles.team_id replaces the old fixed-enum `team` text column.
+--     ON DELETE SET NULL means deleting a team automatically drops its
+--     members back into Unassigned interns — no extra trigger needed.
+--   * Only admins may change someone's role or team_id (see
+--     protect_profile_admin_fields below) — otherwise any intern could
+--     promote themselves via a direct API call even though the UI only
+--     exposes this to admins.
+--   * Creating/removing accounts themselves (not just role/team) needs the
+--     Supabase service-role key, which must never reach the browser — see
+--     supabase/functions/admin-create-account and admin-delete-account.
+-- ============================================================================
+
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('intern', 'team_lead', 'admin'));
+
+alter table profiles add column if not exists team_id uuid references teams(id) on delete set null;
+alter table profiles drop constraint if exists profiles_team_check;
+alter table profiles drop column if exists team;
+
+alter table teams add column if not exists sort_order integer not null default 0;
+
+create or replace function is_admin()
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select exists (
+    select 1 from profiles where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+-- One-time: promote the first admin BEFORE the protect_profile_admin_fields
+-- trigger below exists — that trigger requires is_admin() to already be true
+-- for anyone changing a role, which is a chicken-and-egg problem for the very
+-- first admin (nobody is one yet). Running this seed update here, before the
+-- trigger is created, sidesteps that entirely. Re-run (with a different
+-- email/condition, and only after temporarily dropping the trigger — see its
+-- comment below) whenever someone else needs to be seeded as an admin
+-- directly in the database outside the app's own Teams UI.
+update profiles set role = 'admin' where email = 'andrewquinn737@gmail.com';
+
+drop policy if exists "profiles_update_self_or_lead" on profiles;
+drop policy if exists "profiles_update_self_or_admin" on profiles;
+create policy "profiles_update_self_or_admin" on profiles
+  for update using (auth.uid() = id or is_admin())
+  with check (auth.uid() = id or is_admin());
+
+-- Column-level protection: even though the policy above lets someone update
+-- their OWN row, only an admin may change the role/team_id columns on ANY
+-- row (including their own) — stops privilege escalation via a direct API
+-- call to the clients-side anon key. Must be created AFTER the one-time seed
+-- update above, or that seed update would itself get blocked (is_admin() is
+-- false for everyone until it runs).
+create or replace function protect_profile_admin_fields()
+returns trigger language plpgsql as $$
+begin
+  if not is_admin() then
+    if new.role is distinct from old.role or new.team_id is distinct from old.team_id then
+      raise exception 'Only admins can change role or team assignment';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists profiles_protect_admin_fields on profiles;
+create trigger profiles_protect_admin_fields
+  before update on profiles
+  for each row execute function protect_profile_admin_fields();
+
+-- TEAMS: everyone can read (needed to show team names in the Teams popup);
+-- only admins can create/rename/delete a team.
+drop policy if exists "teams_select_all" on teams;
+create policy "teams_select_all" on teams
+  for select using (auth.uid() is not null);
+drop policy if exists "teams_insert_admin" on teams;
+create policy "teams_insert_admin" on teams
+  for insert with check (is_admin());
+drop policy if exists "teams_update_admin" on teams;
+create policy "teams_update_admin" on teams
+  for update using (is_admin());
+drop policy if exists "teams_delete_admin" on teams;
+create policy "teams_delete_admin" on teams
+  for delete using (is_admin());
+
+-- ============================================================================
+-- ADMIN-ONLY TEMP PASSWORD LOOKUP
+-- Real login passwords are one-way hashed by Supabase Auth and can never be
+-- retrieved once an account exists — there is no way to "show the real
+-- password" for an existing login. Instead, this stores the INITIAL temp
+-- password an admin sets at account-creation time (see
+-- supabase/functions/admin-create-account, which has the plaintext value in
+-- scope at signup and writes it here using the service-role client,
+-- bypassing RLS on insert). Admins can then look it up later from the key
+-- icon on a member's Teams card (see js/profile.js). If someone changes their
+-- own password later, this stored value goes stale — it's a record of the
+-- temp password issued at signup, not a live mirror of the real one.
+-- ============================================================================
+create table if not exists profile_temp_passwords (
+  profile_id uuid primary key references profiles(id) on delete cascade,
+  temp_password text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table profile_temp_passwords enable row level security;
+
+-- Only admins can read this table directly (the anon/authenticated key never
+-- gets insert/update/delete access — only the admin-create-account Edge
+-- Function's service-role client writes to it, which bypasses RLS entirely).
+drop policy if exists "profile_temp_passwords_select_admin" on profile_temp_passwords;
+create policy "profile_temp_passwords_select_admin" on profile_temp_passwords
+  for select using (is_admin());
+
+-- ============================================================================
+-- CLIENT PIPELINE STATUS ("Categories" on the client profile — see
+-- CLIENT_STATUSES in js/clients.js). Colored the same way dials.contact_status
+-- is, plus a new "sold" (light blue) tint not used anywhere in dials. Not
+-- required at creation — new clients default to 'not_in_contact'.
+-- ============================================================================
+alter table clients add column if not exists pipeline_status text not null default 'not_in_contact';
+alter table clients drop constraint if exists clients_pipeline_status_check;
+alter table clients add constraint clients_pipeline_status_check
+  check (pipeline_status in ('sold', 'connected_to_buyer', 'potentially_interested', 'not_in_contact', 'no_longer_interested'));
+
+-- ============================================================================
+-- ADMIN-ONLY DIALS TAB TRANSFER
+-- Lets an admin hand off one of their own dial_lists tabs (and every dial in
+-- it) to a different account — see the "Transfer" option added to the tab's
+-- archive/delete popup in js/dials.js. Reassigning created_by is what actually
+-- moves it: dial_lists_select_own / dials_select_own both scope visibility to
+-- created_by = auth.uid(), so the tab simply stops appearing for the admin and
+-- starts appearing for whoever it was transferred to. The existing "_own"
+-- UPDATE policies don't allow that (they only let you update your OWN rows),
+-- so both are widened here to also allow any admin to update either table.
+-- ============================================================================
+drop policy if exists "dial_lists_update_own" on dial_lists;
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dials_update_own" on dials;
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- NEW CLIENTS DEFAULT TO "POTENTIALLY INTERESTED"
+-- Was 'not_in_contact' — changed per product decision that a freshly-added
+-- client has, by definition, already had some contact (that's how they got
+-- added), so "potentially interested" is the more accurate starting bucket.
+-- Only affects the column default for future inserts; existing rows keep
+-- whatever status they already have.
+-- ============================================================================
+alter table clients alter column pipeline_status set default 'potentially_interested';
+
+-- ============================================================================
+-- PROFILE PICTURES
+-- Public Storage bucket + per-user-folder RLS (each account's photo lives at
+-- "<their own profile id>/avatar.<ext>", enforced via the folder-name check
+-- below) so anyone can VIEW any photo (needed to show teammates' pictures in
+-- Teams) but only the account itself can upload/replace/remove its own photo.
+-- profiles.avatar_url just stores the public URL after upload — see
+-- handleAvatarFileSelected() in js/profile.js.
+-- ============================================================================
+alter table profiles add column if not exists avatar_url text;
+
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+drop policy if exists "avatars_public_read" on storage.objects;
+create policy "avatars_public_read" on storage.objects
+  for select using (bucket_id = 'avatars');
+
+drop policy if exists "avatars_insert_own" on storage.objects;
+create policy "avatars_insert_own" on storage.objects
+  for insert with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "avatars_update_own" on storage.objects;
+create policy "avatars_update_own" on storage.objects
+  for update using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "avatars_delete_own" on storage.objects;
+create policy "avatars_delete_own" on storage.objects
+  for delete using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ============================================================================
+-- INTRO CALLS SCHEDULED (Profile page's "Intro calls" tracker/graph — the
+-- toggled alternative to the "people called" outreach chart, see
+-- loadIntroCallsChart() in js/profile.js). One row is inserted every time the
+-- shared "Schedule Intro Call" flow is used (js/introCall.js's
+-- wireIntroCallForm), from EITHER the Dials or the Clients page — this counts
+-- the act of scheduling itself, independent of client_events/Timeline (which
+-- is now only ever touched by manually clicking "+" in a client's Timeline).
+-- ============================================================================
+create table if not exists intro_call_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id) on delete cascade,
+  scheduled_at timestamptz not null default now()
+);
+
+alter table intro_call_log enable row level security;
+
+drop policy if exists "intro_call_log_select_own" on intro_call_log;
+create policy "intro_call_log_select_own" on intro_call_log
+  for select using (user_id = auth.uid());
+
+drop policy if exists "intro_call_log_insert_own" on intro_call_log;
+create policy "intro_call_log_insert_own" on intro_call_log
+  for insert with check (user_id = auth.uid());
+
+-- ============================================================================
+-- ONE-TIME CLEANUP: the intro_call events on JD Smith and Curtis Pittman were
+-- test data logged before Timeline switched to manual-only entries (see the
+-- ADMIN-ONLY DIALS TAB TRANSFER block's client_events comment above) — this
+-- removes those two specific client_events rows so both clients look like
+-- they haven't had their intro call yet. Safe to re-run (no-ops once gone).
+-- ============================================================================
+delete from client_events
+where event_type = 'intro_call'
+  and client_id in (
+    select id from clients
+    where (first_name = 'JD' and last_name = 'Smith')
+       or (first_name = 'Curtis' and last_name = 'Pittman')
+  );
+
+-- ============================================================================
+-- FIX: ADMIN DIALS TAB TRANSFER — "new row violates row-level security
+-- policy for table dial_lists"
+-- The ADMIN-ONLY DIALS TAB TRANSFER block above widened the UPDATE policies
+-- on dial_lists/dials so an admin can reassign created_by, but that alone
+-- wasn't enough: Postgres re-checks a table's SELECT policy against the
+-- POST-update row whenever the statement returns the updated row (which
+-- Supabase's client library always requests) — and dial_lists_select_own /
+-- dials_select_own were still scoped to `created_by = auth.uid()` only.
+-- So the moment an admin reassigned a row to someone else, the new row (now
+-- owned by that other account) failed the admin's own SELECT policy, and
+-- Postgres surfaced that as the same generic RLS error, masking the real
+-- cause. Fix: widen both SELECT policies to also allow is_admin(), matching
+-- the UPDATE policies. (dial_lists_update_own is also re-created here with
+-- an explicit WITH CHECK — functionally identical to its USING clause, but
+-- spelled out for clarity/symmetry with dials_update_own.)
+-- ============================================================================
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dial_lists_update_own" on dial_lists;
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid() or is_admin())
+  with check (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- ADMIN-ONLY "ACCOUNTS VISIBLE" FILTER (Clients page)
+-- Lets an admin pick which accounts' clients show up in their own Clients
+-- list (see the "Accounts visible" menu item above "Categories" in
+-- js/clients.js) — the account filter is applied client-side, layered
+-- underneath the existing Categories/pipeline-status filter, but that only
+-- works if the admin's browser can actually fetch every account's clients in
+-- the first place. clients_select_own was still scoped to
+-- `created_by = auth.uid()` only (never widened like dial_lists/dials were),
+-- so this widens it the same way.
+-- ============================================================================
+drop policy if exists "clients_select_own" on clients;
+create policy "clients_select_own" on clients
+  for select using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- TIMELINE: MANUAL "CONFIRM THIS HAPPENED" CHECKMARK
+-- New circle control shown to the right of the delete (x) on any Timeline
+-- event dated today or earlier (never on future-dated events, and never on
+-- the auto-inserted "created" event) — see buildTimelineHTML/
+-- toggleClientEventConfirmed in js/clients.js. Purely a manual flag the
+-- intern can toggle; doesn't affect the Progress tab's own checkmarks, which
+-- are still based on an event of that type simply existing. No existing
+-- UPDATE policy existed on client_events at all (only select/insert/delete),
+-- so one is added here, scoped the same way select/insert already are.
+-- ============================================================================
+alter table client_events add column if not exists confirmed boolean not null default false;
+
+drop policy if exists "client_events_update_own" on client_events;
+create policy "client_events_update_own" on client_events
+  for update using (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  )
+  with check (
+    exists (select 1 from clients c where c.id = client_events.client_id and c.created_by = auth.uid())
+  );
+
+-- ============================================================================
+-- REWORK: DIAL TAB OWNERSHIP — admins only see their OWN tabs; Transfer
+-- reassigns ownership via a secure function instead of relying on relaxed
+-- RLS.
+--
+-- Previously (see "FIX: ADMIN DIALS TAB TRANSFER" above), dial_lists_select_own
+-- and dials_select_own were widened to `created_by = auth.uid() or is_admin()`
+-- so that an admin performing a Transfer could still see the row immediately
+-- after reassigning its created_by (Postgres re-checks SELECT against the
+-- post-update row whenever the client requests it back). The side effect:
+-- since is_admin() is true for every admin, EVERY admin could see EVERY
+-- account's tabs all the time — not just their own — and a tab transferred
+-- AWAY from an admin would still show up for them afterward, since they could
+-- still see it via the is_admin() bypass regardless of who it's now owned by.
+--
+-- Fix: drop the is_admin() bypass entirely from both SELECT policies (and
+-- from the UPDATE policies) so visibility is strictly `created_by =
+-- auth.uid()` for everyone, admins included — a tab (and every dial in it) is
+-- attached to exactly one account, exactly like a dial is attached to its
+-- tab via list_id (already true, unchanged). Interns only ever see tabs
+-- attached to their own account; admins, for now, only see their own
+-- personal tabs too (a future "view other accounts' tabs" admin toggle is
+-- planned but explicitly not built yet).
+--
+-- The one remaining need for a bypass — an admin reassigning someone else's
+-- tab during Transfer — is now handled by transfer_dial_list(), a `security
+-- definer` function (same trusted-bypass pattern already used by is_admin()/
+-- is_team_lead() to safely read profiles.role without recursive RLS). It
+-- checks is_admin() itself before doing anything, then reassigns created_by
+-- on both dial_lists and the dials under it in one trusted operation — no
+-- broad standing RLS bypass required, and no RETURNING-row SELECT-recheck
+-- complication, since the function body isn't subject to the caller's RLS at
+-- all. See completeTransfer() in js/dials.js, which now calls this via
+-- supabase.rpc(...) instead of two direct .update() calls.
+--
+-- SEPARATE BUG FOUND WHILE VERIFYING THIS: dial_lists had row-level security
+-- DISABLED at the table level entirely (`relrowsecurity = false` — visible
+-- via `select relname, relrowsecurity from pg_class where relname =
+-- 'dial_lists'`), even though every policy above was correctly defined. A
+-- table with RLS disabled ignores every one of its policies and grants
+-- access per ordinary table GRANTs instead — which, combined with
+-- `authenticated` having SELECT granted (needed for the app to work at all),
+-- meant EVERY account could read EVERY tab regardless of created_by. This is
+-- almost certainly the real mechanism behind "every tab in dials is visible
+-- to every account" — not a policy logic bug, but RLS having been switched
+-- off for this one table at some point (every other app table was confirmed
+-- still correctly enabled). Re-enabled below; this is idempotent to re-run.
+-- ============================================================================
+alter table dial_lists enable row level security;
+
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid());
+
+drop policy if exists "dial_lists_update_own" on dial_lists;
+create policy "dial_lists_update_own" on dial_lists
+  for update using (created_by = auth.uid())
+  with check (created_by = auth.uid());
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid());
+
+drop policy if exists "dials_update_own" on dials;
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid())
+  with check (created_by = auth.uid());
+
+create or replace function transfer_dial_list(p_list_id uuid, p_new_owner uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then
+    raise exception 'Only admins can transfer a tab.';
+  end if;
+  update dial_lists set created_by = p_new_owner where id = p_list_id;
+  update dials set created_by = p_new_owner where list_id = p_list_id;
+end;
+$$;
+
+grant execute on function transfer_dial_list(uuid, uuid) to authenticated;
+
+-- ============================================================================
+-- ADMIN-ONLY SELLERS/BUYERS TOGGLE (Clients + Dials)
+-- No schema change needed here — clients.client_type and dial_lists.dial_type
+-- have existed since the original design (both `check (... in ('buyer',
+-- 'seller'))`), from back when buyer support was built and then hidden app-
+-- wide (see js/clients.js's/js/dials.js's "Buyer support has been removed
+-- entirely" comments). Every existing row was always explicitly inserted
+-- with 'seller' (the hardcoded default in clientForm.js's defaultClient() and
+-- dials.js's old `const currentType = "seller"`), so every current client and
+-- dial tab is already correctly a seller under this column.
+-- This round just re-exposes the toggle in the UI (admin-only, via the
+-- settings gear icon — see js/dealSide.js, and its wiring in js/clients.js /
+-- js/dials.js) and makes currentType/the client_type filter dynamic instead
+-- of hardcoded, so flipping to "Buyers" shows/creates buyer-side data as a
+-- fully separate parallel dataset, scoped underneath account -> seller/buyer
+-- exactly as before (current/archived -> tabs -> category for Dials;
+-- category alone for Clients). No RLS change required since client_type/
+-- dial_type is just another filterable column on tables whose row-level
+-- security already scopes by created_by/account.
+-- ============================================================================
+
+-- ============================================================================
+-- ADMIN-ONLY "ACCOUNTS VISIBLE" ON DIALS
+-- This is exactly the "future toggle" flagged as not-yet-built in the REWORK
+-- above ("i will make an option probably in the future to allow them to see
+-- other people's tabs, not now though") — now being built. Mirrors the
+-- Clients page's existing admin-only Accounts-visible filter (see
+-- clients_select_own's `or is_admin()` and menuAccountsVisibleBtn in
+-- js/clients.js) exactly: widen SELECT only (not UPDATE/DELETE) on both
+-- dial_lists and dials to also allow is_admin(), so an admin's session can
+-- fetch every account's tabs/dials, while js/dials.js's new
+-- menuAccountsVisibleBtn/accountsVisiblePopup client-side filter narrows what
+-- actually gets shown (defaulting to "select all" = every account, same
+-- default as before this existed). Non-admins are completely unaffected:
+-- is_admin() is false for them, so their visibility stays exactly
+-- `created_by = auth.uid()`, matching the REWORK above. UPDATE/DELETE stay
+-- strictly own-only for everyone including admins (same as clients_update_own
+-- never getting an is_admin() bypass) — Transfer is still the only way an
+-- admin can modify a tab they don't own, via the trusted transfer_dial_list()
+-- security-definer function above, which checks is_admin() itself.
+-- ============================================================================
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid() or is_admin());
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid() or is_admin());
+
+-- ============================================================================
+-- ADMIN-ONLY "ACCOUNTS VISIBLE" + "UPCOMING EVENTS" ON PROFILE
+-- Profile's settings gear now shows the same shared Sellers/Buyers +
+-- Accounts visible controls as Clients/Dials (see js/accountsVisible.js), and
+-- uses the selected account(s) to show another account's (or several
+-- accounts' summed) outreach/intro-call numbers and upcoming events — see
+-- resolveSelectedAccounts()/loadCallsChart()/loadIntroCallsChart()/
+-- loadUpcomingEvents() in js/profile.js. That requires an admin's session to
+-- actually be able to fetch other accounts' client_events and
+-- intro_call_log rows in the first place, which neither policy allowed yet
+-- (unlike clients/dials/dial_lists above). Widening SELECT only here, same
+-- pattern as everywhere else in this file: UPDATE/DELETE on client_events
+-- stay strictly own-only (client_events_update_own, client_events_delete_lead_only)
+-- so an admin still can't edit/delete another account's Timeline entries just
+-- by viewing their upcoming events.
+-- ============================================================================
+drop policy if exists "client_events_select_own" on client_events;
+create policy "client_events_select_own" on client_events
+  for select using (
+    exists (select 1 from clients c where c.id = client_events.client_id and (c.created_by = auth.uid() or is_admin()))
+  );
+
+drop policy if exists "intro_call_log_select_own" on intro_call_log;
+create policy "intro_call_log_select_own" on intro_call_log
+  for select using (user_id = auth.uid() or is_admin());
+
+-- ============================================================================
+-- TIMELINE REWORK: MEETING / CONTRACT ADVANCEMENT / TASK
+-- Timeline's "+" menu is now a 2-level picker (see js/clients.js) —
+-- Meeting/Contract advancement/Task at the top, then a specific sub-type.
+-- Two new Timeline-only event_type values are introduced here with NO schema
+-- change needed: event_type has always been plain `text not null` with no
+-- check constraint, so 'general_meeting' and 'task' just work like any other
+-- value already did. Everything else (time, task description, and — for
+-- Client meeting — the counterpart client's id/name) rides in the existing
+-- `details jsonb` column, also with no migration.
+--
+-- The one piece that DOES need a schema change: logging a Client meeting has
+-- to write a row on BOTH clients' timelines (per spec — "client meeting with
+-- (buyer name)" on the seller's side, and the reverse on the buyer's side),
+-- and those two clients are frequently owned by two different intern
+-- accounts. client_events_insert_own only ever allowed inserting on a client
+-- you yourself created (never widened with an is_admin() bypass, same as
+-- clients_update_own/clients_delete_own) — so a plain insert from the
+-- counterpart's owner would fail RLS. Rather than loosening that policy
+-- app-wide, this adds one narrowly-scoped `security definer` function (same
+-- trusted-bypass pattern as transfer_dial_list() above): it re-checks that
+-- the CALLER actually owns p_client_id itself before doing anything, then
+-- inserts both sides' rows, so its trust boundary is exactly "you can only
+-- trigger this by way of a client meeting you're actually a participant in and
+-- own one side of" — not a general-purpose cross-account write.
+-- ============================================================================
+create or replace function log_client_meeting(
+  p_client_id uuid,
+  p_counterpart_client_id uuid,
+  p_event_date timestamptz,
+  p_time text,
+  p_created_by uuid
+)
+returns void language plpgsql security definer as $$
+declare
+  v_owns boolean;
+  v_client record;
+  v_counterpart record;
+begin
+  select exists(select 1 from clients where id = p_client_id and created_by = auth.uid()) into v_owns;
+  if not v_owns then
+    raise exception 'You can only log a client meeting on a client you created.';
+  end if;
+
+  select id, first_name, last_name, company_name, client_type into v_client from clients where id = p_client_id;
+  select id, first_name, last_name, company_name, client_type into v_counterpart from clients where id = p_counterpart_client_id;
+  if v_counterpart.id is null then
+    raise exception 'Counterpart client not found.';
+  end if;
+
+  insert into client_events (client_id, event_type, event_date, details, created_by)
+  values (
+    p_client_id, 'client_meeting', p_event_date,
+    jsonb_build_object(
+      'time', p_time,
+      'counterpart_client_id', v_counterpart.id,
+      'counterpart_name', case when v_counterpart.client_type = 'seller' and coalesce(v_counterpart.company_name, '') != ''
+        then v_counterpart.company_name
+        else trim(both ' ' from concat(v_counterpart.first_name, ' ', v_counterpart.last_name)) end
+    ),
+    p_created_by
+  );
+
+  insert into client_events (client_id, event_type, event_date, details, created_by)
+  values (
+    p_counterpart_client_id, 'client_meeting', p_event_date,
+    jsonb_build_object(
+      'time', p_time,
+      'counterpart_client_id', v_client.id,
+      'counterpart_name', case when v_client.client_type = 'seller' and coalesce(v_client.company_name, '') != ''
+        then v_client.company_name
+        else trim(both ' ' from concat(v_client.first_name, ' ', v_client.last_name)) end
+    ),
+    p_created_by
+  );
+end;
+$$;
+
+grant execute on function log_client_meeting(uuid, uuid, timestamptz, text, uuid) to authenticated;
+
+-- ============================================================================
+-- TEAM LEAD ROLE (reintroduced)
+-- A new tier between intern and admin. Note: this is UNRELATED to the
+-- is_team_lead() function defined way up near the top of this file (in the
+-- original SELLERS/BUYERS/DEALS section) — that function is legacy scaffolding
+-- for the old sellers/buyers/deals/subscription_payments/commissions tables,
+-- which are orphaned (finance.html/sellers.html/buyers.html/deals.html are
+-- unlinked from nav — see js/auth.js renderNav()) and hardcoded to always
+-- return true. It is left alone here, untouched.
+--
+-- profiles_role_check has actually allowed 'team_lead' as a value since the
+-- very first version of this table (see column definition near the top) —
+-- it was never removed even when the team-lead UI/logic was stripped out
+-- (see "Remove team-lead code, interns only" in project history). Re-asserted
+-- here anyway, idempotently, so this constraint is self-documenting and this
+-- migration doesn't silently depend on that historical accident.
+--
+-- What a team lead actually gets (see js/profile.js Teams UI + js/clients.js/
+-- js/dials.js/js/profile.js settings-gear wiring for the app-side half of
+-- this):
+--   * Must be inside a real (non-virtual) team box to be promoted — the
+--     Admins and Unassigned interns boxes are rejected client-side.
+--   * Exactly one team lead per team box; promoting a 2nd swaps the 1st back
+--     to intern (handled entirely in profile.js, not enforced in SQL — same
+--     trust level as any other role/team_id write, which already requires
+--     is_admin() via protect_profile_admin_fields()).
+--   * Can see the Sellers/Buyers toggle + Accounts visible in Clients/Dials/
+--     Profile settings (like an admin), but Accounts visible only ever lists
+--     — and this function only ever grants read access to — teammates who
+--     share their own team_id, never every account.
+--   * Cannot edit teams, see stored temp passwords, or add new accounts
+--     (those stay gated to real is_admin() in the JS, unchanged).
+--   * Everything else (update/delete on their own rows only, no bypass on
+--     anyone else's) is identical to an intern.
+-- ============================================================================
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('intern', 'team_lead', 'admin'));
+
+-- True if the CALLING user is a team lead and target_user is one of their own
+-- teammates (same team_id, and that team_id is a real, non-null team — a
+-- team lead with team_id null shouldn't be possible per the app's own
+-- promotion validation, but the `me.team_id is not null` guard keeps this
+-- function safe even if that's ever violated directly in the database).
+-- security definer, same trusted-bypass pattern as is_admin() above, so this
+-- can read profiles.role/team_id without recursive RLS on the profiles table
+-- itself.
+create or replace function is_team_lead_of(target_user uuid)
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select exists (
+    select 1 from profiles me
+    join profiles them on them.id = target_user
+    where me.id = auth.uid()
+      and me.role = 'team_lead'
+      and me.team_id is not null
+      and me.team_id = them.team_id
+  );
+$$;
+
+-- Widen the same SELECT-only bypass admins already have (see is_admin() uses
+-- above) to also cover a team lead viewing their own teammates' data — never
+-- UPDATE/DELETE, matching how admins themselves are scoped (own-row-only
+-- writes, select-only bypass elsewhere).
+drop policy if exists "clients_select_own" on clients;
+create policy "clients_select_own" on clients
+  for select using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+drop policy if exists "dial_lists_select_own" on dial_lists;
+create policy "dial_lists_select_own" on dial_lists
+  for select using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+drop policy if exists "dials_select_own" on dials;
+create policy "dials_select_own" on dials
+  for select using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+drop policy if exists "client_events_select_own" on client_events;
+create policy "client_events_select_own" on client_events
+  for select using (
+    exists (select 1 from clients c where c.id = client_events.client_id and (c.created_by = auth.uid() or is_admin() or is_team_lead_of(c.created_by)))
+  );
+
+drop policy if exists "intro_call_log_select_own" on intro_call_log;
+create policy "intro_call_log_select_own" on intro_call_log
+  for select using (user_id = auth.uid() or is_admin() or is_team_lead_of(user_id));
+
+-- ============================================================================
+-- Split clients.phone into mobile_phone/company_phone, matching the pattern
+-- dials has had since an earlier migration (same column names, so the shared
+-- buildPhoneNumbersHTML() display helper in js/contactIcons.js works for
+-- both). Mobile is still what's used for instant call/text everywhere;
+-- company is just a second number on file. The old `phone` column is left in
+-- place (unused going forward) rather than dropped, matching this file's
+-- usual convention — its value is backfilled into mobile_phone below so no
+-- existing client's number is lost.
+-- ============================================================================
+alter table clients add column if not exists mobile_phone text;
+alter table clients add column if not exists company_phone text;
+
+update clients set mobile_phone = phone where mobile_phone is null and phone is not null;
+
+-- ============================================================================
+-- FIX: FLAKY DIAL CATEGORY SELECTION (and edit/notes/"Called today") ON
+-- CROSS-ACCOUNT DIALS.
+--
+-- dials_select_own was progressively widened (see the several overrides
+-- above) to `created_by = auth.uid() or is_admin() or is_team_lead_of(...)`
+-- so an admin/team lead can actually SEE other accounts' dials through the
+-- "Accounts visible" filter. dials_update_own, however, was never widened to
+-- match — it's been stuck at strictly `created_by = auth.uid()` since the
+-- "REWORK: DIAL TAB OWNERSHIP" migration above (which deliberately reset it,
+-- for reasons specific to that migration's own bug, and nothing since then
+-- re-added a bypass). The result: opening a dial you don't personally own
+-- (anyone else's, visible only because of the admin/team-lead bypass) and
+-- clicking a category, editing/saving, toggling "Called today", or editing
+-- Call notes all silently fail — Postgres just returns 0 rows affected with
+-- no thrown error (no .select() is chained on any of these .update() calls
+-- in js/dials.js), so the UI often looks like nothing happened, or is
+-- momentarily inconsistent with what's actually in the database. This is the
+-- "sometimes it works, sometimes it doesn't" flakiness reported when picking
+-- a category — it actually depends on whose dial is open, not on timing.
+--
+-- Fix: widen dials_update_own with the exact same bypass dials_select_own
+-- already has. WITH CHECK mirrors USING since none of these updates ever
+-- change created_by itself, so the pre- and post-update row are equivalent
+-- for this check.
+-- ============================================================================
+drop policy if exists "dials_update_own" on dials;
+create policy "dials_update_own" on dials
+  for update using (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by))
+  with check (created_by = auth.uid() or is_admin() or is_team_lead_of(created_by));
+
+-- ============================================================================
+-- "Called today" no longer disappears the instant you pick "Not interested" /
+-- "Unable to contact" / "Intro call scheduled" — it now stays visible for the
+-- rest of that same local day, only actually hiding starting the NEXT day for
+-- whichever of those 3 categories the dial is still sitting in at that point
+-- (picking one of the other 3 categories un-hides it again immediately). See
+-- isCalledTodayVisible()/updateDialStatus() in js/dials.js. This date is the
+-- local calendar day (YYYY-MM-DD, no timezone conversion — set from the
+-- browser's local date same as called_today_date above) from which the hide
+-- should actually take effect; null means either currently a "show" category,
+-- or a hide-category dial that predates this column (treated as already
+-- hidden — see isCalledTodayVisible's comment on that).
+-- ============================================================================
+alter table dials add column if not exists status_hide_effective_date date;
+
+-- ============================================================================
+-- ROUND G: BUYER/SELLER PROGRESS REWORK — GENERALIZED SHARED-EVENT LOGGING.
+--
+-- Sellers and buyers now run different Progress-tab milestone lists (see
+-- SELLER_PROGRESS_STEPS/BUYER_PROGRESS_STEPS in js/clients.js), but 5
+-- milestone names are common to both: client_approval, client_meeting, loi,
+-- due_diligence, close (SHARED_EVENT_TYPES in js/clients.js). Each of these
+-- represents one real-world event shared between a specific buyer and a
+-- specific seller, so logging one now requires picking the other party (see
+-- openCounterpartPicker) and mirrors a matching client_events row onto BOTH
+-- clients' Timelines at once — generalizing what log_client_meeting() below
+-- already did, but only ever for the single client_meeting type. This
+-- log_shared_client_event() function replaces it (log_client_meeting is left
+-- in place, unused, rather than dropped) with the same trust boundary: it
+-- re-checks that the CALLER actually owns p_client_id before doing anything,
+-- then inserts both sides' rows.
+-- ============================================================================
+create or replace function log_shared_client_event(
+  p_client_id uuid,
+  p_counterpart_client_id uuid,
+  p_event_type text,
+  p_event_date timestamptz,
+  p_time text,
+  p_created_by uuid
+)
+returns void language plpgsql security definer as $$
+declare
+  v_owns boolean;
+  v_client record;
+  v_counterpart record;
+begin
+  select exists(select 1 from clients where id = p_client_id and created_by = auth.uid()) into v_owns;
+  if not v_owns then
+    raise exception 'You can only log an event on a client you created.';
+  end if;
+
+  select id, first_name, last_name, company_name, client_type into v_client from clients where id = p_client_id;
+  select id, first_name, last_name, company_name, client_type into v_counterpart from clients where id = p_counterpart_client_id;
+  if v_counterpart.id is null then
+    raise exception 'Counterpart client not found.';
+  end if;
+
+  insert into client_events (client_id, event_type, event_date, details, created_by)
+  values (
+    p_client_id, p_event_type, p_event_date,
+    jsonb_build_object(
+      'time', p_time,
+      'counterpart_client_id', v_counterpart.id,
+      'counterpart_name', case when v_counterpart.client_type = 'seller' and coalesce(v_counterpart.company_name, '') != ''
+        then v_counterpart.company_name
+        else trim(both ' ' from concat(v_counterpart.first_name, ' ', v_counterpart.last_name)) end
+    ),
+    p_created_by
+  );
+
+  insert into client_events (client_id, event_type, event_date, details, created_by)
+  values (
+    p_counterpart_client_id, p_event_type, p_event_date,
+    jsonb_build_object(
+      'time', p_time,
+      'counterpart_client_id', v_client.id,
+      'counterpart_name', case when v_client.client_type = 'seller' and coalesce(v_client.company_name, '') != ''
+        then v_client.company_name
+        else trim(both ' ' from concat(v_client.first_name, ' ', v_client.last_name)) end
+    ),
+    p_created_by
+  );
+end;
+$$;
+
+grant execute on function log_shared_client_event(uuid, uuid, text, timestamptz, text, uuid) to authenticated;
+
+-- ============================================================================
+-- ROUND G: buyer-only money_to_spend_min/max already existed on clients (see
+-- earlier migration) — no schema change needed for the buyer Notes tab
+-- rework (js/clientForm.js) beyond what's already there.
+--
+-- Buyer category rename ("Sold" -> "Bought company") is presentation-only
+-- (see statusLabel() in js/clients.js) — pipeline_status stays "sold" in the
+-- database, so no migration needed for it either.
+-- ============================================================================
