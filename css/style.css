@@ -1,0 +1,1292 @@
+:root {
+  /* Warm-tinted neutrals + a muted gold accent, taken from the
+     waystationadvisors.com marketing site palette (cream / deep navy / gold),
+     applied subtly on top of the app's original blue/gray UI. Every tab's
+     page background and every popup/modal use --bg / --surface, both plain
+     white in light mode (see the dark-mode override right below for the
+     black/inverted equivalents). */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --border: #eae3d3;
+  --text: #15213a;
+  --text-muted: #6b7280;
+  /* Between --text and --text-muted — used where something (e.g. a company
+     name next to a location) needs to read as slightly more prominent than
+     plain muted text, without going all the way to full-strength text. */
+  --text-muted-strong: #4b5563;
+  --accent: #2f5fed;
+  --accent-hover: #2449c4;
+  --gold: #c8a45a;
+  --gold-soft: #f4ead2;
+  --danger: #d1453b;
+  --success: #1f9d55;
+  --warn: #c98a12;
+  --radius: 8px;
+
+  /* Dial "Categories" / contact-status colors (see CONTACT_STATUSES in
+     js/dials.js) — used for the status dropdown, the Categories filter
+     swatches, and the dial list row/card backgrounds. Defined as variables
+     (rather than hardcoded hex in JS) so the dark-mode override below can
+     swap in shades that actually read well on a black background, instead
+     of the light-mode pastels staying pinned regardless of theme. */
+  --status-uncontacted-bg: #ffffff;
+  --status-uncontacted-border: #eae3d3;
+  --status-uncontacted-dot: #ffffff;
+  --status-unable-bg: #eef0f2;
+  --status-unable-border: #d8dde2;
+  --status-unable-dot: #9ca3af;
+  --status-not-interested-bg: #fdecec;
+  --status-not-interested-border: #f7d2ce;
+  --status-not-interested-dot: #e0776d;
+  --status-no-response-bg: #ffeede;
+  --status-no-response-border: #f7d9b8;
+  --status-no-response-dot: #f2a65a;
+  --status-callback-bg: #fff6e0;
+  --status-callback-border: #f3e6b8;
+  --status-callback-dot: #f2d34b;
+  --status-scheduled-bg: #e7f8ee;
+  --status-scheduled-border: #c9ebd4;
+  --status-scheduled-dot: #6fcf8e;
+
+  /* Client "Categories" pipeline-status color (see CLIENT_STATUSES in
+     js/clients.js) — only "Sold" needs a new tint (light blue); the other 4
+     client statuses reuse the dial status colors above directly (same shade,
+     per spec) rather than duplicating them under new variable names. */
+  --status-sold-bg: #e6f4fb;
+  --status-sold-border: #c7e6f5;
+  --status-sold-dot: #5aa9d6;
+
+  /* Mobile bottom tab bar (see .bottom-tabbar below) — a floating pill whose
+     colors need their own theme-aware variables since they're deliberately
+     NOT the same as --surface/--border (it floats over the page content
+     rather than sitting flush with it). */
+  --tabbar-bg: rgba(107, 114, 128, 0.85);
+  --tabbar-icon: rgba(255, 255, 255, .8);
+  --tabbar-active-bg: rgba(255, 255, 255, .18);
+  --tabbar-active-icon: #fff;
+}
+
+/* Full dark-mode support: every tab's background and every popup/modal
+   inherit from these same custom properties, so overriding them here is
+   enough to invert the whole app to black backgrounds / light text without
+   touching individual components. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --surface: #000000;
+    --border: #2c2c2c;
+    --text: #f2f2f2;
+    --text-muted: #a3adba;
+    --text-muted-strong: #c7cdd6;
+    --accent: #6d8dff;
+    --accent-hover: #8aa4ff;
+    --gold: #d9b876;
+    --gold-soft: #2a2412;
+    --danger: #ff6b61;
+    --success: #34c973;
+    --warn: #e0a83e;
+
+    /* Same hue family as the light-mode status colors above, just re-tuned
+       to dark, muted background tints with brighter swatches/dots so they
+       stay legible against black instead of looking washed-out or, in
+       uncontacted's case, glaring white-on-black. */
+    --status-uncontacted-bg: #1a1a1a;
+    --status-uncontacted-border: #333333;
+    --status-uncontacted-dot: #f2f2f2;
+    --status-unable-bg: #23262b;
+    --status-unable-border: #3a3f47;
+    --status-unable-dot: #9ca3af;
+    --status-not-interested-bg: #3a1f1d;
+    --status-not-interested-border: #5c2f2b;
+    --status-not-interested-dot: #f0897d;
+    --status-no-response-bg: #3a2a14;
+    --status-no-response-border: #5c4020;
+    --status-no-response-dot: #f5b673;
+    --status-callback-bg: #332c0f;
+    --status-callback-border: #4d431c;
+    --status-callback-dot: #e8c94a;
+    --status-scheduled-bg: #12301d;
+    --status-scheduled-border: #1f4a2e;
+    --status-scheduled-dot: #7ee0a0;
+
+    --status-sold-bg: #12262f;
+    --status-sold-border: #1e3c49;
+    --status-sold-dot: #6fc0ea;
+
+    /* Dark charcoal pill (not the same gray used in light mode) with the
+       accent blue used for the active tab, instead of a plain white
+       highlight — matches every other "active" state in dark mode. */
+    --tabbar-bg: rgba(28, 28, 30, 0.9);
+    --tabbar-icon: #a3adba;
+    --tabbar-active-bg: rgba(109, 141, 255, 0.22);
+    --tabbar-active-icon: #6d8dff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { touch-action: manipulation; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  touch-action: manipulation; /* blocks double-tap-to-zoom; see js/noZoom.js
+                                  for the rest of the page-zoom prevention */
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- Top nav (desktop) ---- */
+.topnav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topnav-bar .brand { font-weight: 700; font-size: 16px; padding-bottom: 3px; border-bottom: 2px solid var(--gold); }
+.topnav-bar .links { display: flex; gap: 18px; align-items: center; }
+.topnav-bar .links a { color: var(--text); font-size: 14px; padding: 6px 4px; }
+.topnav-bar .links a.active { color: var(--accent); font-weight: 600; }
+.topnav-bar .who { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-muted); }
+
+/* ---- Bottom tab bar (mobile only — shown via the max-width:720px media
+   query further down, which also hides .topnav-bar). A floating gray/
+   translucent pill, not flush with the screen edges, with white icons. */
+.bottom-tabbar {
+  display: none;
+  position: fixed; left: 16px; right: 16px; bottom: 14px; z-index: 40;
+  background: var(--tabbar-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 20px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  gap: 2px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+}
+.bottom-tabbar a, .bottom-tabbar button {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 10px 2px; font-size: 12px; font-weight: 600; color: var(--tabbar-icon);
+  border: none; background: none; cursor: pointer; border-radius: 14px; text-decoration: none;
+  font-family: inherit;
+}
+.bottom-tabbar a svg { display: block; }
+.bottom-tabbar a.active { color: var(--tabbar-active-icon); background: var(--tabbar-active-bg); }
+.bottom-tabbar a:active, .bottom-tabbar button:active { background: var(--tabbar-active-bg); }
+.role-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1ff;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- Layout ---- */
+main { max-width: 1080px; margin: 0 auto; padding: 24px; }
+
+/* Page header: now a bordered "tab/box" (like the app's other cards) instead
+   of bare text with a gold left rule — sits inset from the screen edges
+   (top/left/right) same as .mobile-card / .auth-card / etc. Contains the
+   dropdown-toggle + title on the left, a settings icon on the right. */
+.page-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 4px 0 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.page-header h1 { font-size: 20px; line-height: 1; margin: 0; display: flex; align-items: center; }
+.page-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* "X prospects displayed" next to the Dials heading — count of dials visible
+   in the currently selected tab, after the Categories filter is applied (see
+   updateProspectCount() in js/dials.js). */
+.dials-prospect-count { font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+
+/* Triangle dropdown toggle — replaces the old gold vertical rule. Points up
+   by default; flips to point down (via .open) while its menu is showing. */
+.page-header-toggle {
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+@media (hover: hover) { .page-header-toggle:hover { background: var(--gold-soft); color: var(--text); } }
+.page-header-toggle svg { transition: transform .15s ease; }
+.page-header-toggle.open svg { transform: rotate(180deg); }
+
+/* Settings icon button, right side of the header — same icon/position on
+   Profile/Clients/Dials. Intentionally has no click behavior yet. */
+.page-header-settings {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+@media (hover: hover) { .page-header-settings:hover { background: var(--gold-soft); color: var(--text); } }
+
+/* Dropdown menu revealed under the page header when the triangle is open.
+   Content differs per page (js/profile.js, js/clients.js, js/dials.js).
+   No top margin of its own — the 16px gap above comes from .page-header's
+   own bottom margin collapsing through (same as any two stacked blocks),
+   which matches the 16px margin-bottom below so the menu sits evenly spaced
+   between the header box above and whatever box comes next (previously a
+   -8px top margin pulled it noticeably closer to the header than to the box
+   beneath it). */
+.page-header-menu {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  margin: 0 0 16px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+}
+.page-header-menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 12px; border: none; background: none;
+  border-radius: 6px; font-size: 13.5px; font-weight: 600; color: var(--text); cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .page-header-menu-item:hover { background: var(--bg); } }
+/* Small icon on the right of each menu item's label, hinting at what it
+   does (a "+" for Add new, a color palette for Categories, etc.) — see
+   dials.html for the per-item SVGs. */
+.menu-item-icon { display: flex; align-items: center; justify-content: center; color: var(--text-muted); flex-shrink: 0; }
+.page-header-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-muted); }
+
+/* "Categories" submenu — 6 colored rectangles (with labels) shown to the
+   side of the Categories menu item. Positioned via JS (getBoundingClientRect)
+   as position:fixed, same escape-the-scroll-container pattern used for the
+   dial tab archive menu below. */
+.categories-submenu { position: fixed; z-index: 70; display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 180px; }
+.category-rect-option { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; cursor: pointer; border-radius: 6px; padding: 6px 8px; font-size: 12.5px; font-weight: 600; color: var(--text); background: var(--bg); font-family: inherit; }
+@media (hover: hover) { .category-rect-option:hover { background: var(--gold-soft); } }
+.category-rect-swatch { width: 24px; height: 16px; border-radius: 4px; border: 2px solid rgba(0,0,0,.1); flex-shrink: 0; }
+.category-rect-option.is-hidden { opacity: .4; }
+
+/* "Progress" filter (js/clients.js renderProgressSubmenu) reuses
+   .category-rect-option's rectangle-row look, but is additive (checked =
+   shown) rather than Categories' subtractive dimming, so it gets its own
+   checkbox-style swatch + a highlighted row when selected instead. */
+.progress-check-swatch { width: 16px; height: 16px; border-radius: 4px; border: 2px solid var(--border); background: var(--bg); display: flex; align-items: center; justify-content: center; color: transparent; flex-shrink: 0; }
+.category-rect-option.is-selected { background: var(--gold-soft); }
+.category-rect-option.is-selected .progress-check-swatch { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Select-mode toolbar (Dials page) — replaces the page-header-menu while
+   bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode. */
+.select-mode-bar {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 16px;
+}
+.select-mode-btn {
+  flex: 1 1 auto; white-space: nowrap; padding: 9px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .select-mode-btn:hover { background: var(--gold-soft); } }
+.select-mode-btn.danger { color: var(--danger); border-color: var(--danger); }
+@media (hover: hover) { .select-mode-btn.danger:hover { background: #fdecec; } }
+.select-mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.select-mode-hint { font-size: 12.5px; font-weight: 600; color: var(--accent); margin: -10px 0 14px; }
+
+/* Selection circle shown in place of instant-contact icons while select
+   mode is active (mobile card + desktop table row alike). */
+.select-circle {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border);
+  background: var(--surface); flex-shrink: 0; cursor: pointer; box-sizing: border-box;
+}
+.select-circle.selected { background: var(--accent); border-color: var(--accent); position: relative; }
+.select-circle.selected::after {
+  content: ""; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+
+/* ---- Cards / auth ---- */
+.auth-card {
+  max-width: 380px;
+  margin: 80px auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+}
+.auth-card h1 { font-size: 18px; margin: 0 0 4px; }
+.auth-card p.sub { color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
+
+/* ---- Forms ---- */
+label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+input, select, textarea {
+  width: 100%;
+  min-width: 0; /* prevents native date/time inputs' intrinsic content size
+                   from overriding width:100% and overflowing their container
+                   (seen on mobile Safari/Chrome) */
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+textarea { resize: vertical; min-height: 60px; }
+.btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+@media (hover: hover) { .btn:hover { background: var(--accent-hover); } }
+.btn.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn.danger { background: var(--danger); }
+@media (hover: hover) { .btn.danger:hover { background: #b53a31; } }
+.btn.yellow { background: #f2d34b; color: #5c4a05; }
+@media (hover: hover) { .btn.yellow:hover { background: #e6c53a; } }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.form-row { display: flex; gap: 12px; }
+.form-row > div { flex: 1; }
+.form-actions { margin-top: 16px; display: flex; gap: 8px; }
+
+/* ---- Table ---- */
+table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+th, td { text-align: left; padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--border); }
+th { background: var(--bg); color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
+tr:last-child td { border-bottom: none; }
+td.muted { color: var(--text-muted); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- Status pills ---- */
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.pill.new, .pill.pitched { background: #eef1ff; color: var(--accent); }
+.pill.vetted, .pill.interested { background: #fff6e0; color: var(--warn); }
+.pill.negotiating { background: #ffeede; color: #c9660c; }
+.pill.dead, .pill.closed_lost, .pill.cancelled { background: #fdecec; color: var(--danger); }
+.pill.closed_won, .pill.active, .pill.paid { background: #e7f8ee; color: var(--success); }
+.pill.paused, .pill.owed { background: #fff6e0; color: var(--warn); }
+.pill.invoiced { background: #eef1ff; color: var(--accent); }
+
+/* ---- Modal ---- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(20,22,28,.4);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 60px 16px; overflow-y: auto; z-index: 50;
+  /* Stops an over-scroll at the top/bottom of the popup's own content from
+     "chaining" into scrolling whatever's behind it (the dials list, etc.) —
+     paired with the body-position-lock done in JS (see openDialModal /
+     closeDialModal in js/dials.js) for full cross-browser coverage, since
+     overscroll-behavior alone doesn't reliably stop background scroll on
+     every mobile browser during the elastic bounce. */
+  overscroll-behavior: contain;
+}
+.modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; overflow-x: hidden; box-sizing: border-box; }
+.modal h2 { margin: 0 0 4px; font-size: 17px; }
+.modal .close { position: absolute; }
+
+/* ---- Full-screen modal (e.g. Teams) ---- */
+.fullscreen-modal {
+  position: fixed; inset: 0; background: var(--surface);
+  z-index: 100; display: flex; flex-direction: column;
+}
+.fullscreen-modal .fs-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 16px 24px; border-bottom: 1px solid var(--border); gap: 12px;
+}
+.fullscreen-modal .fs-header h2 { margin: 0; font-size: 18px; }
+/* Wraps the title + (optional) company/location subtitle underneath it —
+   e.g. the Clients detail popup, styled to match the Dials detail popup's
+   header (see .dial-modal-subtitle). */
+.fs-header-main { min-width: 0; }
+.fs-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-top: 2px; }
+.fullscreen-modal .fs-body { flex: 1; overflow-y: auto; padding: 24px; max-width: 720px; margin: 0 auto; width: 100%; }
+.fs-close {
+  width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); font-size: 16px; line-height: 1; cursor: pointer; color: var(--text-muted);
+}
+@media (hover: hover) { .fs-close:hover { background: var(--bg); } }
+
+/* ---- Profile card ---- */
+.profile-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 28px; max-width: 480px;
+}
+.profile-avatar {
+  width: 64px; height: 64px; border-radius: 999px; background: var(--accent);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 700; margin-bottom: 16px; overflow: hidden; position: relative;
+}
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Only clickable (to open the photo picker) while editing — see
+   enterProfileEditMode()/exitProfileEditMode() in js/profile.js. */
+.profile-avatar.editable { cursor: pointer; box-shadow: 0 0 0 3px var(--accent-hover); }
+.profile-avatar.editable::after {
+  content: "Edit"; position: absolute; inset: auto 0 0 0; text-align: center;
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  background: rgba(0,0,0,.55); color: #fff; padding: 3px 0;
+}
+.profile-card h1 { margin: 0 0 4px; font-size: 20px; }
+/* Account's own phone/email, between the listed position (role) and the
+   weekly call-count section — see js/profile.js. */
+.profile-contact-line { font-size: 13px; color: var(--text-muted); margin: 2px 0 0; }
+/* Editable versions of the name/phone/email fields, swapped in for the plain
+   text elements while the header's "Edit" option is active (see
+   enterProfileEditMode() in js/profile.js). */
+.profile-edit-input {
+  display: block; width: 100%; max-width: 260px; box-sizing: border-box;
+  font-family: inherit; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); padding: 6px 8px; margin: 2px 0;
+}
+.profile-edit-input.profile-edit-name { font-size: 18px; font-weight: 700; margin-top: 0; }
+
+.profile-calls-section { margin-top: 18px; }
+.profile-calls-text { font-size: 15px; font-weight: 700; color: var(--text); margin: 0 0 10px; }
+.profile-quota-status { font-size: 12px; font-weight: 600; margin-top: 2px; }
+.profile-quota-status.profile-quota-remaining { color: var(--danger); }
+.profile-quota-status.profile-quota-met { color: var(--success); }
+.profile-chart { width: 100%; max-width: 320px; }
+.profile-chart svg { width: 100%; height: auto; display: block; }
+.profile-chart-dot { fill: var(--accent); }
+.profile-chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.profile-chart-label { font-size: 9px; fill: var(--text-muted); }
+.profile-chart-value { font-size: 9px; font-weight: 700; fill: var(--text); }
+.profile-chart-grid { stroke: var(--border); stroke-width: 1; }
+.profile-chart-grid-label { font-size: 8px; fill: var(--text-muted); }
+/* Fixed weekly-quota reference line — always drawn at 50, always green,
+   regardless of how the rest of the chart's scale adapts to the data. */
+.profile-chart-quota-line { stroke: var(--success); stroke-width: 1.5; stroke-dasharray: 4 3; }
+
+/* "(Multiple accounts shown)" note — admin viewing 0 or 2+ accounts at once
+   via Accounts visible (see resolveSelectedAccounts() in js/profile.js). */
+.profile-multi-note { margin: 0 0 4px; font-size: 12px; }
+
+/* Upcoming events box — the 3rd calls-view option (see loadUpcomingEvents()
+   in js/profile.js). Same row shell as accounts-visible-row's list feel, but
+   each row shows two lines (client name, then type + date/time) instead of a
+   checkbox + label. */
+/* Fixed-height box with its own internal scroll (rather than growing however
+   tall the list is) so a long list of upcoming events doesn't push the rest
+   of the Profile page down — matches the "put upcoming events in a box you
+   scroll within" requirement. Bordered so it visually reads as its own
+   contained box, not just a bare list. */
+.upcoming-events-box {
+  display: flex; flex-direction: column; gap: 2px; max-width: 320px;
+  max-height: 280px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px;
+}
+.upcoming-event-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left; background: none; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; cursor: pointer; font-family: inherit; color: var(--text);
+}
+@media (hover: hover) { .upcoming-event-row:hover { background: var(--bg); } }
+.upcoming-event-name { font-size: 14px; font-weight: 700; }
+.upcoming-event-meta { font-size: 12px; color: var(--text-muted); }
+
+/* #upcomingEventOverlay (see profile.html/js) reuses .fullscreen-modal for
+   its inset:0/z-index, just with an iframe filling the body instead of the
+   usual .fs-header/.fs-body — the iframe's own content (clients.html,
+   deep-linked straight to a client's Timeline) already renders its own
+   fullscreen client modal, so no extra chrome is needed here beyond the
+   close button layered on top. */
+.upcoming-event-frame { flex: 1; width: 100%; border: none; }
+
+/* ---- Floating action button ---- */
+.fab {
+  position: fixed; right: 28px; bottom: 28px; width: 56px; height: 56px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 28px; line-height: 1; border: none;
+  box-shadow: 0 4px 14px rgba(47,95,237,.35); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+@media (hover: hover) { .fab:hover { background: var(--accent-hover); } }
+
+/* ---- Clickable list rows ---- */
+tr.clickable-row { cursor: pointer; }
+@media (hover: hover) { tr.clickable-row:hover { background: var(--bg); } }
+
+.hidden { display: none !important; }
+/* Shown only at mobile widths (opposite of .hidden's always-off) — see the
+   max-width:720px media query further down which flips this to visible. */
+.mobile-only { display: none; }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
+.error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+/* Plain inline red text (no background box) shown right under a single
+   field — used for the duplicate-email message on Add account instead of
+   the boxed .error-msg banner. */
+.field-error-text { color: var(--danger); font-size: 12.5px; margin: 4px 0 8px; }
+.help-text { color: var(--text-muted); font-size: 12.5px; margin-top: 6px; }
+.section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--gold); font-weight: 700; margin: 28px 0 10px; }
+.toolbar { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; }
+.toolbar input[type="search"] { max-width: 240px; }
+.count-badge { color: var(--text-muted); font-size: 13px; }
+
+/* ---- Popups need to sit above the full-screen client modal ---- */
+#requiredPopup, #confirmDeleteModal, #introCallPopup, #eventDateModal,
+#addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal,
+/* eventReportModal ("write a report" on checking a Timeline event) and
+   editEventModal (its Edit button) were added later (see js/clients.js) and
+   were missing from this list — left at the base .modal-backdrop z-index of
+   50, well under the client modal's fullscreen z-index of 100, so they
+   rendered invisibly underneath it. counterpartModal has the same "opens
+   while the client modal is already open" shape, so it's included too even
+   though it wasn't reported broken. */
+#eventReportModal, #editEventModal, #counterpartModal { z-index: 200; }
+
+/* ---- Collapsible accordion sections (client create/profile form) ---- */
+.accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+.accordion-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--bg); cursor: pointer; font-weight: 600; font-size: 14px;
+}
+@media (hover: hover) { .accordion-header:hover { background: var(--gold-soft); } }
+.accordion-header .chevron { color: var(--text-muted); font-size: 11px; transition: transform .15s ease; }
+.accordion-section.open .accordion-header .chevron { transform: rotate(180deg); }
+.accordion-body { padding: 16px; display: none; }
+.accordion-section.open .accordion-body { display: block; }
+
+/* ---- Inline required-field errors ---- */
+.field-label-row { display: flex; align-items: center; gap: 8px; }
+.field-required-msg { color: var(--danger); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+
+/* ---- Read-only field display (Profile tab, not editing) ---- */
+.readonly-field { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.readonly-field:last-child { border-bottom: none; }
+.readonly-field .rf-label { font-size: 11.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 3px; }
+.readonly-field .rf-value { font-size: 14px; white-space: pre-wrap; }
+.readonly-field .rf-value.empty { color: var(--text-muted); font-style: italic; }
+.rf-value-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.contact-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.contact-action-btn {
+  width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+}
+@media (hover: hover) { .contact-action-btn:hover { background: var(--gold-soft); color: var(--text); } }
+/* "Instant call" (tel:) isn't something a desktop computer can actually do,
+   so it's hidden there — text and email quick-actions stay on both. See
+   html.is-desktop-device further down (device-detection block). */
+html.is-desktop-device .contact-action-tel { display: none; }
+
+.edit-icon-btn {
+  width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); cursor: pointer; font-size: 14px; color: var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+@media (hover: hover) { .edit-icon-btn:hover { background: var(--bg); } }
+.edit-icon-btn.inline { width: 24px; height: 24px; font-size: 11px; }
+.accordion-header-left { display: flex; align-items: center; gap: 10px; }
+
+/* ---- Bottom sub-tab bar on the client detail view ---- */
+.subtabs { display: flex; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+.subtabs button {
+  flex: 1; padding: 12px; border: none; border-top: 2px solid transparent; margin-top: -1px;
+  background: none; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+}
+.subtabs button.active { color: var(--accent); border-top-color: var(--accent); }
+
+/* ---- Timeline tab ---- */
+.timeline-add-btn {
+  /* bottom nudged up from the original 28px on desktop — it was overlapping
+     the Timeline subtab button in the client popup at that position (see
+     .subtabs). Mobile still uses its own bottom value below, unaffected. */
+  position: fixed; right: 28px; bottom: 48px; z-index: 110;
+  width: 48px; height: 48px; border-radius: 999px; border: none; background: var(--accent);
+  color: #fff; font-size: 24px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px rgba(47,95,237,.35);
+}
+@media (hover: hover) { .timeline-add-btn:hover { background: var(--accent-hover); } }
+.timeline-add-menu {
+  position: fixed; right: 28px; bottom: 104px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12); z-index: 110; min-width: 150px; overflow: hidden;
+}
+.timeline-add-menu button { display: block; width: 100%; text-align: left; padding: 10px 14px; border: none; background: none; font-size: 13.5px; cursor: pointer; }
+@media (hover: hover) { .timeline-add-menu button:hover { background: var(--bg); } }
+
+.timeline-list { position: relative; padding-left: 20px; }
+.timeline-item { position: relative; padding-bottom: 24px; }
+.timeline-item:last-child { padding-bottom: 4px; }
+.timeline-dot { position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; border-radius: 999px; background: var(--accent); }
+.timeline-line { position: absolute; left: -16px; top: 14px; bottom: -10px; width: 2px; background: var(--border); }
+.timeline-item:last-child .timeline-line { display: none; }
+.timeline-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.timeline-box .tl-date { font-size: 12px; color: var(--text-muted); }
+.timeline-box .tl-type { font-size: 14px; font-weight: 600; }
+/* Title + triangle-toggle sit on one line together ("directly right of the
+   title" — see buildTimelineHTML in js/clients.js); the triangle only exists
+   at all once the event is confirmed. */
+.tl-title-row { display: flex; align-items: center; gap: 6px; }
+/* Edit (pencil) + confirm-happened controls on the right of a timeline
+   event's box — grouped together so justify-content:space-between on
+   .timeline-box still only ever sees two children (the date/type block, and
+   this group). Never shown on the auto-inserted "created" event (see
+   buildTimelineHTML in js/clients.js, which simply omits this whole group's
+   markup for that one event type). */
+.timeline-box-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.timeline-edit-btn {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+@media (hover: hover) { .timeline-edit-btn:hover { background: var(--bg); border-color: var(--accent); color: var(--accent); } }
+
+/* Triangle toggle next to a confirmed event's title — right-side-up
+   (collapsed) by default on every fresh render; clicking it adds .expanded
+   (rotate 180deg = upside down) and reveals the connected .timeline-report-box
+   directly below (see wireTimelineTab in js/clients.js). */
+.timeline-triangle-btn {
+  flex-shrink: 0; width: 16px; height: 16px; border: none; background: none; color: var(--text-muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+  transition: transform .15s ease;
+}
+.timeline-triangle-btn.expanded { transform: rotate(180deg); }
+@media (hover: hover) { .timeline-triangle-btn:hover { color: var(--accent); } }
+
+/* Report box connected directly underneath its event's .timeline-box (shares
+   its side borders, no gap, rounded only on the bottom) — hidden by default,
+   shown by the triangle toggle. */
+.timeline-report-box {
+  background: var(--bg); border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px;
+  margin-top: -1px; padding: 10px 14px; font-size: 13px; color: var(--text-muted); white-space: pre-wrap;
+}
+
+/* Confirm-happened circle — only rendered for events dated today or earlier
+   (see buildTimelineHTML's `future` check); future-dated events haven't
+   happened yet so they never get this control. Click toggles
+   client_events.confirmed (see toggleClientEventConfirmed in js/clients.js). */
+.timeline-confirm-btn {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+@media (hover: hover) { .timeline-confirm-btn:hover { border-color: var(--success); } }
+.timeline-confirm-btn.confirmed { background: var(--success); border-color: var(--success); }
+
+/* Dashed divider between future-dated events (clustered above, since the
+   list sorts newest-first) and today-or-past events below — only rendered
+   at all when at least one event of each kind is present (see
+   buildTimelineHTML). The future item right above it has its connecting
+   "rail" line suppressed so it doesn't visually cross the dashed rule. */
+.timeline-future-divider { border-top: 2px dashed var(--border); margin: 4px 0 20px; }
+.timeline-item.tl-before-divider .timeline-line { display: none; }
+
+/* Small "pick the date this happened" step shown before an event actually
+   gets logged (see openEventDateModal in js/clients.js) — reuses the regular
+   .modal-backdrop/.modal shell, just narrower. A little wider than before
+   (280 -> 320px) with overflow-x switched to visible instead of the base
+   .modal's hidden — on some mobile browsers the native <input type="date">
+   control's real rendered width doesn't perfectly respect width:100% (a
+   known quirk, see the min-width:0 comment on the global input rule above),
+   and overflow-x:hidden was silently clipping the right edge of that input
+   (and the popup's own padding) instead of just letting it render at its
+   natural size within the wider box. */
+#eventDateModal .modal { max-width: 320px; overflow-x: visible; }
+/* The native date-input control's real rendered width can still run a few
+   pixels past a plain width:100% on some browsers even inside the wider
+   320px modal above (see comment on that rule) — trimming it back to 92%
+   keeps its right edge safely inside the popup's padding instead of poking
+   past it. */
+#eventDateModal #eventDateInput { width: 92%; }
+
+/* Timeline "Edit event" popup (see openEditEventModal in js/clients.js) has
+   the exact same native-date-input overflow quirk as #eventDateModal right
+   above — its date input was running past the popup's right edge inside the
+   default 480px .modal. Same fix: trim the input's own width, no need to
+   widen/un-clip the modal itself here since the report textarea below it
+   already needs the full-width .modal shell. */
+#editEventModal #editEventDateInput { width: 92%; box-sizing: border-box; }
+
+/* ---- Client "Categories" pipeline-status dropdown (Profile tab) ----
+   Reuses the dial popup's .dial-status-* classes (see js/dials.js) directly
+   instead of duplicating that CSS — this override just stops the button from
+   stretching to the full width of its container the way it does inside
+   dials' align-items:stretch column, so it reads as a compact select-style
+   control here instead of a full-width bar.
+   display:inline-block is required here: .dial-status-menu is positioned
+   `right:0` relative to its nearest positioned ancestor, which is THIS
+   wrapper (.dial-status-dropdown has position:relative). Left as a plain
+   block div, it stretches to the full width of its container by default, so
+   right:0 anchored to the far right of that full-width div instead of to the
+   actual (much narrower) button sitting inside it — the menu appeared far
+   off to the right of the button rather than directly below it. Shrinking
+   the wrapper to fit its content fixes that once and for all. */
+.client-status-dropdown { margin: 0 0 16px; display: inline-block; }
+.client-status-dropdown .dial-status-btn { width: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 150px; }
+
+/* ---- Client Progress tab: vertical stepper of 7 fixed milestones ---- */
+.progress-stepper { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 380px; padding: 6px 0 6px 34px; }
+/* Short connectors drawn only BETWEEN adjacent dots (never above the first
+   or below the last) — replaces the old single rail that ran the full
+   height of the stepper regardless of how many dots existed. Positioned via
+   JS (see positionProgressConnectors in js/clients.js), which measures each
+   dot's real rendered position rather than relying on flexbox math here. */
+.progress-connector { position: absolute; width: 2px; background: var(--border); transform: translateX(-50%); }
+.progress-step { position: relative; display: flex; align-items: center; gap: 14px; }
+.progress-step-dot {
+  position: absolute; left: -34px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff; z-index: 1;
+}
+.progress-step.done .progress-step-dot { background: var(--success); border-color: var(--success); }
+.progress-step-label { font-size: 14px; font-weight: 600; color: var(--text); }
+.progress-step.done .progress-step-label { color: var(--text-muted); }
+
+/* "Buyers/Sellers met with" — fills the space below the stepper (see
+   buildProgressHTML in js/clients.js), listing confirmed, not-in-the-future
+   Client meeting counterparts as clickable name chips. */
+.progress-met-with { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.progress-met-with-title { font-size: 14px; font-weight: 700; color: var(--text); margin: 0 0 10px; }
+.progress-met-with-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.progress-met-with-chip {
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 14px; cursor: pointer;
+}
+@media (hover: hover) { .progress-met-with-chip:hover { background: var(--surface); border-color: var(--accent); } }
+.progress-met-with .empty-state { padding: 0; text-align: left; font-size: 13px; }
+
+/* ---- Dials page ---- */
+.segmented { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+.segmented button {
+  border: none; background: none; padding: 7px 18px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+}
+.segmented button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.segmented.small button { padding: 5px 13px; font-size: 12.5px; }
+
+.dials-header-controls { display: flex; align-items: center; gap: 10px; }
+
+/* Mobile-only single toggle button standing in for the segmented Current/
+   Archived switch (desktop keeps #statusSwitch — see media query below). */
+.status-toggle-mobile {
+  display: none;
+  border: none; border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 600;
+  background: var(--surface); color: var(--text); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.status-toggle-mobile.is-archived { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); box-shadow: none; }
+
+/* Status-filter "palette" button + its popover of toggleable color dots. */
+.status-filter { position: relative; }
+.status-filter-btn { border: none; background: none; cursor: pointer; padding: 2px; display: flex; align-items: center; justify-content: center; border-radius: 999px; }
+@media (hover: hover) { .status-filter-btn:hover { background: var(--gold-soft); } }
+.status-filter-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+  display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 18px; padding: 10px 8px; box-shadow: 0 4px 14px rgba(0,0,0,.12);
+}
+.status-filter-dot {
+  width: 22px; height: 22px; border-radius: 999px; border: 2px solid rgba(0,0,0,.1); cursor: pointer; padding: 0; position: relative; flex-shrink: 0;
+}
+.status-filter-dot.is-hidden { opacity: .35; }
+.status-filter-dot.is-hidden::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 999px;
+  background: linear-gradient(to top right, transparent 46%, var(--text) 48%, var(--text) 52%, transparent 54%);
+}
+
+.dials-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.dials-tabbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.dials-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.dial-tab {
+  padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  /* A long-press-to-drag (mobile) or click-and-drag (desktop) shouldn't ever
+     highlight/select the tab's text, or let the browser start its own native
+     text/element drag — both fought with the custom pointer-based reordering
+     in js/dials.js. */
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-user-drag: none;
+}
+@media (hover: hover) { .dial-tab:hover { background: var(--gold-soft); } }
+.dial-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.dial-tab-rename-input { padding: 7px 10px; border-radius: 6px; border: 1px solid var(--accent); font-size: 13px; width: 130px; }
+.dial-tab-add {
+  width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-muted); font-size: 16px; cursor: pointer; flex-shrink: 0;
+}
+@media (hover: hover) { .dial-tab-add:hover { background: var(--gold-soft); color: var(--text); } }
+
+/* Wraps each tab button so the mobile-only Archive/Unarchive affordance can
+   be absolutely positioned right below it without nesting a <button> inside
+   a <button> (invalid HTML). Also the unit that gets physically reordered
+   during a long-press drag. */
+.dial-tab-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+/* Only the active tab needs touch-action:none (it's the only one that can
+   ever be long-pressed/dragged) — this stops the horizontal-scrolling tab
+   bar from fighting the drag gesture, which was the main source of
+   "clunky" reordering. */
+html.is-mobile-device .dial-tab.active { touch-action: none; }
+.dial-tab.pressing { transform: scale(.96); box-shadow: 0 1px 4px rgba(0,0,0,.12); transition: transform .12s ease; }
+.dial-tab.dragging { opacity: .55; box-shadow: 0 2px 10px rgba(0,0,0,.18); position: relative; z-index: 30; cursor: grabbing; }
+/* position:fixed + JS-computed left/top (see js/dials.js) rather than
+   absolute-positioned inside .dial-tab-wrap — that wrap lives inside the
+   horizontally-scrolling .dials-tabbar, whose overflow-x:auto forces its
+   overflow-y to auto too, which would silently clip an absolutely
+   positioned popup that pokes out below it. Fixed positioning escapes that
+   entirely. */
+.dial-tab-archive-menu { position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.dial-tab-archive-btn {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+@media (hover: hover) { .dial-tab-archive-btn:hover { background: var(--gold-soft); } }
+.dial-tab-delete-btn {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; font-weight: 600; color: var(--danger); cursor: pointer; white-space: nowrap;
+}
+@media (hover: hover) { .dial-tab-delete-btn:hover { background: #fdecec; } }
+.dial-tab-transfer-btn {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+@media (hover: hover) { .dial-tab-transfer-btn:hover { background: var(--gold-soft); } }
+
+/* Admin-only "Transfer to..." popup — see #dialTabTransferMenu in dials.html. */
+.dial-tab-transfer-menu {
+  position: fixed; z-index: 65; display: flex; flex-direction: column; gap: 4px; padding: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12); min-width: 170px; max-width: 220px;
+}
+.dial-tab-transfer-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); padding: 2px 6px 4px; }
+.dial-tab-transfer-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+.dial-tab-transfer-option {
+  display: block; width: 100%; text-align: left; padding: 8px; border: none; background: none;
+  border-radius: 6px; font-size: 13px; color: var(--text); cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .dial-tab-transfer-option:hover { background: var(--gold-soft); } }
+.dial-tab-transfer-empty { padding: 8px; font-size: 12.5px; color: var(--text-muted); }
+
+/* Admin-only "Accounts visible" popup (Clients page) — see
+   #accountsVisiblePopup in clients.html. "Select all" is styled as its own
+   bolder, bordered row sitting above the plain per-account checkbox rows —
+   the "tab at the top" the feature was asked for — so it reads as a
+   master toggle rather than just one more account in the list. */
+.accounts-visible-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.accounts-visible-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 10px;
+  border: none; background: none; border-radius: 6px; font-size: 13.5px; color: var(--text);
+  cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .accounts-visible-row:hover { background: var(--bg); } }
+.accounts-visible-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent); }
+.accounts-visible-row.select-all {
+  font-weight: 700; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  margin-bottom: 4px;
+}
+.accounts-visible-empty { padding: 8px 10px; font-size: 12.5px; color: var(--text-muted); }
+/* Shown instead of/alongside the "Done" button (disabled via the native
+   `disabled` attribute, see wireAccountsVisiblePopup) whenever zero accounts
+   are selected — the popup can't be closed until at least one is checked. */
+.accounts-visible-warning { padding: 8px 10px 0; font-size: 12.5px; color: var(--danger); }
+/* Selected-row highlight — used by the "Who's the meeting with?" counterpart
+   picker (see openCounterpartPicker in js/clients.js), which reuses the
+   accounts-visible-row shell but needs an actual persistent selection state
+   rather than a checkbox toggle. */
+.accounts-visible-row.selected { background: var(--bg); border: 1px solid var(--accent); }
+
+/* ---- Dial detail/create popup ---- */
+.dial-modal-stack { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 540px; }
+.dial-modal { position: relative; width: 100%; max-width: 540px; }
+/* Swipe/prev-next transition between dials — a real slide+fade rather than
+   an instant content swap (see goToDial in js/dials.js, which toggles
+   transform/opacity inline and these classes around a re-render). The
+   transition applies by default; .dial-modal-jump disables it for one frame
+   so the "jump to the opposite off-screen edge" step right after the content
+   swap isn't itself animated — only the release back to centered is. */
+.dial-modal { transition: transform 0.18s ease, opacity 0.18s ease; }
+.dial-modal.dial-modal-jump { transition: none; }
+.dial-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dial-modal-header-main h2 { margin: 0; font-size: 17px; }
+.dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+/* Company name reads slightly more prominent than the location next to it
+   (see subtitle-company/subtitle-location in js/dials.js) — no comma between
+   them anymore, just a space. */
+.subtitle-company { color: var(--text-muted-strong); }
+.subtitle-location { color: var(--text-muted); }
+.subtitle-company + .subtitle-location { margin-left: 6px; }
+/* Pin icon that opens the dial/client's city+state in Google Maps, shown
+   right after the location text in the subtitle line. */
+.location-pin-link {
+  display: inline-flex; vertical-align: middle; margin-left: 8px;
+  color: var(--text-muted); position: relative; top: -0.5px;
+}
+@media (hover: hover) { .location-pin-link:hover { color: var(--accent); } }
+/* Client popup's "Location" field (see buildClientViewHTML in js/clients.js)
+   sits in a flex row instead of inline text — nudged right and down a touch
+   further than the default so it reads as centered next to the location
+   text rather than tucked up against it. */
+.location-pin-link.pin-body-row { margin-left: 4px; top: 1px; }
+/* Groups the actions row (Schedule intro call / X) and the status/edit row
+   into one right-aligned column, instead of two independently-flowing flex
+   rows. This is what keeps the gap between them small and CONSTANT (set by
+   this column's own `gap`) rather than being dictated by however tall the
+   name/subtitle block on the left happens to be (which could wrap to two
+   lines) — and what makes "Schedule intro call", the status/"Categories"
+   dropdown, and "Did call today" all line up on their right edges, since all
+   three now live in the same right-aligned column. */
+.dial-modal-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.dial-modal-editrow { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
+/* Status dropdown + "Did call today" stacked directly under one another,
+   right-aligned, with the edit (pencil) button beside the whole stack. */
+.dial-status-col { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+/* "Schedule intro call" — same height as the status dropdown/Did-call-today
+   buttons beside it (32px), and a softer, muted yellow: just a touch darker
+   than the "Callback, interested" status tint rather than the vivid yellow
+   used for the Calendly button elsewhere (see .btn.yellow), which read as
+   too bold/heavy sitting right next to the softer status colors. */
+.dial-schedule-intro-btn {
+  height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 14px; border-radius: 7px; border: none; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  background: #f2e2a0; color: #6b5410;
+  /* Its own text is shorter than the status dropdown/"Did call today"
+     buttons in .dial-status-col underneath, which stretch to match each
+     other's natural width — without this, "Schedule intro call" ended up
+     narrower and its LEFT edge sat further right than theirs (right edges
+     already lined up via .dial-modal-header-right's align-items:flex-end).
+     min-width just extends it leftward to roughly match. */
+  min-width: 158px;
+}
+@media (hover: hover) { .dial-schedule-intro-btn:hover { background: #ecd684; } }
+.dial-did-call-btn {
+  height: 30px; border-radius: 7px; border: 2px solid var(--border); background: var(--surface);
+  color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0 12px; white-space: nowrap;
+  /* min-width matches the button's previous rendered width (measured live)
+     from when its label was "Did call today" — shortening the label to
+     "Called today" would otherwise shrink the button since nothing else
+     forces its width. */
+  min-width: 129px;
+}
+@media (hover: hover) { .dial-did-call-btn:hover { background: var(--gold-soft); } }
+.dial-did-call-btn.active { background: var(--success); border-color: var(--success); color: #fff; }
+
+/* Quick call-status dropdown, left of the edit button in the popup's
+   edit-row. Never colors the popup itself — only the list rows/cards. */
+.dial-status-dropdown { position: relative; }
+/* width:100% matters here: .dial-status-dropdown (this button's parent) is
+   the flex item that stretches to match "Did call today" in .dial-status-col
+   (see align-items:stretch there) — but a stretched block parent doesn't
+   automatically widen an inline-block button inside it. Without this, the
+   button's own right edge fell short of the stretched wrapper's edge (and
+   therefore short of "Did call today" and "Schedule intro call" above it),
+   which is what made it look shifted left / misaligned. */
+.dial-status-btn {
+  width: 100%; height: 32px; min-width: 100px; border-radius: 7px; border: 2px solid var(--border);
+  cursor: pointer; padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--text);
+  white-space: nowrap;
+}
+.dial-status-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 10;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 190px; overflow: hidden;
+}
+.dial-status-option {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 12px; border: none; background: none; font-size: 13px; color: var(--text); cursor: pointer;
+}
+@media (hover: hover) { .dial-status-option:hover { background: var(--bg); } }
+.dial-status-dot {
+  width: 14px; height: 14px; border-radius: 999px; border: 2px solid var(--border); flex-shrink: 0;
+}
+
+/* Prev/Next now live inside the modal box itself (bottom), styled to match
+   the rest of the box's buttons rather than as plain text links. */
+.dial-nav-row { display: flex; gap: 8px; margin-top: 16px; }
+.dial-nav-btn { flex: 1; text-align: center; }
+.dial-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Editable "Call notes" textarea shown only in display mode (autosaves on
+   blur — see js/dials.js). */
+.call-notes-live { min-height: 80px; }
+.call-notes-saved { color: var(--success); }
+
+/* Intro Call date/time inputs are intentionally narrower than the default
+   full-width — the native browser date/time picker box only needs to be as
+   wide as its content, and full width was running close to (or off) the
+   right edge of the popup on narrow screens. */
+.ic-input-narrow { width: auto; max-width: 160px; }
+
+/* =============================================================================
+   RESPONSIVE / MOBILE LAYOUT
+   Originally this section was gated by viewport-width media queries
+   (max-width: 720px / 420px), which meant a phone held sideways (landscape)
+   got the desktop layout, and a narrow-but-real desktop browser window got
+   the mobile layout. Both were wrong — what should decide "mobile vs
+   desktop" is the device itself, not the current window/viewport size.
+
+   js/deviceDetect.js runs inline in <head> (before first paint, before this
+   stylesheet is even parsed) and adds either "is-mobile-device" or
+   "is-desktop-device" to <html> based on the browser's user agent. Every
+   rule below is scoped to html.is-mobile-device instead of living inside a
+   max-width media query, so it now depends on device type, not orientation
+   or window width. The one exception is the small-phone tuning block at the
+   bottom, which legitimately is about physical screen size (a small phone
+   vs a regular one) — it's still nested inside html.is-mobile-device so it
+   never applies on desktop, but keeps its own max-width query for that
+   narrower within-mobile distinction. Rotating a mobile device between
+   portrait/landscape only moves it in and out of that inner breakpoint —
+   it never leaves the mobile layout entirely.
+   ============================================================================= */
+
+/* ---- Mobile devices (phones/tablets), any orientation ---- */
+html.is-mobile-device main { padding: 16px 16px 78px; }
+html.is-mobile-device .page-header h1 { font-size: 18px; }
+
+/* Top nav is replaced entirely by the fixed bottom tab bar on mobile. */
+html.is-mobile-device .topnav-bar { display: none; }
+html.is-mobile-device .bottom-tabbar { display: flex; }
+html.is-mobile-device .mobile-only { display: block; }
+html.is-mobile-device .fab { bottom: 98px; }
+html.is-mobile-device .timeline-add-btn { bottom: 98px; }
+html.is-mobile-device .timeline-add-menu { bottom: 154px; }
+
+/* Forms: two-column rows (first/last name, city/state, revenue/employees,
+   min/max spend, etc.) stack into one column. */
+html.is-mobile-device .form-row { flex-direction: column; gap: 0; }
+html.is-mobile-device .form-actions { flex-wrap: wrap; }
+
+html.is-mobile-device .auth-card { margin: 40px auto; padding: 20px; max-width: calc(100% - 32px); }
+html.is-mobile-device .profile-card { padding: 20px; max-width: 100%; }
+
+/* Full-screen client/teams modal body: less side padding, no artificial
+   max-width centering column since the screen itself is already narrow. */
+html.is-mobile-device .fullscreen-modal .fs-header { padding: 14px 16px; }
+html.is-mobile-device .fullscreen-modal .fs-body { padding: 16px; max-width: 100%; }
+
+/* Centered popups (delete confirm, required-fields, intro call, new list):
+   less top padding so the popup isn't pushed down below the fold. */
+html.is-mobile-device .modal-backdrop { padding: 24px 12px; }
+html.is-mobile-device .modal { padding: 18px; }
+
+/* Dials toolbar: tighten the gap under the "Dials" heading slightly. */
+html.is-mobile-device .page-header { margin-bottom: 10px; }
+html.is-mobile-device .dials-toolbar { gap: 8px; margin-bottom: 8px; }
+html.is-mobile-device .segmented { width: 100%; justify-content: center; }
+
+/* Current/Archived: mobile shows the single toggle button instead of the
+   desktop segmented switch. */
+html.is-mobile-device #statusSwitch { display: none; }
+html.is-mobile-device .status-toggle-mobile { display: inline-flex; align-items: center; justify-content: center; }
+
+/* Tabs + the "+" add-tab button become one horizontally-scrollable strip
+   (instead of wrapping to new rows), so you scroll right to reach "+". */
+html.is-mobile-device .dials-tabbar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+html.is-mobile-device .dials-tabbar::-webkit-scrollbar { display: none; }
+html.is-mobile-device .dials-tabs { flex-wrap: nowrap; }
+html.is-mobile-device .dial-tab { white-space: nowrap; flex-shrink: 0; }
+
+/* Dial popup nav row (prev/next) gets a little breathing room so both
+   buttons are easy to tap with a thumb. */
+html.is-mobile-device .dial-nav-row { width: 100%; justify-content: space-between; gap: 8px; }
+html.is-mobile-device .dial-nav-btn { flex: 1; text-align: center; padding: 10px 8px; }
+
+/* ---- Tables become stacked "cards" instead of side-scrolling grids ----
+   Each <td> is labeled via a data-label attribute (set in clients.js /
+   dials.js / finance.js) so the field name still shows next to its value. */
+html.is-mobile-device table { border: none; background: none; }
+html.is-mobile-device thead { display: none; }
+html.is-mobile-device tbody { display: block; }
+html.is-mobile-device table tr {
+  display: block; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 10px; padding: 4px 12px;
+}
+html.is-mobile-device table tr:last-child { margin-bottom: 0; }
+html.is-mobile-device table td {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-bottom: 1px solid var(--border); padding: 8px 0; text-align: right;
+}
+html.is-mobile-device table td:last-child { border-bottom: none; }
+html.is-mobile-device table td.num { text-align: right; }
+html.is-mobile-device table td::before {
+  content: attr(data-label); font-weight: 600; color: var(--text-muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .02em;
+  text-align: left; flex-shrink: 0;
+}
+html.is-mobile-device table td:not([data-label])::before { content: none; }
+
+/* Clients and Dials get their own bespoke mobile card layout (below)
+   instead of the generic labeled-card table transform above, so hide
+   their <table> and show .mobile-list in its place. Finance keeps the
+   generic table-to-card transform since it wasn't redesigned. */
+html.is-mobile-device #tableWrap table, html.is-mobile-device #dialsTableWrap table { display: none; }
+
+/* Profile read-view rows (label/value + text/call/email quick-contact
+   icons) wrap instead of squeezing or overflowing on narrow screens. */
+html.is-mobile-device .rf-value-row { flex-wrap: wrap; }
+html.is-mobile-device .accordion-header-left { flex-wrap: wrap; }
+html.is-mobile-device .accordion-header { flex-wrap: wrap; gap: 8px; }
+
+/* ---- Mobile card list (Clients + Dials) ----
+   Hidden by default (desktop shows the <table> instead); shown on mobile
+   devices. */
+.mobile-list { display: none; }
+html.is-mobile-device .mobile-list { display: block; }
+.mobile-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 8px;
+}
+.mobile-card:last-child { margin-bottom: 0; }
+/* Wraps the small photo/initials circle + the name/position block together
+   as one flex child of .team-member-card (which is itself
+   justify-content: space-between against the icons/trash on the right) —
+   see memberAvatarHTML()/memberCardHTML() in js/profile.js. */
+.mc-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.mc-avatar {
+  width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0; overflow: hidden;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.mc-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mc-main { min-width: 0; }
+.mc-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mobile-card .contact-actions { flex-shrink: 0; }
+
+/* ---- Teams popup: member rectangles (same look as .mobile-card, but shown
+   on both mobile and desktop — Teams doesn't have a separate table view) ---- */
+.team-member-list { display: flex; flex-direction: column; gap: 8px; }
+/* Marks a team's lead (always sorted to the top — see loadTeams() in
+   js/profile.js): instead of a separator line between them and the rest of
+   the box, their own card gets a slightly darker/heavier border all the way
+   around. */
+.team-member-card.is-team-lead { border-color: var(--text-muted); border-width: 2px; }
+.team-member-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; cursor: pointer;
+  /* Mobile browsers show a translucent blue/gray "tap highlight" overlay on
+     any pressed element by default — harmless for a quick tap, but very
+     visible (and unwanted) during the hold-and-drag gesture used to move a
+     member between team boxes (see wireMemberDrag in js/profile.js). */
+  -webkit-tap-highlight-color: transparent;
+  /* On top of the tap-highlight fix above, a long-press on mobile can also
+     trigger the browser's native text-selection UI (blue selection highlight
+     + selection handles) on the card's text — same class of issue as the
+     dial tab long-press-drag on the Dials page (see .dial-tab), fixed the
+     same way here. */
+  user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; -webkit-user-drag: none;
+}
+/* The actual fix for "can't drag a card into another team box on mobile":
+   without this, the browser's native scroll-gesture recognition can claim a
+   touch-and-hold+move before wireMemberDrag's own pointer-capture kicks in,
+   which silently fires pointercancel and kills the drag — same root cause
+   the Dials page's tab-reorder gesture had (see html.is-mobile-device
+   .dial-tab.active above), fixed the same way here. Every card can be picked
+   up (admin-only — see wireMemberDrag), so unlike the single active dial tab
+   this applies to all of them, not just one. */
+html.is-mobile-device .team-member-card { touch-action: none; }
+@media (hover: hover) { .team-member-card:hover { background: var(--bg); } }
+.team-member-card .contact-actions { flex-shrink: 0; }
+/* Tapping a member's card expands their phone/email inline right below it
+   (see toggleMemberDetail() in js/profile.js) instead of opening a separate
+   popup. The card's bottom corners square off so it visually merges with
+   the detail block sitting flush underneath. */
+.team-member-card.expanded { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.team-member-detail {
+  background: var(--bg); border: 1px solid var(--border); border-top: none;
+  border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
+  margin-top: -1px; padding: 2px 14px 2px;
+}
+/* Keep the detail box's side/bottom border matching when it's expanded out
+   from underneath a team lead's highlighted card, so the seam between them
+   doesn't visually mismatch. */
+.team-member-card.is-team-lead + .team-member-detail { border-color: var(--text-muted); border-width: 0 2px 2px; }
+.team-member-detail .readonly-field:first-child { border-top: none; }
+.copy-toast { font-size: 11px; font-weight: 600; color: var(--success); }
+
+/* Wraps the (admin-only) key icon + instant-contact icons together so they
+   sit adjacent to each other as ONE flex child of .team-member-card (which
+   is justify-content: space-between) — see memberCardHTML/toggleMemberDetail
+   in js/profile.js. */
+.mc-right-icons { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Admin-only "reveal temp password" row, appears directly below a member
+   card when its key icon is clicked (see toggleTempPasswordReveal). Same
+   look/indentation family as .team-member-detail. */
+.temp-pw-reveal {
+  background: var(--bg); border: 1px solid var(--border); border-top: none;
+  border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
+  margin-top: -1px; padding: 8px 14px; display: flex; align-items: center; gap: 8px; font-size: 13px;
+}
+.temp-pw-label { color: var(--text-muted); }
+.temp-pw-value { font-weight: 600; font-family: monospace; letter-spacing: 0.02em; }
+
+/* ---- Admin/Teams management (js/profile.js) ---- */
+
+/* + / edit icons next to the Teams popup's X — admin-only, toggled via
+   .hidden in JS once loadTeams() knows whether the signed-in user is an
+   admin. The edit icon gets a subtle "on" state while edit mode is active. */
+.edit-icon-btn.active { background: var(--gold-soft); color: var(--text); border-color: var(--gold); }
+
+/* "+" popup: Account / Team, positioned the same escape-the-clip way as the
+   Categories submenu on Dials. */
+.teams-add-menu {
+  position: fixed; z-index: 210; display: flex; flex-direction: column; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 130px;
+}
+
+/* Team group header: name (renamable in edit mode) + member count on the
+   left, trash/chevron grouped on the right so justify-content:space-between
+   on .accordion-header still only sees two flex children. */
+.team-group-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Member count next to the group name — was previously reusing .help-text,
+   whose margin-top:6px (meant for that class's usual block-level use
+   elsewhere) pushed it visibly below the name text instead of sitting
+   centered on the same line. */
+.team-group-count { color: var(--text-muted); font-size: 12.5px; line-height: 1; }
+.accordion-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.team-group-name.renamable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.team-trash-btn {
+  width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+@media (hover: hover) { .team-trash-btn:hover { background: #fdecec; color: var(--danger); border-color: var(--danger); } }
+
+/* Position label ("Intern"/"Admin") under a member's name — clickable only
+   for admins (position-toggle class only rendered when isAdmin), opening a
+   tiny 3-option dropdown (Intern/Team lead/Admin) right below it. Same look
+   as .dial-status-menu. */
+.mc-sub-wrap { position: relative; display: inline-block; }
+.mc-sub.position-toggle { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.position-menu {
+  /* position: fixed (not absolute) so this escapes .accordion-section's
+     overflow: hidden clipping — an absolutely-positioned version was getting
+     cut off, hiding the "Admin" option. Left/top are set inline via JS
+     (see togglePositionMenu in js/profile.js), same escape-the-clip pattern
+     already used for the dial categories submenu and the Teams "+" menu. */
+  position: fixed; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.12); min-width: 100px; overflow: hidden;
+}
+.position-option {
+  display: block; width: 100%; text-align: left; padding: 7px 10px; border: none;
+  background: none; font-size: 12.5px; color: var(--text); cursor: pointer; font-family: inherit;
+}
+@media (hover: hover) { .position-option:hover { background: var(--bg); } }
+
+/* Hold-and-drag a member card into a different team box (admin-only — see
+   wireMemberDrag() in js/profile.js). The dragged card dims in place while a
+   floating "ghost" clone follows the pointer; whichever team box is
+   currently under the pointer is highlighted. */
+.team-member-card-wrap.dragging-source { opacity: .35; }
+.team-drag-ghost {
+  position: fixed; z-index: 300; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  transform: rotate(-1deg); opacity: .95;
+}
+.accordion-section.drag-over .accordion-header { background: var(--gold-soft); }
+.accordion-section.drag-over { border-color: var(--gold); }
+.copyable { cursor: pointer; }
+
+/* ---- Small phones ---- (still device-gated — see comment above; the
+   max-width query here is only for graphics fitting smaller physical
+   screens, not for distinguishing mobile from desktop) */
+@media (max-width: 420px) {
+  html.is-mobile-device main { padding: 12px 12px 78px; }
+  html.is-mobile-device .page-header h1 { font-size: 17px; }
+  html.is-mobile-device .fab { right: 18px; bottom: 88px; width: 52px; height: 52px; font-size: 26px; }
+  html.is-mobile-device .timeline-add-btn { right: 18px; bottom: 88px; }
+  html.is-mobile-device .timeline-add-menu { right: 18px; bottom: 144px; }
+  html.is-mobile-device .modal { padding: 16px; }
+  html.is-mobile-device .accordion-header { padding: 10px 12px; }
+  html.is-mobile-device .accordion-body { padding: 12px; }
+}
