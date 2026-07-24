@@ -205,7 +205,20 @@ const SELLER_MEETING_SUBTYPES = [
   { value: "intro_call", label: "Intro call" },
   { value: "client_meeting", label: "Client meeting" },
 ];
-const SELLER_CONTRACT_SUBTYPES = SELLER_PROGRESS_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "client_meeting");
+// .map() to {value, label} below is required — SELLER_PROGRESS_STEPS/
+// BUYER_PROGRESS_STEPS entries use a `type` key (not `value`), but the
+// subtype <select> this feeds (see openEventDetailsModal) reads `o.value`
+// for each <option>'s value attribute. Without this mapping every option's
+// value attribute silently comes out as the literal string "undefined"
+// (since `o.value` is undefined on a {type, label} object, and template
+// literals stringify `undefined` as the text "undefined") — which is
+// exactly why every logged Contract advancement event used to show up on
+// the Timeline titled "undefined": its event_type was really being saved as
+// the 4-character string "undefined", not a valid event type at all.
+const SELLER_CONTRACT_SUBTYPES = SELLER_PROGRESS_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "client_meeting").map((s) => ({
+  value: s.type,
+  label: s.label,
+}));
 const BUYER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
   { value: "intro_call", label: "Intro call" },
@@ -215,7 +228,7 @@ const BUYER_MEETING_SUBTYPES = [
 ];
 const BUYER_CONTRACT_SUBTYPES = BUYER_PROGRESS_STEPS.filter((s) =>
   ["contract_signed", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
-);
+).map((s) => ({ value: s.type, label: s.label }));
 function meetingSubtypesFor(clientType) {
   return clientType === "buyer" ? BUYER_MEETING_SUBTYPES : SELLER_MEETING_SUBTYPES;
 }
@@ -903,12 +916,55 @@ function isFutureDate(dateStr) {
   return d.getTime() > today.getTime();
 }
 
+// The actual instant to sort an event by. event_date alone isn't enough —
+// manually-logged events are all noon-anchored regardless of the time the
+// user picked (see openEventDetailsModal), so two events on the same
+// calendar date used to sort in whatever order they happened to be
+// inserted, NOT by the time-of-day the user actually chose. That's the "time
+// order is backwards" bug: later-in-the-day entries could end up below
+// earlier ones. Folding details.time (a "HH:MM" string) into the event's own
+// calendar date fixes that — same-day events now sort by their real chosen
+// time, consistent with the newest-first date ordering below. Events with no
+// time picked keep using event_date's own (noon) instant, unchanged from
+// before.
+function eventSortInstant(e) {
+  const d = new Date(e.event_date);
+  if (e.details?.time) {
+    const [hh, mm] = e.details.time.split(":").map(Number);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0).getTime();
+  }
+  return d.getTime();
+}
+
+// event_type strings that only ever mean "contract advancement" on EITHER
+// side (never appear in meetingSubtypesFor's lists) — used as a fallback for
+// events logged before details.category existed (see logClientEvent/
+// logSharedClientEvent). client_approval/client_meeting/loi/due_diligence/
+// close are ambiguous without a stored category (meeting on one side's list,
+// contract advancement on the other's — see meetingSubtypesFor/
+// contractSubtypesFor), so legacy rows of those types default to "meeting"
+// below rather than risk hiding an already-written report.
+const ADVANCEMENT_ONLY_TYPES = new Set(["nda_financials", "contract_signed", "secured_financing"]);
+function eventCategory(e) {
+  if (e.details?.category) return e.details.category;
+  if (ADVANCEMENT_ONLY_TYPES.has(e.event_type)) return "contract_advancement";
+  return "meeting";
+}
+// Reports are only meaningful for meetings that actually happened — a
+// contract advancement (or task) is either done or it isn't, nothing to
+// write up — so only "meeting"-category events get the write-a-report step
+// and the resulting triangle/report box on the Timeline (see
+// wireTimelineTab's confirm-button handler and buildTimelineHTML below).
+function eventIsMeeting(e) {
+  return eventCategory(e) !== "contract_advancement";
+}
+
 function buildTimelineHTML(events) {
   // Newest first — most recent milestone at the top of the feed. Since
   // future-dated events sort above today/past ones, they end up clustered
   // together at the top, letting the divider below sit at a single clean
   // boundary rather than needing to be threaded between scattered items.
-  const sorted = [...events].sort((a, b) => new Date(b.event_date) - new Date(a.event_date));
+  const sorted = [...events].sort((a, b) => eventSortInstant(b) - eventSortInstant(a));
   const futureFlags = sorted.map((e) => isFutureDate(e.event_date));
   const hasFuture = futureFlags.some(Boolean);
   const hasPastOrToday = futureFlags.some((f) => !f);
@@ -944,7 +1000,7 @@ function buildTimelineHTML(events) {
         // Both start collapsed/hidden on every fresh render (see
         // wireTimelineTab, which handles the expand/collapse purely in the
         // DOM afterward, no re-render needed).
-        if (e.confirmed) {
+        if (e.confirmed && eventIsMeeting(e)) {
           triangleHTML = `<button type="button" class="timeline-triangle-btn" data-event-id="${e.id}" title="Show report">${TRIANGLE_SVG}</button>`;
           reportBoxHTML = `<div class="timeline-report-box hidden" data-report-for="${e.id}">${escapeHtml(e.details?.report || "(No report written)")}</div>`;
         }
@@ -1039,7 +1095,14 @@ function wireTimelineTab() {
         toggleClientEventConfirmed(eventId, false);
       } else {
         const existing = currentClientEvents.find((ev) => ev.id === eventId);
-        openEventReportModal(existing?.details?.report || "", (reportText) => confirmEventWithReport(eventId, reportText));
+        // Only meeting-category events (see eventIsMeeting) ask for a
+        // report — a contract advancement or task just confirms directly,
+        // nothing to write up.
+        if (existing && eventIsMeeting(existing)) {
+          openEventReportModal(existing?.details?.report || "", (reportText) => confirmEventWithReport(eventId, reportText));
+        } else {
+          confirmEventWithReport(eventId, null);
+        }
       }
     });
   });
@@ -1071,13 +1134,21 @@ function openTimelineAddFlow(category) {
   openEventDetailsModal(category, currentClient.client_type, ({ eventDate, time, subtype, taskDescription }) => {
     const details = time ? { time } : null;
     if (category === "task") {
-      logClientEvent("task", eventDate, { ...(details || {}), task_description: taskDescription });
+      logClientEvent("task", eventDate, { ...(details || {}), task_description: taskDescription }, category);
     } else if (subtype === "intro_call") {
       openTimelineIntroCall(eventDate, time);
     } else if (SHARED_EVENT_TYPES.has(subtype)) {
-      openCounterpartPicker((counterpart) => logSharedClientEvent(subtype, eventDate, time, counterpart));
+      // category ("meeting" or "contract_advancement") is stashed in
+      // details.category on both sides' rows (see logSharedClientEvent) so
+      // the report feature can be correctly gated to meetings only even for
+      // a shared type like client_approval/close/loi/due_diligence, which
+      // is a Meeting subtype on one side's list and a Contract advancement
+      // subtype on the other's (see meetingSubtypesFor/contractSubtypesFor)
+      // — the event_type string alone can't tell you which one it was
+      // logged as.
+      openCounterpartPicker((counterpart) => logSharedClientEvent(subtype, eventDate, time, counterpart, category));
     } else {
-      logClientEvent(subtype, eventDate, details);
+      logClientEvent(subtype, eventDate, details, category);
     }
   });
 }
@@ -1262,10 +1333,11 @@ async function loadClientEvents() {
   currentClientEvents = error ? [] : data || [];
 }
 
-async function logClientEvent(eventType, eventDate, details = null) {
+async function logClientEvent(eventType, eventDate, details = null, category = null) {
   const payload = { client_id: currentClient.id, event_type: eventType, created_by: profile.id };
   if (eventDate) payload.event_date = eventDate;
-  if (details) payload.details = details;
+  const mergedDetails = category ? { ...(details || {}), category } : details;
+  if (mergedDetails) payload.details = mergedDetails;
   const { error } = await supabase.from("client_events").insert(payload);
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
@@ -1282,7 +1354,7 @@ async function logClientEvent(eventType, eventDate, details = null) {
 // supabase/schema.sql), so this calls the log_shared_client_event()
 // security-definer function instead, which checks the caller actually owns
 // `currentClient` and then inserts both sides.
-async function logSharedClientEvent(eventType, eventDate, time, counterpart) {
+async function logSharedClientEvent(eventType, eventDate, time, counterpart, category = null) {
   const { error } = await supabase.rpc("log_shared_client_event", {
     p_client_id: currentClient.id,
     p_counterpart_client_id: counterpart.id,
@@ -1290,14 +1362,20 @@ async function logSharedClientEvent(eventType, eventDate, time, counterpart) {
     p_event_date: eventDate,
     p_time: time || null,
     p_created_by: profile.id,
+    p_category: category,
   });
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   renderModalBody();
 }
 
+// Uses the delete_client_event() security-definer RPC (rather than a plain
+// table delete) so that if this event is one half of a shared buyer/seller
+// milestone (has a paired_event_id), its counterpart row on the OTHER
+// client's timeline is deleted too — see this file's top-of-session comment
+// on shared events being conceptually ONE event, not two independent copies.
 async function deleteClientEvent(eventId) {
-  const { error } = await supabase.from("client_events").delete().eq("id", eventId);
+  const { error } = await supabase.rpc("delete_client_event", { p_event_id: eventId });
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   await loadClientProgressStages(); // see toggleClientEventConfirmed's comment above
@@ -1314,7 +1392,7 @@ async function deleteClientEvent(eventId) {
 // confirmEventWithReport instead, since that also needs to save the report
 // text written in openEventReportModal.
 async function toggleClientEventConfirmed(eventId, newValue) {
-  const { error } = await supabase.from("client_events").update({ confirmed: newValue }).eq("id", eventId);
+  const { error } = await supabase.rpc("set_client_event_confirmed", { p_event_id: eventId, p_confirmed: newValue });
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   // Un/confirming a PROGRESS_STEPS event can change this client's Progress
@@ -1360,9 +1438,11 @@ function openEventReportModal(existingReport, onConfirm) {
 // alongside details.time/etc, so the other keys already on the event are
 // preserved rather than clobbered by a full-column replace.
 async function confirmEventWithReport(eventId, reportText) {
-  const existing = currentClientEvents.find((e) => e.id === eventId);
-  const details = { ...(existing?.details || {}), report: reportText };
-  const { error } = await supabase.from("client_events").update({ confirmed: true, details }).eq("id", eventId);
+  const { error } = await supabase.rpc("set_client_event_confirmed", {
+    p_event_id: eventId,
+    p_confirmed: true,
+    p_report: reportText ?? null,
+  });
   if (error) return showError(document.getElementById("clientModalError"), error);
   await loadClientEvents();
   await loadClientProgressStages(); // see toggleClientEventConfirmed's comment above
@@ -1394,7 +1474,7 @@ function openEditEventModal(eventId) {
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = e.details?.time || "";
 
-  reportWrap.classList.toggle("hidden", !e.confirmed);
+  reportWrap.classList.toggle("hidden", !e.confirmed || !eventIsMeeting(e));
   reportInput.value = e.details?.report || "";
 
   modal.classList.remove("hidden");
@@ -1412,9 +1492,15 @@ function openEditEventModal(eventId) {
     // Same noon-UTC-relative anchoring as openEventDetailsModal, so this can
     // never accidentally roll the date back a day in a timezone behind UTC.
     const eventDate = new Date(`${val}T12:00:00`).toISOString();
-    const details = { ...(e.details || {}), time: timeSelect.value || null };
-    if (e.confirmed) details.report = reportInput.value.trim();
-    const { error } = await supabase.from("client_events").update({ event_date: eventDate, details }).eq("id", eventId);
+    // update_client_event() RPC mirrors date/time/report onto the paired
+    // event on the counterpart's timeline too, if this is a shared event
+    // (see log_shared_client_event / paired_event_id).
+    const { error } = await supabase.rpc("update_client_event", {
+      p_event_id: eventId,
+      p_event_date: eventDate,
+      p_time: timeSelect.value || null,
+      p_report: e.confirmed && eventIsMeeting(e) ? reportInput.value.trim() : null,
+    });
     if (error) return showError(document.getElementById("clientModalError"), error);
     await loadClientEvents();
     renderModalBody();
