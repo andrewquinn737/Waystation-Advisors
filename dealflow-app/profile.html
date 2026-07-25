@@ -249,9 +249,12 @@
        (deep-linked straight to that client's Timeline, same as before) in an
        iframe layered on top of Profile — closing it just hides the overlay,
        and Profile itself was never actually left (see wireUpcomingEventOverlay
-       in js/profile.js). -->
+       in js/profile.js). No standalone close button here — the embedded
+       clients.html's own client-popup close (X) button dismisses this whole
+       overlay via postMessage (see js/profile.js); a separate floating close
+       button used to sit in the same top-right corner on top of it, reading
+       as two close buttons stacked on each other. -->
   <div class="fullscreen-modal hidden" id="upcomingEventOverlay">
-    <button type="button" class="fs-close" id="upcomingEventOverlayClose" title="Close" style="position:absolute; top:16px; right:16px; z-index:1;">&times;</button>
     <iframe id="upcomingEventFrame" class="upcoming-event-frame" src="about:blank" title="Client details"></iframe>
   </div>
 
