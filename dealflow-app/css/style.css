@@ -269,6 +269,16 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .category-rect-option.is-selected { background: var(--gold-soft); }
 .category-rect-option.is-selected .progress-check-swatch { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+/* "Select all" master toggle at the top of the Categories submenu (Clients +
+   Dials) — same bolder, bordered look as Accounts visible's own Select all
+   row (.accounts-visible-row.select-all below), so it reads as a master
+   toggle rather than just one more category in the list. Reuses the
+   Progress submenu's checkbox-style swatch (.progress-check-swatch) since
+   Select all has no color of its own to swatch. */
+.category-rect-option.select-all-option {
+  font-weight: 700; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 4px;
+}
+
 /* Select-mode toolbar (Dials page) — replaces the page-header-menu while
    bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode. */
 .select-mode-bar {
