@@ -11,6 +11,50 @@ export const CONTACT_ICONS = {
   pin: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
 };
 
+// ---------------------------------------------------------------------------
+// Which of the signed-in user's own mail accounts the "Email" instant-contact
+// icon should try to send from. Set once at page load (see setOwnEmail() call
+// in requireSession(), js/auth.js) from the signed-in profile's own `email`
+// column — every page (Profile/Clients/Dials) shares this same module-scoped
+// value rather than threading it through every single call site.
+//
+// There is no cross-provider way for a web page to choose which configured
+// mail account (or which phone line, for tel:/sms:) the device actually
+// sends from — that's controlled entirely by the OS/app's own default-account
+// setting, with no override available to page content. Gmail is the one
+// concrete exception: its own compose URL accepts an `authuser` hint that
+// preselects a matching signed-in Google account instead of falling back to
+// whichever one the Gmail app/site currently treats as default. So this is a
+// best-effort upgrade that only kicks in when the signed-in user's own email
+// is a Gmail address (gmail.com/googlemail.com, including Google Workspace
+// domains that are Gmail-hosted isn't reliably detectable from the address
+// alone, so those still fall back to plain mailto:); everyone else keeps the
+// exact same mailto: link as before. Phone/text (tel:/sms:) have no Gmail-
+// style equivalent on any platform, so those are unchanged.
+// ---------------------------------------------------------------------------
+let ownEmail = null;
+
+export function setOwnEmail(email) {
+  ownEmail = email || null;
+}
+
+function isGmailAddress(email) {
+  return /@(gmail\.com|googlemail\.com)$/i.test(email || "");
+}
+
+// Builds the href for the "Email" instant-contact icon. Plain `mailto:` for
+// everyone, except when the signed-in user's own profile email is a Gmail
+// address — then this opens Gmail's own compose view instead, with
+// `authuser` set to that address so Gmail preselects the matching account
+// rather than whichever Google account happens to be default.
+function buildEmailHref(targetEmail) {
+  if (isGmailAddress(ownEmail)) {
+    const params = new URLSearchParams({ view: "cm", fs: "1", to: targetEmail, authuser: ownEmail });
+    return `https://mail.google.com/mail/?${params.toString()}`;
+  }
+  return `mailto:${targetEmail}`;
+}
+
 // Small pin icon shown next to a dial/client's location — opens that
 // city/state in Google Maps in a new tab. Returns "" if there's no city/state
 // to map. `extraClass` (optional) adds a modifier class for contexts that
@@ -79,7 +123,7 @@ export function contactActionIcons({ phone, email } = {}) {
     parts.push(`<a class="contact-action-btn contact-action-tel" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);
   }
   if (email) {
-    parts.push(`<a class="contact-action-btn" href="mailto:${escapeHtml(email)}" title="Email">${CONTACT_ICONS.mailto}</a>`);
+    parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(email))}" title="Email">${CONTACT_ICONS.mailto}</a>`);
   }
   return parts.length ? `<div class="contact-actions">${parts.join("")}</div>` : "";
 }

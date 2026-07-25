@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient.js";
+import { setOwnEmail } from "./contactIcons.js";
 
 /**
  * Call at the top of every protected page. Redirects to login.html if
@@ -26,6 +27,13 @@ export async function requireSession() {
     window.location.href = "login.html";
     return null;
   }
+
+  // Lets the shared "Email" instant-contact icon (js/contactIcons.js) try to
+  // open under the signed-in user's own Gmail account instead of whichever
+  // Google account the device/browser currently treats as default — see the
+  // comment above setOwnEmail() for why this only ever helps Gmail addresses,
+  // never phone numbers, and always falls back to a plain mailto: otherwise.
+  setOwnEmail(profile.email);
 
   renderNav(profile);
   return { user: session.user, profile };
