@@ -503,13 +503,39 @@ els.search.addEventListener("input", renderTable);
 // ---------------------------------------------------------------------------
 
 function renderCategoriesSubmenu() {
-  els.categoriesSubmenu.innerHTML = CLIENT_STATUSES.map(
-    (s) => `
+  // "Select all" sits above the individual categories as a master toggle —
+  // same select-all/deselect-all-on-second-press pattern as the Accounts
+  // visible popup's own Select all row (see js/accountsVisible.js). "All
+  // selected" here means nothing is currently hidden.
+  const allCategoriesSelected = hiddenClientStatuses.size === 0;
+  const selectAllHTML = `
+      <button type="button" class="category-rect-option select-all-option ${allCategoriesSelected ? "is-selected" : ""}" data-select-all="1">
+        <span class="category-rect-swatch progress-check-swatch">${allCategoriesSelected ? CHECK_SVG : ""}</span>Select all
+      </button>`;
+  els.categoriesSubmenu.innerHTML =
+    selectAllHTML +
+    CLIENT_STATUSES.map(
+      (s) => `
       <button type="button" class="category-rect-option ${hiddenClientStatuses.has(s.value) ? "is-hidden" : ""}" data-value="${s.value}">
         <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(statusLabel(s))}
       </button>`
-  ).join("");
-  els.categoriesSubmenu.querySelectorAll(".category-rect-option").forEach((btn) => {
+    ).join("");
+  els.categoriesSubmenu.querySelector("[data-select-all]").addEventListener("click", (e) => {
+    e.stopPropagation();
+    // Pressing it again once everything is selected hides every category
+    // instead of being a no-op; otherwise (partial or none selected) it
+    // shows everything, same select-all/deselect-all-on-second-press pattern
+    // as Accounts visible's own Select all row.
+    if (hiddenClientStatuses.size === 0) {
+      CLIENT_STATUSES.forEach((s) => hiddenClientStatuses.add(s.value));
+    } else {
+      hiddenClientStatuses.clear();
+    }
+    persistHiddenClientStatuses();
+    renderCategoriesSubmenu();
+    renderTable();
+  });
+  els.categoriesSubmenu.querySelectorAll(".category-rect-option[data-value]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const v = btn.dataset.value;
@@ -1232,7 +1258,12 @@ function openEventDetailsModal(category, clientType, onConfirm) {
 // Continue is enabled.
 // ---------------------------------------------------------------------------
 function counterpartDisplayName(c) {
-  return c.client_type === "seller" && c.company_name ? c.company_name : clientDisplayName(c);
+  // Always the person's own name, never their company name — even for a
+  // seller-side counterpart, which elsewhere in the app is often shown by
+  // company name. Whoever's actually attending the meeting should be
+  // pickable/identifiable by their own name (counterpartSearchText below
+  // still matches on both, so searching a company name still works too).
+  return clientDisplayName(c);
 }
 
 // Search matches against BOTH the person's name and the company name,

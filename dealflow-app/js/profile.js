@@ -3,7 +3,7 @@ import { requireSession, showError, signOut } from "./auth.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { contactActionIcons, stopContactActionPropagation } from "./contactIcons.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
-import { wireDealSideToggle } from "./dealSide.js";
+import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 
 const session = await requireSession();
@@ -85,7 +85,6 @@ const els = {
   confirmDeleteAccountModal: document.getElementById("confirmDeleteAccountModal"),
   upcomingEventOverlay: document.getElementById("upcomingEventOverlay"),
   upcomingEventFrame: document.getElementById("upcomingEventFrame"),
-  upcomingEventOverlayClose: document.getElementById("upcomingEventOverlayClose"),
 };
 
 // Opens a client (deep-linked straight to its Timeline, same URL the old
@@ -104,10 +103,18 @@ function closeUpcomingEventOverlay() {
   els.upcomingEventFrame.src = "about:blank"; // stop the embedded page running in the background
   unlockPageScroll();
 }
-els.upcomingEventOverlayClose.addEventListener("click", closeUpcomingEventOverlay);
+// There used to also be a standalone "×" close button floating in the
+// overlay's own top-right corner (#upcomingEventOverlayClose, see
+// profile.html), on top of the embedded clients.html's own client-popup
+// close (X) button right underneath it — same corner, same look, so it
+// visibly read as two close buttons stacked on each other. Removed: the
+// embedded page's own close button already dismisses this whole overlay (see
+// the postMessage listener right below), so it was a redundant duplicate,
+// not a second real option.
+//
 // The embedded clients.html posts this the moment its OWN client-popup close
 // (X) button is pressed (see closeModal() in js/clients.js) — that's the
-// close button someone will actually reach for after reading the client's
+// one real close button someone reaches for after reading the client's
 // info, so it needs to dismiss this whole overlay, not just the iframe's
 // internal modal.
 window.addEventListener("message", (e) => {
@@ -1431,10 +1438,15 @@ async function loadCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
+  // Scoped to whichever side (Sellers/Buyers) is currently active — see
+  // js/dealSide.js. Always resolves to "seller" for non-admins, so this is a
+  // no-op filter for them (their calls are always logged as "seller" — see
+  // updateDialStatus/toggleDidCallToday in js/dials.js).
   const { data, error } = await supabase
     .from("call_status_changes")
     .select("changed_at")
     .in("user_id", ids)
+    .eq("dial_type", getDealSide())
     .gte("changed_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1489,10 +1501,14 @@ async function loadIntroCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
+  // Scoped to whichever side (Sellers/Buyers) is currently active — see
+  // js/dealSide.js and the matching client_type filter added to
+  // js/introCall.js's own intro_call_log inserts.
   const { data, error } = await supabase
     .from("intro_call_log")
     .select("scheduled_at")
     .in("user_id", ids)
+    .eq("client_type", getDealSide())
     .gte("scheduled_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 

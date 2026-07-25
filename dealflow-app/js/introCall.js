@@ -119,8 +119,14 @@ export function wireIntroCallForm(container, opts) {
     // client_events/Timeline, which each caller's own onScheduled below
     // handles (or doesn't) on its own terms. Skipped when logToGraph is
     // false (a future-dated Timeline entry — see the opts comment above).
+    // client_type is the client's own client_type (seller/buyer) — lets the
+    // Profile page's tracker filter to just the currently-active
+    // Sellers/Buyers side (see loadIntroCallsChart in js/profile.js).
+    // Falls back to "seller" on the off chance a caller ever passes a
+    // client-like object without one, so this never violates the column's
+    // NOT NULL constraint.
     if (userId && logToGraph) {
-      await supabase.from("intro_call_log").insert({ user_id: userId });
+      await supabase.from("intro_call_log").insert({ user_id: userId, client_type: client?.client_type || "seller" });
     }
 
     if (onScheduled) await onScheduled(client);
@@ -143,7 +149,7 @@ export function wireIntroCallForm(container, opts) {
       successEl.classList.remove("hidden");
 
       if (userId && logToGraph) {
-        await supabase.from("intro_call_log").insert({ user_id: userId });
+        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: client?.client_type || "seller" });
       }
 
       if (onScheduled) await onScheduled(client);

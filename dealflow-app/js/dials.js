@@ -1963,7 +1963,13 @@ async function toggleDidCallToday() {
     const { error } = await supabase.from("dials").update({ called_today_date: today }).eq("id", currentDial.id);
     if (error) return showError(els.dialModalError, error);
     currentDial.called_today_date = today;
-    await supabase.from("call_status_changes").insert({ user_id: profile.id, dial_id: currentDial.id });
+    // dial_type is a snapshot of currentType (the active Sellers/Buyers
+    // toggle) at the moment this call is logged — currentDial always
+    // belongs to whichever side is currently selected (dials only ever
+    // holds the active tab's rows), so this needs no extra lookup. Lets the
+    // Profile page's Outreach calls counter/graph filter to just the
+    // currently-active side (see loadCallsChart in js/profile.js).
+    await supabase.from("call_status_changes").insert({ user_id: profile.id, dial_id: currentDial.id, dial_type: currentType });
   }
 
   const idx = dials.findIndex((d) => d.id === currentDial.id);
@@ -2222,14 +2228,46 @@ els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.
 // from the page-header triangle menu's "Categories" item.
 // ---------------------------------------------------------------------------
 
+// Small standalone checkmark icon for the "Select all" row below — matching
+// the same checkmark used by Clients' analogous Categories submenu (see
+// CHECK_SVG in js/clients.js), just kept local here since dials.js doesn't
+// otherwise need one.
+const SELECT_ALL_CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+
 function renderCategoriesSubmenu() {
-  els.categoriesSubmenu.innerHTML = CONTACT_STATUSES.map(
-    (s) => `
+  // "Select all" sits above the individual categories as a master toggle —
+  // same select-all/deselect-all-on-second-press pattern as the Accounts
+  // visible popup's own Select all row (see js/accountsVisible.js). "All
+  // selected" here means nothing is currently hidden.
+  const allCategoriesSelected = hiddenStatuses.size === 0;
+  const selectAllHTML = `
+      <button type="button" class="category-rect-option select-all-option ${allCategoriesSelected ? "is-selected" : ""}" data-select-all="1">
+        <span class="category-rect-swatch progress-check-swatch">${allCategoriesSelected ? SELECT_ALL_CHECK_SVG : ""}</span>Select all
+      </button>`;
+  els.categoriesSubmenu.innerHTML =
+    selectAllHTML +
+    CONTACT_STATUSES.map(
+      (s) => `
       <button type="button" class="category-rect-option ${hiddenStatuses.has(s.value) ? "is-hidden" : ""}" data-value="${s.value}">
         <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
       </button>`
-  ).join("");
-  els.categoriesSubmenu.querySelectorAll(".category-rect-option").forEach((btn) => {
+    ).join("");
+  els.categoriesSubmenu.querySelector("[data-select-all]").addEventListener("click", (e) => {
+    e.stopPropagation();
+    // Pressing it again once everything is selected hides every category
+    // instead of being a no-op; otherwise (partial or none selected) it
+    // shows everything, same select-all/deselect-all-on-second-press pattern
+    // as Accounts visible's own Select all row.
+    if (hiddenStatuses.size === 0) {
+      CONTACT_STATUSES.forEach((s) => hiddenStatuses.add(s.value));
+    } else {
+      hiddenStatuses.clear();
+    }
+    persistHiddenStatuses();
+    renderCategoriesSubmenu();
+    renderDialsTable();
+  });
+  els.categoriesSubmenu.querySelectorAll(".category-rect-option[data-value]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const v = btn.dataset.value;
