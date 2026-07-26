@@ -251,6 +251,14 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .menu-item-icon { display: flex; align-items: center; justify-content: center; color: var(--text-muted); flex-shrink: 0; }
 .page-header-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-muted); }
 
+/* Diagonal slash drawn across the bell icon when notifications are off —
+   the <line> is always in the SVG markup (see profile.html/dials.html/
+   clients.html's #menuNotificationsBtn) but hidden by default; toggling
+   .notif-off on the button itself (see wireNotificationsToggle in
+   js/notifications.js) reveals it, same on/off idea as a muted-phone icon. */
+#menuNotificationsBtn .notif-slash { display: none; }
+#menuNotificationsBtn.notif-off .notif-slash { display: inline; }
+
 /* "Categories" submenu — 6 colored rectangles (with labels) shown to the
    side of the Categories menu item. Positioned via JS (getBoundingClientRect)
    as position:fixed, same escape-the-scroll-container pattern used for the

@@ -1254,6 +1254,7 @@ els.pageMenuToggle.addEventListener("click", closeArchiveMenu);
 wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
 els.pageSettingsBtn.addEventListener("click", closeArchiveMenu); // see comment above
 if (isAdmin || isTeamLead) {
+  els.dealSideToggleBtn.classList.remove("hidden");
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     currentType = getDealSide();
     els.settingsMenu.classList.add("hidden");

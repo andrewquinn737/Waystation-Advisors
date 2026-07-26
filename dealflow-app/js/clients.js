@@ -1798,6 +1798,7 @@ wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, 
 // visible stay individually gated to admin/team lead.
 wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
 if (isAdmin || isTeamLead) {
+  els.dealSideToggleBtn.classList.remove("hidden");
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");

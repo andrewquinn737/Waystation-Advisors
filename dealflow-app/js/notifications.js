@@ -38,7 +38,12 @@ export async function createNotification(userId, message, type = null) {
 export function wireNotificationsToggle(toggleBtn, labelEl, profile) {
   if (!toggleBtn || !labelEl) return;
   const render = () => {
-    labelEl.textContent = profile.notifications_enabled === false ? "Notifications: Off" : "Notifications: On";
+    const isOff = profile.notifications_enabled === false;
+    labelEl.textContent = isOff ? "Notifications: Off" : "Notifications: On";
+    // Draws a diagonal slash through the bell icon when off — see the
+    // .notif-slash <line> in profile.html/dials.html/clients.html and its
+    // CSS rule in css/style.css.
+    toggleBtn.classList.toggle("notif-off", isOff);
   };
   render();
   toggleBtn.addEventListener("click", async (e) => {
