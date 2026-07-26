@@ -5,6 +5,7 @@ import { contactActionIcons, stopContactActionPropagation } from "./contactIcons
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
+import { wireNotificationsToggle } from "./notifications.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -38,6 +39,8 @@ const els = {
   accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
   accountsVisibleBody: document.getElementById("accountsVisibleBody"),
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
+  menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
+  notificationsLabel: document.getElementById("notificationsLabel"),
   menuEditProfileBtn: document.getElementById("menuEditProfileBtn"),
   menuCallsViewBtn: document.getElementById("menuCallsViewBtn"),
   upcomingEventsSection: document.getElementById("upcomingEventsSection"),
@@ -85,6 +88,7 @@ const els = {
   confirmDeleteAccountModal: document.getElementById("confirmDeleteAccountModal"),
   upcomingEventOverlay: document.getElementById("upcomingEventOverlay"),
   upcomingEventFrame: document.getElementById("upcomingEventFrame"),
+  upcomingEventOverlayClose: document.getElementById("upcomingEventOverlayClose"),
 };
 
 // Opens a client (deep-linked straight to its Timeline, same URL the old
@@ -103,18 +107,10 @@ function closeUpcomingEventOverlay() {
   els.upcomingEventFrame.src = "about:blank"; // stop the embedded page running in the background
   unlockPageScroll();
 }
-// There used to also be a standalone "×" close button floating in the
-// overlay's own top-right corner (#upcomingEventOverlayClose, see
-// profile.html), on top of the embedded clients.html's own client-popup
-// close (X) button right underneath it — same corner, same look, so it
-// visibly read as two close buttons stacked on each other. Removed: the
-// embedded page's own close button already dismisses this whole overlay (see
-// the postMessage listener right below), so it was a redundant duplicate,
-// not a second real option.
-//
+if (els.upcomingEventOverlayClose) els.upcomingEventOverlayClose.addEventListener("click", closeUpcomingEventOverlay);
 // The embedded clients.html posts this the moment its OWN client-popup close
 // (X) button is pressed (see closeModal() in js/clients.js) — that's the
-// one real close button someone reaches for after reading the client's
+// close button someone will actually reach for after reading the client's
 // info, so it needs to dismiss this whole overlay, not just the iframe's
 // internal modal.
 window.addEventListener("message", (e) => {
@@ -382,7 +378,15 @@ els.avatarFileInput.addEventListener("change", async () => {
 // showing always reflects whatever account(s) are currently selected in
 // Accounts visible (see resolveSelectedAccounts above, and the settings-gear
 // wiring near the bottom of this file), so switching accounts re-fetches
-// rather than relying on a stale first-load cache.
+// rather than relying on a stale first-load cache. It ALSO always reflects
+// whichever side (Sellers/Buyers) is currently selected in the settings
+// gear's Sellers/Buyers toggle — see wireDealSideToggle's onChange callback
+// near the bottom of this file, which now calls refreshActiveCallsView() the
+// same way Accounts visible's onChange does, instead of only closing the
+// menu. Previously that callback did nothing else, so flipping Sellers/Buyers
+// alone left whichever chart was on screen showing the OLD side's numbers
+// until the Outreach/Intro toggle was also clicked (which happened to force
+// a reload as a side effect) — this is the fix for that.
 //
 // Upcoming events used to be the 3rd state in this cycle; it's now its own
 // always-visible box further down the page (see #upcomingEventsSection in
@@ -403,7 +407,8 @@ function showCallsView(view) {
 }
 
 // Re-runs whichever calls-view is currently on screen, plus the always-visible
-// Upcoming events box — called after the Accounts visible selection changes,
+// Upcoming events box — called after the Accounts visible selection changes
+// AND after the Sellers/Buyers side changes (see wireDealSideToggle below),
 // so the numbers/graph/events update immediately instead of only on next
 // toggle or reload.
 function refreshActiveCallsView() {
@@ -1339,7 +1344,9 @@ function fmtShortDate(d) {
 }
 
 // Weekly quota — also drives the "(N more calls to reach quota)" /
-// "(Quota met)" text under the calls-this-week heading.
+// "(Quota met)" text under the calls-this-week heading. Sellers only — see
+// loadCallsChart(), which skips the quota entirely in Buyers mode (a buyer-
+// side intern isn't held to the same 50-cold-calls/week target).
 const WEEKLY_QUOTA = 50;
 
 // Picks a "nice" gridline step (1/2/5 x a power of 10) for a given rough
@@ -1359,7 +1366,9 @@ function niceStep(roughStep) {
 // targetEl: the .profile-chart element to render into.
 // quota: a fixed reference line to always draw (and to guarantee fits on the
 // axis), or null/undefined to skip it entirely — used by the Outreach calls
-// chart (WEEKLY_QUOTA) but not by the Intro calls chart (no quota).
+// chart (WEEKLY_QUOTA, Sellers only) but not by the Intro calls chart (no
+// quota, either side) or Outreach calls while in Buyers mode (no quota
+// either — see loadCallsChart()).
 function renderCallsChart(targetEl, weekStarts, counts, quota) {
   const w = 300;
   const h = 150;
@@ -1402,7 +1411,8 @@ function renderCallsChart(targetEl, weekStarts, counts, quota) {
 
   // Fixed quota reference line, always green, regardless of the data — drawn
   // after the regular gridlines so it sits on top of them. Omitted entirely
-  // when there's no quota (the Intro calls tracker).
+  // when there's no quota (the Intro calls tracker, or Outreach calls in
+  // Buyers mode).
   const quotaLine = quota
     ? (() => {
         const quotaY = yFor(quota);
@@ -1425,11 +1435,15 @@ function renderCallsChart(targetEl, weekStarts, counts, quota) {
 // ids: account id(s) currently in view (see resolveSelectedAccounts).
 // quota: 50 for a single account (self or another), or 50 * ids.length when
 // viewing multiple accounts at once — see the "50 x number of accounts
-// selected" spec for Outreach calls only.
+// selected" spec for Outreach calls only. null entirely while in Buyers mode
+// (see getDealSide() from js/dealSide.js) — the 50-call quota is a sellers-
+// only cold-calling target and doesn't apply to buyer-side outreach, so
+// Buyers mode shows the plain weekly count with no quota line/text at all.
 async function loadCallsChart() {
   const selected = await resolveSelectedAccounts();
   const ids = selected.map((a) => a.id);
-  const quota = WEEKLY_QUOTA * (selected.length > 1 ? selected.length : 1);
+  const isBuyerSide = getDealSide() === "buyer";
+  const quota = isBuyerSide ? null : WEEKLY_QUOTA * (selected.length > 1 ? selected.length : 1);
 
   const thisWeekStart = startOfWeek(new Date());
   const weekStarts = [];
@@ -1438,15 +1452,10 @@ async function loadCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
-  // Scoped to whichever side (Sellers/Buyers) is currently active — see
-  // js/dealSide.js. Always resolves to "seller" for non-admins, so this is a
-  // no-op filter for them (their calls are always logged as "seller" — see
-  // updateDialStatus/toggleDidCallToday in js/dials.js).
   const { data, error } = await supabase
     .from("call_status_changes")
     .select("changed_at")
     .in("user_id", ids)
-    .eq("dial_type", getDealSide())
     .gte("changed_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1474,11 +1483,14 @@ async function loadCallsChart() {
     return t >= startOfToday && t < startOfTomorrow;
   }).length;
 
-  const remaining = quota - thisWeekCount;
-  const quotaHTML =
-    remaining <= 0
-      ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
-      : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
+  const quotaHTML = !quota
+    ? ""
+    : (() => {
+        const remaining = quota - thisWeekCount;
+        return remaining <= 0
+          ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
+          : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
+      })();
   els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week, ${todayCount} today${quotaHTML}`;
   renderCallsChart(els.callsChart, weekStarts, counts, quota);
 }
@@ -1501,14 +1513,10 @@ async function loadIntroCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
-  // Scoped to whichever side (Sellers/Buyers) is currently active — see
-  // js/dealSide.js and the matching client_type filter added to
-  // js/introCall.js's own intro_call_log inserts.
   const { data, error } = await supabase
     .from("intro_call_log")
     .select("scheduled_at")
     .in("user_id", ids)
-    .eq("client_type", getDealSide())
     .gte("scheduled_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1619,23 +1627,29 @@ els.profileSignOutBtn.addEventListener("click", signOut);
 
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
 
-// Settings gear popover — admin-only Sellers/Buyers toggle + Accounts visible
-// (see js/dealSide.js, js/accountsVisible.js), same shared components and
-// markup pattern as Clients/Dials. Changing either one here changes the same
-// underlying setting used on Clients and Dials too (single shared
-// localStorage key each) — on Profile specifically, changing Accounts
-// visible also drives which account(s)' info/numbers/events are shown (see
-// resolveSelectedAccounts, renderProfileHeader, refreshActiveCallsView).
-// Hidden entirely for interns (used to just be inert/unwired but still
-// visible, which was pointless since it has nothing for them). Team leads get
-// it too, same as admins — see getAllAccounts below for how their Accounts
-// visible list is scoped down to just their own teammates.
-if (!isAdminSync && !isTeamLeadSync) els.pageSettingsBtn.classList.add("hidden");
+// Settings gear popover — Sellers/Buyers toggle + Accounts visible stay
+// admin/team-lead-only (see js/dealSide.js, js/accountsVisible.js), but the
+// gear button itself, and the menu it opens, is now visible to EVERY role —
+// it used to be hidden entirely for interns (nothing in it was theirs), but
+// now it also holds the Notifications on/off toggle (see
+// js/notifications.js), which everyone gets. So: the toggle/menu wiring
+// always runs; only the Sellers/Buyers + Accounts visible buttons inside it
+// are individually shown/wired, and only for admins/team leads (both start
+// with the "hidden" class in profile.html and are unhidden here).
+els.pageSettingsBtn.classList.remove("hidden");
+wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+
 if (isAdminSync || isTeamLeadSync) {
-  wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+  els.dealSideToggleBtn.classList.remove("hidden");
+  // onChange now also calls refreshActiveCallsView() (previously it only
+  // closed the settings menu) — see the CALLS_VIEW_CYCLE comment above for
+  // why: without this, flipping Sellers/Buyers alone left whichever chart
+  // was on screen showing the OLD side's numbers until the Outreach/Intro
+  // toggle was also clicked.
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, () => {
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");
+    refreshActiveCallsView();
   });
   els.menuAccountsVisibleBtn.classList.remove("hidden");
   wireAccountsVisiblePopup({
@@ -1671,6 +1685,13 @@ if (isAdminSync || isTeamLeadSync) {
     escapeHtml,
   });
 }
+
+// Notifications on/off — everyone gets this, unlike Sellers/Buyers/Accounts
+// visible above. See js/notifications.js: this is just the preference
+// switch (stored on the signed-in account's own profile row, so it follows
+// them across devices/browsers); the bell/inbox UI itself is mounted in the
+// top nav by auth.js's requireSession(), on every page, not just Profile.
+wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 
 showCallsView("outreach");
 loadUpcomingEvents();

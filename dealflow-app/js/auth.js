@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { setOwnEmail } from "./contactIcons.js";
+import { mountNotificationsBell, checkDailyEventNotifications } from "./notifications.js";
 
 /**
  * Call at the top of every protected page. Redirects to login.html if
@@ -18,7 +19,7 @@ export async function requireSession() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role, phone, email, team_id, avatar_url")
+    .select("id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date")
     .eq("id", session.user.id)
     .single();
 
@@ -36,6 +37,16 @@ export async function requireSession() {
   setOwnEmail(profile.email);
 
   renderNav(profile);
+
+  // Notifications bell (desktop top bar only — see mountNotificationsBell's
+  // ".topnav .who" mount point) + the once-per-calendar-day "upcoming events
+  // today" check (deduped server-side via profiles.last_daily_notif_date —
+  // see js/notifications.js). Both run on every page, not just Profile, so
+  // the bell/badge and the daily check are always current no matter which
+  // page someone lands on first.
+  mountNotificationsBell(profile);
+  checkDailyEventNotifications(profile);
+
   return { user: session.user, profile };
 }
 

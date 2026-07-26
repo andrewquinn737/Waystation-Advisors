@@ -7,6 +7,7 @@ import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } fr
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
+import { createNotification, wireNotificationsToggle } from "./notifications.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -161,6 +162,8 @@ const els = {
   accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
   accountsVisibleBody: document.getElementById("accountsVisibleBody"),
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
+  menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
+  notificationsLabel: document.getElementById("notificationsLabel"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -223,6 +226,10 @@ const els = {
 if (isAdmin || isTeamLead) els.menuImportBtn.classList.remove("hidden");
 if (isAdmin) els.dialTabTransferBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
+// Notifications on/off — everyone gets this (see js/notifications.js),
+// unlike Import/Transfer/Accounts visible above which stay admin/team-lead
+// only.
+wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
@@ -411,6 +418,11 @@ const DIAL_FIELD_ALIASES = {
   // on the Austin Price sheet — the same field, just named more tersely.
   industry: ["industry", "industry sector", "sector", "mandate industry sector", "mandate"],
   summary: ["summary", "notes", "description"],
+  // Exact-match only (see headerMatchesField below), so this never collides
+  // with summary's own bare "notes" alias above — a "Call notes" column
+  // saves into the dial's Call notes box (call_notes), completely separate
+  // from the Summary field.
+  call_notes: ["call notes", "callnotes", "call note"],
   contact_status: ["status"],
 };
 
@@ -894,6 +906,13 @@ async function completeTransfer(targetId) {
   const { error } = await supabase.rpc("transfer_dial_list", { p_list_id: tabId, p_new_owner: targetId });
   if (error) return showError(els.errorBox, error);
 
+  // Let the recipient know a tab of dials just landed in their account — see
+  // js/notifications.js. Best-effort: a failure here shouldn't block or
+  // error out the transfer itself, which already succeeded above.
+  if (targetId !== profile.id) {
+    createNotification(targetId, `${profile.full_name} sent you a list of people to contact.`, "dial_transfer");
+  }
+
   archiveMenuTabId = null;
   currentListId = null;
   await loadLists();
@@ -1225,14 +1244,16 @@ wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, 
 // listeners on this same element) closes it explicitly.
 els.pageMenuToggle.addEventListener("click", closeArchiveMenu);
 
-// Settings gear popover — admin-only Sellers/Buyers toggle (see
-// js/dealSide.js). Hidden entirely for interns (it used to just be inert
-// but still visible/clickable, which was pointless since it has nothing
-// for them — now it's not even shown).
-if (!isAdmin && !isTeamLead) els.pageSettingsBtn.classList.add("hidden");
+// Settings gear popover — used to be hidden entirely for interns since it
+// only ever held the admin/team-lead-only Sellers/Buyers + Accounts visible
+// controls. Now it also holds the Notifications on/off toggle (see
+// wireNotificationsToggle above), which every role gets — so the gear
+// button and its menu are always shown/wired; only the Sellers/Buyers and
+// Accounts visible items inside it stay individually gated to admin/team
+// lead.
+wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+els.pageSettingsBtn.addEventListener("click", closeArchiveMenu); // see comment above
 if (isAdmin || isTeamLead) {
-  wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
-  els.pageSettingsBtn.addEventListener("click", closeArchiveMenu); // see comment above
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     currentType = getDealSide();
     els.settingsMenu.classList.add("hidden");

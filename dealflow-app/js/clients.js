@@ -15,6 +15,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
+import { wireNotificationsToggle } from "./notifications.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -293,6 +294,8 @@ const els = {
   accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
   accountsVisibleBody: document.getElementById("accountsVisibleBody"),
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
+  menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
+  notificationsLabel: document.getElementById("notificationsLabel"),
   clientSubtabs: document.getElementById("clientSubtabs"),
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
@@ -1787,13 +1790,14 @@ els.menuAddNewBtn.addEventListener("click", () => {
 els.clientModalClose.addEventListener("click", closeModal);
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: [els.categoriesSubmenu, els.progressSubmenu] });
 
-// Settings gear popover — Sellers/Buyers toggle (see js/dealSide.js), visible
-// to admins and team leads. Hidden entirely for interns (it used to just be
-// inert but still visible/clickable, which was pointless since it has
-// nothing for them — now it's not even shown).
-if (!isAdmin && !isTeamLead) els.pageSettingsBtn.classList.add("hidden");
+// Settings gear popover — used to be hidden entirely for interns since it
+// only ever held the admin/team-lead-only Sellers/Buyers + Accounts visible
+// controls (see js/dealSide.js). It now also holds a Notifications on/off
+// toggle (see js/notifications.js) that every role gets, so the gear button
+// and its menu are always shown/wired; only Sellers/Buyers and Accounts
+// visible stay individually gated to admin/team lead.
+wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
 if (isAdmin || isTeamLead) {
-  wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");
@@ -1811,6 +1815,9 @@ if (isAdmin || isTeamLead) {
     renderTable();
   });
 }
+// Notifications on/off — everyone gets this, unlike Sellers/Buyers/Accounts
+// visible above.
+wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 els.editProfileBtn.addEventListener("click", () => {
   currentMode = "edit";
   renderModalBody();
