@@ -1301,32 +1301,3 @@ html.is-mobile-device .team-member-card { touch-action: none; }
   html.is-mobile-device .accordion-body { padding: 12px; }
 }
 
-/* ---- Notifications bell (desktop top bar only — see mountNotificationsBell
-   in js/notifications.js, which mounts this right before .who's own
-   name/role-badge/Log out group). A small unread-count badge sits on the
-   bell's top-right corner; clicking the bell opens a dropdown panel listing
-   recent notifications, newest first. ---- */
-.notifications-bell-wrap { position: relative; display: flex; align-items: center; }
-.notifications-bell-btn {
-  position: relative; display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border-radius: 999px; border: none; background: none;
-  color: var(--text-muted); cursor: pointer;
-}
-@media (hover: hover) { .notifications-bell-btn:hover { background: var(--bg); color: var(--text); } }
-.notifications-badge {
-  position: absolute; top: -1px; right: -1px; min-width: 15px; height: 15px; padding: 0 3px;
-  border-radius: 999px; background: var(--danger, #d64545); color: #fff;
-  font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center;
-}
-.notifications-panel {
-  position: absolute; top: calc(100% + 8px); right: 0; z-index: 80;
-  width: 300px; max-height: 360px; overflow-y: auto;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 4px 14px rgba(0,0,0,.12); padding: 10px;
-}
-.notifications-panel-title { font-size: 12.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; padding: 2px 6px 8px; }
-.notifications-empty { padding: 10px 6px; font-size: 13px; color: var(--text-muted); }
-.notification-item { padding: 8px 6px; border-radius: 6px; cursor: default; }
-.notification-item.unread { background: var(--gold-soft); cursor: pointer; }
-.notification-message { font-size: 13px; color: var(--text); line-height: 1.35; }
-.notification-when { font-size: 11px; color: var(--text-muted); margin-top: 2px; }

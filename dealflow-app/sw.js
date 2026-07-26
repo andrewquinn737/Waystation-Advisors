@@ -2,12 +2,12 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v3";
+const CACHE = "waystation-shell-v4";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/finance.html", "/css/style.css",
   "/js/auth.js", "/js/profile.js", "/js/clients.js", "/js/dials.js",
-  "/js/finance.js", "/js/config.js", "/js/supabaseClient.js",
+  "/js/finance.js", "/js/config.js", "/js/supabaseClient.js", "/js/push.js",
   "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png",
 ];
 
@@ -50,5 +50,42 @@ self.addEventListener("fetch", (event) => {
         return res;
       })
       .catch(() => caches.match(req).then((cached) => cached || caches.match("/index.html")))
+  );
+});
+
+// Real Web Push (see js/push.js for the subscribe side, and the send-push
+// Edge Function for the send side). The payload is always
+// { title, body } JSON — see send-push/index.ts.
+self.addEventListener("push", (event) => {
+  let payload = { title: "Waystation Advisors", body: "" };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch {
+    // Non-JSON payload (shouldn't happen — send-push always sends JSON) —
+    // fall back to the plain text body rather than dropping the notification.
+    if (event.data) payload.body = event.data.text();
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      data: { url: "/profile.html" },
+    })
+  );
+});
+
+// Tapping a push notification focuses an already-open tab if one exists,
+// otherwise opens a new one straight to Profile.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "/profile.html";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
   );
 });

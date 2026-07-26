@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { setOwnEmail } from "./contactIcons.js";
-import { mountNotificationsBell, checkDailyEventNotifications } from "./notifications.js";
+import { subscribeToPush } from "./push.js";
 
 /**
  * Call at the top of every protected page. Redirects to login.html if
@@ -38,14 +38,14 @@ export async function requireSession() {
 
   renderNav(profile);
 
-  // Notifications bell (desktop top bar only — see mountNotificationsBell's
-  // ".topnav .who" mount point) + the once-per-calendar-day "upcoming events
-  // today" check (deduped server-side via profiles.last_daily_notif_date —
-  // see js/notifications.js). Both run on every page, not just Profile, so
-  // the bell/badge and the daily check are always current no matter which
-  // page someone lands on first.
-  mountNotificationsBell(profile);
-  checkDailyEventNotifications(profile);
+  // Real push notifications (see js/push.js) — subscribes this browser/
+  // device once (upserted by endpoint, so re-running here on every page
+  // load is harmless) so it can receive pushes from the send-push Edge
+  // Function even while the app is fully closed. The old in-app bell and
+  // client-side daily check are gone — the daily "upcoming events" check
+  // now runs server-side (see run_daily_event_notifications() /
+  // push_notifications_infra migration).
+  subscribeToPush(profile);
 
   return { user: session.user, profile };
 }

@@ -59,6 +59,12 @@
         <span class="menu-item-label">Teams</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
       </button>
+      <!-- Opens shareAppPopup below with Open/Copy for the app's Google Drive
+           link — see wireShareAppPopup() in js/profile.js. -->
+      <button type="button" class="page-header-menu-item" id="menuShareAppBtn">
+        <span class="menu-item-label">Share app</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuCallsViewBtn" data-view="outreach">
         <span class="menu-item-label">Outreach calls</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
@@ -153,6 +159,22 @@
       <div id="accountsVisibleBody"></div>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="accountsVisibleClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Share app" popup (see menuShareAppBtn above / wireShareAppPopup() in
+       js/profile.js) — Open launches the Drive link in a new tab, Copy link
+       copies it to the clipboard (same pattern as the existing copy-icon
+       buttons elsewhere on this page). -->
+  <div class="modal-backdrop hidden" id="shareAppPopup">
+    <div class="modal">
+      <h2>Share app</h2>
+      <p class="help-text">Send this link to anyone who needs to install Waystation Advisors.</p>
+      <div class="form-actions">
+        <button type="button" class="btn" id="shareAppOpenBtn">Open</button>
+        <button type="button" class="btn secondary" id="shareAppCopyBtn">Copy link</button>
+        <button type="button" class="btn secondary" id="shareAppCloseBtn">Close</button>
       </div>
     </div>
   </div>

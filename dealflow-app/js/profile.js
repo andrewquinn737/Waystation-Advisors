@@ -58,6 +58,11 @@ const els = {
   callsChart: document.getElementById("callsChart"),
   introCallsThisWeekText: document.getElementById("introCallsThisWeekText"),
   introCallsChart: document.getElementById("introCallsChart"),
+  menuShareAppBtn: document.getElementById("menuShareAppBtn"),
+  shareAppPopup: document.getElementById("shareAppPopup"),
+  shareAppOpenBtn: document.getElementById("shareAppOpenBtn"),
+  shareAppCopyBtn: document.getElementById("shareAppCopyBtn"),
+  shareAppCloseBtn: document.getElementById("shareAppCloseBtn"),
   menuTeamsBtn: document.getElementById("menuTeamsBtn"),
   teamsModal: document.getElementById("teamsModal"),
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
@@ -1456,6 +1461,7 @@ async function loadCallsChart() {
     .from("call_status_changes")
     .select("changed_at")
     .in("user_id", ids)
+    .eq("dial_type", getDealSide())
     .gte("changed_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1517,6 +1523,7 @@ async function loadIntroCallsChart() {
     .from("intro_call_log")
     .select("scheduled_at")
     .in("user_id", ids)
+    .eq("client_type", getDealSide())
     .gte("scheduled_at", weekStarts[0].toISOString());
   if (error) return showError(els.errorBox, error);
 
@@ -1624,6 +1631,29 @@ els.teamsCloseBtn.addEventListener("click", () => {
   unlockPageScroll();
 });
 els.profileSignOutBtn.addEventListener("click", signOut);
+
+// Share app popup — Open launches the install link in a new tab, Copy link
+// copies it to the clipboard (briefly relabeling the button, same
+// lightweight feedback idea as wireTapCopy's toast above).
+const SHARE_APP_URL = "https://drive.google.com/file/d/10qawN0VVOel8dwf1zm0EXYEqTSKAHzOG/view?usp=sharing";
+els.menuShareAppBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closePageHeaderMenu();
+  els.shareAppPopup.classList.remove("hidden");
+});
+els.shareAppCloseBtn.addEventListener("click", () => els.shareAppPopup.classList.add("hidden"));
+els.shareAppOpenBtn.addEventListener("click", () => window.open(SHARE_APP_URL, "_blank", "noopener"));
+els.shareAppCopyBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(SHARE_APP_URL);
+    const original = els.shareAppCopyBtn.textContent;
+    els.shareAppCopyBtn.textContent = "Copied!";
+    setTimeout(() => (els.shareAppCopyBtn.textContent = original), 1200);
+  } catch {
+    // Clipboard access can fail (permissions, insecure context, etc.) —
+    // silently ignore, Open still works as a fallback.
+  }
+});
 
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
 
