@@ -32,33 +32,90 @@ export function timeOptionsHTML(selected = "", { includeNoTime = true } = {}) {
   return opts.join("");
 }
 
-// The device's own current IANA zone — used as the picker's default so
-// nobody has to think about timezones unless they're deliberately
-// scheduling something for someone else's zone.
-export function defaultTimezone() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
-  } catch {
-    return "America/Chicago";
+// One representative zone per whole-hour UTC offset, -11 through +12 — the
+// classic "24 time zones" list, rather than the full ~400-entry IANA list
+// (too long to scan for picking a call time). Each option shows that zone's
+// current local time alongside its label (see timezoneOptionsHTML) so
+// picking the right one doesn't require doing the math yourself.
+const CURATED_ZONES = [
+  "Pacific/Niue", "Pacific/Honolulu", "America/Anchorage", "America/Los_Angeles",
+  "America/Denver", "America/Chicago", "America/New_York", "America/Halifax",
+  "America/Sao_Paulo", "Atlantic/South_Georgia", "Atlantic/Azores", "Europe/London",
+  "Europe/Paris", "Europe/Athens", "Europe/Moscow", "Asia/Dubai", "Asia/Karachi",
+  "Asia/Dhaka", "Asia/Bangkok", "Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney",
+  "Pacific/Noumea", "Pacific/Auckland",
+];
+const ZONE_LABELS = {
+  "Pacific/Niue": "Niue",
+  "Pacific/Honolulu": "Hawaii",
+  "America/Anchorage": "Alaska",
+  "America/Los_Angeles": "Pacific Time (US)",
+  "America/Denver": "Mountain Time (US)",
+  "America/Chicago": "Central Time (US)",
+  "America/New_York": "Eastern Time (US)",
+  "America/Halifax": "Atlantic Time (Canada)",
+  "America/Sao_Paulo": "São Paulo",
+  "Atlantic/South_Georgia": "South Georgia",
+  "Atlantic/Azores": "Azores",
+  "Europe/London": "London",
+  "Europe/Paris": "Paris",
+  "Europe/Athens": "Athens",
+  "Europe/Moscow": "Moscow",
+  "Asia/Dubai": "Dubai",
+  "Asia/Karachi": "Karachi",
+  "Asia/Dhaka": "Dhaka",
+  "Asia/Bangkok": "Bangkok",
+  "Asia/Shanghai": "Shanghai",
+  "Asia/Tokyo": "Tokyo",
+  "Australia/Sydney": "Sydney",
+  "Pacific/Noumea": "New Caledonia",
+  "Pacific/Auckland": "Auckland",
+};
+
+// Maps any IANA zone to whichever of the 24 curated options currently shares
+// its UTC offset (returns it unchanged if it's already one of them) — used
+// both for the device's own default zone and for prefilling an existing
+// event's stored timezone if it's ever something outside the curated list
+// (e.g. from before this list existed, or a zone like America/Detroit that
+// currently reads the same as America/New_York but isn't itself curated).
+export function nearestCuratedZone(zone) {
+  if (CURATED_ZONES.includes(zone)) return zone;
+  const targetOffset = getOffsetMs(new Date(), zone);
+  let best = "America/Chicago";
+  let bestDiff = Infinity;
+  for (const z of CURATED_ZONES) {
+    const diff = Math.abs(getOffsetMs(new Date(), z) - targetOffset);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = z;
+    }
   }
+  return best;
 }
 
-// Full IANA zone list where supported (all evergreen browsers this PWA
-// targets); a short curated fallback otherwise so the picker never ends up
-// empty on an older engine.
-const FALLBACK_ZONES = [
-  "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
-  "America/Anchorage", "Pacific/Honolulu", "America/Phoenix", "UTC",
-];
-export function timezoneOptionsHTML(selected = "") {
-  let zones;
+// The device's own current IANA zone, mapped to its nearest curated
+// equivalent — used as the picker's default so nobody has to think about
+// timezones unless they're deliberately scheduling something for someone
+// else's zone.
+export function defaultTimezone() {
+  let deviceZone;
   try {
-    zones = Intl.supportedValuesOf("timeZone");
+    deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
   } catch {
-    zones = FALLBACK_ZONES;
+    deviceZone = "America/Chicago";
   }
-  if (!zones.includes(selected)) zones = [selected, ...zones];
-  return zones.map((z) => `<option value="${z}"${z === selected ? " selected" : ""}>${z.replace(/_/g, " ")}</option>`).join("");
+  return nearestCuratedZone(deviceZone);
+}
+
+// The 24 curated zones above, each option's label showing that zone's
+// current local time appended at the end.
+export function timezoneOptionsHTML(selected = "") {
+  const now = new Date();
+  return CURATED_ZONES.map((z) => {
+    const time = now.toLocaleTimeString(undefined, { timeZone: z, hour: "numeric", minute: "2-digit" });
+    const label = `${(ZONE_LABELS[z] || z).padEnd(22)}— ${time}`;
+    return `<option value="${z}"${z === selected ? " selected" : ""}>${label}</option>`;
+  }).join("");
 }
 
 // Offset (ms) of `timeZone` from UTC at the instant `date` represents — how

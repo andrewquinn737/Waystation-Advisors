@@ -17,7 +17,7 @@ import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
-import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone } from "./eventTime.js";
+import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -1523,7 +1523,11 @@ function openEditEventModal(eventId) {
   dateInput.value = dateStrInZone(e.event_date, existingTz);
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = e.details?.time || "";
-  tzSelect.innerHTML = timezoneOptionsHTML(existingTz);
+  // The stored zone might not be one of the 24 curated options shown below
+  // (e.g. a zone picked before this list existed) — map it to whichever
+  // curated zone currently shares its offset so the dropdown still opens
+  // with the right one highlighted, instead of none matching at all.
+  tzSelect.innerHTML = timezoneOptionsHTML(nearestCuratedZone(existingTz));
   tzWrap.classList.toggle("hidden", !timeSelect.value);
   const onTimeChange = () => tzWrap.classList.toggle("hidden", !timeSelect.value);
   timeSelect.addEventListener("change", onTimeChange);
