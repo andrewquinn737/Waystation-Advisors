@@ -1203,12 +1203,10 @@ function openEventDetailsModal(category, clientType, onConfirm) {
   input.value = today.toISOString().slice(0, 10);
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = "";
-  // Time zone only matters once a time is actually picked — see
-  // js/eventTime.js. Defaults to this device's own zone.
+  // Always shown, not just once a time is picked — see js/eventTime.js.
+  // Defaults to this device's own zone.
   tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
-  tzWrap.classList.add("hidden");
-  const onTimeChange = () => tzWrap.classList.toggle("hidden", !timeSelect.value);
-  timeSelect.addEventListener("change", onTimeChange);
+  tzWrap.classList.remove("hidden");
 
   const showSubtype = category === "meeting" || category === "contract_advancement";
   subtypeWrap.classList.toggle("hidden", !showSubtype);
@@ -1227,7 +1225,6 @@ function openEventDetailsModal(category, clientType, onConfirm) {
     modal.classList.add("hidden");
     confirmBtn.removeEventListener("click", onConfirmClick);
     cancelBtn.removeEventListener("click", onCancelClick);
-    timeSelect.removeEventListener("change", onTimeChange);
   };
   const onConfirmClick = () => {
     const val = input.value;
@@ -1528,9 +1525,7 @@ function openEditEventModal(eventId) {
   // curated zone currently shares its offset so the dropdown still opens
   // with the right one highlighted, instead of none matching at all.
   tzSelect.innerHTML = timezoneOptionsHTML(nearestCuratedZone(existingTz));
-  tzWrap.classList.toggle("hidden", !timeSelect.value);
-  const onTimeChange = () => tzWrap.classList.toggle("hidden", !timeSelect.value);
-  timeSelect.addEventListener("change", onTimeChange);
+  tzWrap.classList.remove("hidden");
 
   reportWrap.classList.toggle("hidden", !e.confirmed || !eventIsMeeting(e));
   reportInput.value = e.details?.report || "";
@@ -1542,7 +1537,6 @@ function openEditEventModal(eventId) {
     saveBtn.removeEventListener("click", onSaveClick);
     deleteBtn.removeEventListener("click", onDeleteClick);
     cancelBtn.removeEventListener("click", onCancelClick);
-    timeSelect.removeEventListener("change", onTimeChange);
   };
   const onSaveClick = async () => {
     const val = dateInput.value;
