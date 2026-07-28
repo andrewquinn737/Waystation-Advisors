@@ -6,6 +6,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { wireNotificationsToggle } from "./notifications.js";
+import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -1457,15 +1458,26 @@ async function loadCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
+  const cacheKey = `calls_${getDealSide()}_${ids.join(",")}`;
   const { data, error } = await supabase
     .from("call_status_changes")
     .select("changed_at")
     .in("user_id", ids)
     .eq("dial_type", getDealSide())
     .gte("changed_at", weekStarts[0].toISOString());
-  if (error) return showError(els.errorBox, error);
+  let rows;
+  if (error) {
+    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    const cached = cacheGet(cacheKey);
+    if (!cached) return showOfflineNotice(false);
+    rows = cached;
+    showOfflineNotice(true);
+  } else {
+    hideOfflineNotice();
+    rows = data || [];
+    cacheSet(cacheKey, rows);
+  }
 
-  const rows = data || [];
   const counts = weekStarts.map((ws) => {
     const we = new Date(ws);
     we.setDate(we.getDate() + 7);
@@ -1519,15 +1531,26 @@ async function loadIntroCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
+  const cacheKey = `introCalls_${getDealSide()}_${ids.join(",")}`;
   const { data, error } = await supabase
     .from("intro_call_log")
     .select("scheduled_at")
     .in("user_id", ids)
     .eq("client_type", getDealSide())
     .gte("scheduled_at", weekStarts[0].toISOString());
-  if (error) return showError(els.errorBox, error);
+  let rows;
+  if (error) {
+    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    const cached = cacheGet(cacheKey);
+    if (!cached) return showOfflineNotice(false);
+    rows = cached;
+    showOfflineNotice(true);
+  } else {
+    hideOfflineNotice();
+    rows = data || [];
+    cacheSet(cacheKey, rows);
+  }
 
-  const rows = data || [];
   const counts = weekStarts.map((ws) => {
     const we = new Date(ws);
     we.setDate(we.getDate() + 7);
@@ -1567,7 +1590,13 @@ const UPCOMING_EVENT_TYPE_LABELS = {
 function fmtEventDateTime(iso, hasTime) {
   const d = new Date(iso);
   const dateStr = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  if (!hasTime) return dateStr;
+  // Once a time is chosen, event_date IS the real UTC instant for it (see
+  // openEventDetailsModal/js/eventTime.js in clients.js), so
+  // toLocaleTimeString here already shows it correctly converted to
+  // whichever device is viewing it — this used to always read as noon
+  // because event_date was unconditionally noon-anchored regardless of
+  // whether a time had actually been picked.
+  if (!hasTime) return `${dateStr}, No set time`;
   const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${dateStr}, ${timeStr}`;
 }
@@ -1579,18 +1608,30 @@ async function loadUpcomingEvents() {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
+  const cacheKey = "upcomingEvents_" + ids.join(",");
   const { data, error } = await supabase
     .from("client_events")
     .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, first_name, last_name, created_by)")
     .gte("event_date", startOfToday.toISOString())
     .in("clients.created_by", ids)
     .order("event_date", { ascending: true });
-  if (error) return showError(els.errorBox, error);
+  let eventRows;
+  if (error) {
+    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    const cached = cacheGet(cacheKey);
+    if (!cached) return showOfflineNotice(false);
+    eventRows = cached;
+    showOfflineNotice(true);
+  } else {
+    hideOfflineNotice();
+    eventRows = data || [];
+    cacheSet(cacheKey, eventRows);
+  }
 
   // Skip the auto-inserted "Client created" entry (never a real event to
   // follow up on) and anything already checked off as happened on the
   // client's own Timeline — once confirmed there, it's done, not upcoming.
-  const rows = (data || []).filter((r) => r.event_type !== "created" && !r.confirmed);
+  const rows = eventRows.filter((r) => r.event_type !== "created" && !r.confirmed);
   if (!rows.length) {
     els.upcomingEventsBox.innerHTML = `<div class="empty-state">No upcoming events.</div>`;
     return;

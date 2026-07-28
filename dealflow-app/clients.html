@@ -29,6 +29,9 @@
 <script src="js/noZoom.js"></script>
 </head>
 <body data-page="clients.html">
+  <!-- Hidden by requireSession() (js/auth.js) once the session/profile fetch
+       resolves — see .page-loading-overlay in css/style.css. -->
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="page-loading-spinner"></div></div>
   <nav class="topnav" id="topnav"></nav>
 
   <main>
@@ -101,6 +104,7 @@
          menuProgressBtn above and renderProgressSubmenu in js/clients.js). -->
     <div class="categories-submenu hidden" id="progressSubmenu"></div>
     <div id="errorBox" class="error-msg hidden"></div>
+    <div id="offlineNotice" class="offline-notice hidden"></div>
     <div class="toolbar">
       <input type="search" id="search" placeholder="Search clients..." />
       <span class="count-badge" id="countBadge"></span>
@@ -173,8 +177,16 @@
       <h2 id="eventDateModalTitle">Schedule event</h2>
       <label for="eventDateInput">Date</label>
       <input type="date" id="eventDateInput" />
-      <label for="eventTimeInput">Time (optional)</label>
+      <label for="eventTimeInput">Time (optional, 7 AM–7 PM)</label>
       <select id="eventTimeInput"></select>
+      <!-- Shown only once a time is picked (see openEventDetailsModal in
+           js/clients.js) — a bare date has no timezone to speak of. Defaults
+           to this device's own zone; changing it only matters for scheduling
+           something for someone in a different one. -->
+      <div class="hidden" id="eventTimezoneWrap">
+        <label for="eventTimezoneInput">Time zone</label>
+        <select id="eventTimezoneInput"></select>
+      </div>
       <div class="hidden" id="eventSubtypeWrap">
         <label for="eventSubtypeSelect">Type</label>
         <select id="eventSubtypeSelect"></select>
@@ -217,8 +229,12 @@
       <h2>Edit event</h2>
       <label for="editEventDateInput">Date</label>
       <input type="date" id="editEventDateInput" />
-      <label for="editEventTimeInput">Time (optional)</label>
+      <label for="editEventTimeInput">Time (optional, 7 AM–7 PM)</label>
       <select id="editEventTimeInput"></select>
+      <div class="hidden" id="editEventTimezoneWrap">
+        <label for="editEventTimezoneInput">Time zone</label>
+        <select id="editEventTimezoneInput"></select>
+      </div>
       <div class="hidden" id="editEventReportWrap">
         <label for="editEventReportInput">Report</label>
         <textarea id="editEventReportInput" rows="5"></textarea>

@@ -2,25 +2,51 @@
 // ("+" > Intro Call) and from the Dials "Create client" flow's
 // "Schedule intro call" button.
 //
-// TEMPORARY SIMPLIFIED VERSION: this just opens Waystation Advisors' public
-// Calendly booking page in a new tab, pre-filled with the client's name and
-// email, instead of booking through Calendly's API. No Calendly API token or
-// server-side secrets are required for this — it's the same as a client
-// clicking a "Book a call" link themselves.
+// Uses Calendly's public popup widget (assets/external/widget.js), loaded as
+// an overlay on top of the current page, instead of the old window.open()
+// new-tab link — that had no way back into the app at all, so nothing could
+// auto-close it or know what got booked. The widget's own postMessage
+// broadcasts "calendly.event_scheduled" the moment a booking is confirmed;
+// we use that to auto-close the popup immediately. That message only ever
+// carries the created event/invitee's *URI*, never the actual start
+// time/timezone (a Calendly platform limitation — resolving those requires
+// the Calendly API + a Personal Access Token), which is why the real
+// date/time/timezone still has to be captured separately — see
+// onCalendlyClosed below, wired only by Dials (js/dials.js), which opens its
+// own confirmation step for that right after the popup closes.
 //
-// The previous version of this file called a Supabase Edge Function
-// ("schedule-intro-call") that booked the call automatically via the
-// Calendly API, which needs a CALENDLY_TOKEN + CALENDLY_EVENT_TYPE_URI
-// secret set in Supabase. That Edge Function (supabase/functions/
-// schedule-intro-call) is still deployed and ready to go — once those two
-// secrets are set, this file can be swapped back to call it instead of
-// opening Calendly directly.
+// No Calendly API token or server-side secrets are required for any of
+// this — same trust level as a client clicking a public "Book a call" link
+// themselves.
 
 import { supabase } from "./supabaseClient.js";
 
 // Public Calendly link for the 30-minute intro call event. Update this if
 // the Calendly account or event type ever changes.
 const CALENDLY_BOOKING_URL = "https://calendly.com/mason-waystationadvisors/30min";
+
+// Lazily injects Calendly's embed script/stylesheet once per page load and
+// resolves once window.Calendly is ready to use. Safe to call repeatedly —
+// every caller shares the same in-flight/resolved promise.
+let calendlyLoadPromise = null;
+function loadCalendlyWidget() {
+  if (window.Calendly) return Promise.resolve();
+  if (calendlyLoadPromise) return calendlyLoadPromise;
+  calendlyLoadPromise = new Promise((resolve, reject) => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://assets.calendly.com/assets/external/widget.css";
+    document.head.appendChild(link);
+
+    const script = document.createElement("script");
+    script.src = "https://assets.calendly.com/assets/external/widget.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Calendly"));
+    document.head.appendChild(script);
+  });
+  return calendlyLoadPromise;
+}
 
 // allowSkip: shows a secondary "Log without Calendly" option beneath the
 // main button — used by the Clients Timeline's "+" > Intro call flow (see
@@ -32,7 +58,7 @@ const CALENDLY_BOOKING_URL = "https://calendly.com/mason-waystationadvisors/30mi
 export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
   return `
     <div class="intro-call-form">
-      <p class="help-text">This opens Calendly in a new tab, pre-filled with the client's name and email, so you can pick a time together.</p>
+      <p class="help-text">This opens Calendly right here, pre-filled with the client's name and email, so you can pick a time together.</p>
       <div id="introCallError" class="error-msg hidden"></div>
       <div id="introCallSuccess" class="help-text hidden" style="color: var(--gold, #7a5c00);"></div>
       <div class="form-actions">
@@ -44,7 +70,7 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 }
 
 // container: element the form HTML above was injected into.
-// opts: { client, createClient, internEmail, userId, logToGraph, onScheduled(client) }
+// opts: { client, createClient, internEmail, userId, logToGraph, onCalendlyClosed(client), onScheduled(client) }
 //   - client: an already-existing client row ({first_name,last_name,email,id,...}).
 //   - createClient: alternative to `client` — an async function called the
 //     moment "Open Calendly" is clicked, which should create the client
@@ -56,18 +82,24 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 //   - userId: the signed-in profile's id — logged to intro_call_log (see
 //     supabase/schema.sql) so the Profile page's "Intro calls" tracker can
 //     count every time this flow is used, from either Dials or Clients,
-//     independent of client_events/Timeline (see onScheduled below, which is
-//     each caller's own business and no longer touches client_events here).
+//     independent of client_events/Timeline.
 //   - logToGraph: defaults to true. The Clients Timeline's "+" > Intro call
 //     flow passes false when the chosen date is in the future — a call that
 //     hasn't happened yet shouldn't count toward the graph until its date
 //     arrives (see the logToGraph comment in js/clients.js's
 //     openTimelineIntroCall). Every other caller schedules "now", so the
 //     default of true is correct for them without passing anything.
+//   - onCalendlyClosed(client): fired right after the popup auto-closes on a
+//     confirmed booking, before onScheduled. Only Dials passes this (see
+//     handleScheduleIntroCallFromDial in js/dials.js) — it opens its own
+//     date/time/timezone confirmation step there, since Calendly's
+//     postMessage doesn't expose the actual chosen time (see the top-of-file
+//     comment).
+//   - onScheduled(client): fired after onCalendlyClosed, same as before.
 // (internEmail is accepted but unused in this simplified version — the
 // booking link isn't per-intern.)
 export function wireIntroCallForm(container, opts) {
-  const { client: initialClient, createClient, userId, logToGraph = true, onScheduled } = opts;
+  const { client: initialClient, createClient, userId, logToGraph = true, onCalendlyClosed, onScheduled } = opts;
   const btn = container.querySelector("#scheduleCallBtn");
   const skipBtn = container.querySelector("#skipCalendlyBtn");
   const errEl = container.querySelector("#introCallError");
@@ -103,40 +135,56 @@ export function wireIntroCallForm(container, opts) {
       return;
     }
 
-    const params = new URLSearchParams();
-    const name = `${client.first_name || ""} ${client.last_name || ""}`.trim();
-    if (name) params.set("name", name);
-    params.set("email", client.email);
-
-    const separator = CALENDLY_BOOKING_URL.includes("?") ? "&" : "?";
-    window.open(`${CALENDLY_BOOKING_URL}${separator}${params.toString()}`, "_blank", "noopener");
-
-    successEl.textContent = "Opened Calendly in a new tab.";
-    successEl.classList.remove("hidden");
-
-    // Counts toward the Profile page's "Intro calls" weekly tracker — see
-    // loadIntroCallsChart() in js/profile.js. Deliberately separate from
-    // client_events/Timeline, which each caller's own onScheduled below
-    // handles (or doesn't) on its own terms. Skipped when logToGraph is
-    // false (a future-dated Timeline entry — see the opts comment above).
-    // client_type is the client's own client_type (seller/buyer) — lets the
-    // Profile page's tracker filter to just the currently-active
-    // Sellers/Buyers side (see loadIntroCallsChart in js/profile.js).
-    // Falls back to "seller" on the off chance a caller ever passes a
-    // client-like object without one, so this never violates the column's
-    // NOT NULL constraint.
-    if (userId && logToGraph) {
-      await supabase.from("intro_call_log").insert({ user_id: userId, client_type: client?.client_type || "seller" });
+    try {
+      await loadCalendlyWidget();
+    } catch {
+      errEl.textContent = "Could not load Calendly. Check your connection and try again.";
+      errEl.classList.remove("hidden");
+      return;
     }
 
-    if (onScheduled) await onScheduled(client);
+    const name = `${client.first_name || ""} ${client.last_name || ""}`.trim();
+    window.Calendly.initPopupWidget({
+      url: CALENDLY_BOOKING_URL,
+      prefill: { name, email: client.email },
+    });
+
+    // One-shot: Calendly broadcasts this via postMessage the instant a
+    // booking is confirmed inside the popup. Removing the listener right
+    // away means a second, unrelated Calendly embed elsewhere on the page
+    // (there isn't one today, but this keeps it safe) can't double-fire this
+    // handler.
+    const onMessage = async (e) => {
+      if (e.data?.event !== "calendly.event_scheduled") return;
+      window.removeEventListener("message", onMessage);
+      window.Calendly.closePopupWidget();
+
+      successEl.textContent = "Intro call scheduled.";
+      successEl.classList.remove("hidden");
+
+      // Counts toward the Profile page's "Intro calls" weekly tracker — see
+      // loadIntroCallsChart() in js/profile.js. client_type is the client's
+      // own client_type (seller/buyer), letting that tracker filter to just
+      // the currently-active Sellers/Buyers side. Falls back to "seller" on
+      // the off chance a caller ever passes a client-like object without
+      // one, so this never violates the column's NOT NULL constraint.
+      if (userId && logToGraph) {
+        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: client?.client_type || "seller" });
+      }
+
+      if (onCalendlyClosed) await onCalendlyClosed(client);
+      if (onScheduled) await onScheduled(client);
+    };
+    window.addEventListener("message", onMessage);
   });
 
   // "Skip Calendly, just log it" — same end result (onScheduled fires, the
   // graph gets credited) minus actually opening Calendly, and without
   // requiring the client to have an email on file (Calendly's pre-fill is
   // the only reason that was ever needed). See the allowSkip comment on
-  // buildIntroCallFormHTML above for when this button even exists.
+  // buildIntroCallFormHTML above for when this button even exists — Dials
+  // never passes allowSkip, so it never wires onCalendlyClosed through this
+  // path either.
   if (skipBtn) {
     skipBtn.addEventListener("click", async () => {
       errEl.classList.add("hidden");

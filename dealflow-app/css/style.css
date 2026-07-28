@@ -527,6 +527,29 @@ tr.clickable-row { cursor: pointer; }
 .mobile-only { display: none; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
 .error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+
+/* Shared "you're offline" banner (see js/offlineCache.js's showOfflineNotice/
+   hideOfflineNotice) — one per page, reused by whichever loader last hit a
+   network error, so wording never stacks or contradicts across sections. */
+.offline-notice { background: var(--gold-soft); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+
+/* Full-page loading overlay shown the instant a protected page's script
+   starts, hidden once requireSession() resolves (see js/auth.js) — replaces
+   the blank white gap that used to show while the session/profile fetch was
+   in flight, which is most of what read as "delay between loading screens"
+   on a slow connection. */
+.page-loading-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+}
+.page-loading-overlay.hidden { display: none; }
+.page-loading-spinner {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 3px solid var(--border); border-top-color: var(--accent);
+  animation: page-loading-spin 0.7s linear infinite;
+}
+@keyframes page-loading-spin { to { transform: rotate(360deg); } }
 /* Plain inline red text (no background box) shown right under a single
    field — used for the duplicate-email message on Add account instead of
    the boxed .error-msg banner. */

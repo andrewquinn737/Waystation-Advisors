@@ -8,6 +8,8 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
+import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
+import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -196,6 +198,12 @@ const els = {
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
+  introCallTimeModal: document.getElementById("introCallTimeModal"),
+  introCallTimeDateInput: document.getElementById("introCallTimeDateInput"),
+  introCallTimeSelect: document.getElementById("introCallTimeSelect"),
+  introCallTimeZoneSelect: document.getElementById("introCallTimeZoneSelect"),
+  introCallTimeError: document.getElementById("introCallTimeError"),
+  introCallTimeConfirmBtn: document.getElementById("introCallTimeConfirmBtn"),
   importDialsModal: document.getElementById("importDialsModal"),
   importDialsError: document.getElementById("importDialsError"),
   importDialsFileInput: document.getElementById("importDialsFileInput"),
@@ -652,8 +660,18 @@ function wireCallNotesAutosave() {
 
 async function loadLists() {
   const { data, error } = await supabase.from("dial_lists").select("*").order("sort_order", { ascending: true });
-  if (error) return showError(els.errorBox, error);
+  if (error) {
+    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    const cached = cacheGet("dial_lists");
+    if (!cached) return showOfflineNotice(false);
+    allLists = cached;
+    showOfflineNotice(true);
+    renderTabs();
+    return;
+  }
+  hideOfflineNotice();
   allLists = data || [];
+  cacheSet("dial_lists", allLists);
   renderTabs();
 }
 
@@ -1539,11 +1557,22 @@ async function loadDials() {
     renderDialsTable();
     return;
   }
+  const cacheKey = "dials_" + currentListId;
   const { data, error } = await supabase.from("dials").select("*").eq("list_id", currentListId);
-  if (error) return showError(els.errorBox, error);
+  if (error) {
+    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    const cached = cacheGet(cacheKey);
+    if (!cached) return showOfflineNotice(false);
+    dials = cached;
+    showOfflineNotice(true);
+    renderDialsTable();
+    return;
+  }
+  hideOfflineNotice();
   // Alphabetical A-Z by first name (case/locale-insensitive) rather than
   // import/creation order.
   dials = (data || []).slice().sort((a, b) => (a.first_name || "").localeCompare(b.first_name || "", undefined, { sensitivity: "base" }));
+  cacheSet(cacheKey, dials);
   renderDialsTable();
 }
 
@@ -1635,7 +1664,7 @@ function renderDialsTable() {
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
           </div>
-          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone, email: d.email })}
+          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone || d.company_phone, email: d.email })}
         </div>`
         )
         .join("")}
@@ -2228,17 +2257,78 @@ async function handleScheduleIntroCallFromDial(dial) {
       if (error) throw error;
       return inserted;
     },
-    // Scheduling from Dials no longer logs a client_events row (and so no
-    // longer appears in the new client's Timeline on its own) — Timeline is
-    // now strictly manual-only, populated exclusively by clicking "+" there
-    // and choosing "Intro call" yourself (see wireTimelineTab/
-    // openTimelineIntroCall in js/clients.js). The "intro calls scheduled"
-    // count on the Profile page still goes up, though — that's logged inside
-    // wireIntroCallForm itself (js/introCall.js) via the `userId` opt above.
-    onScheduled: async () => {
-      setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
+    // Scheduling from Dials DOES now log a client_events "intro_call" row on
+    // the new client's Timeline, with the real date/time/timezone just
+    // confirmed in Calendly — see openIntroCallTimeConfirmModal below.
+    // (Reversed from the previous behavior, where Dials scheduling
+    // deliberately logged nothing to Timeline.) The "intro calls scheduled"
+    // count on the Profile page is unaffected — that's logged inside
+    // wireIntroCallForm itself (js/introCall.js) via the `userId` opt above,
+    // same as before.
+    onCalendlyClosed: async (client) => {
+      els.introCallPopup.classList.add("hidden");
+      openIntroCallTimeConfirmModal(client);
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Shown right after the Calendly popup auto-closes on a confirmed booking
+// (see onCalendlyClosed above). Calendly's own postMessage never exposes the
+// actual chosen start time (a platform limitation — see the comment at the
+// top of js/introCall.js), so this asks for it directly instead of guessing
+// "now", then logs the new client's intro call on their Timeline with that
+// real data. No cancel option — the client and its intro_call_log credit
+// already exist by this point, so backing out here would just leave the
+// Timeline entry unlogged rather than undo anything.
+function openIntroCallTimeConfirmModal(client) {
+  const modal = els.introCallTimeModal;
+  const dateInput = els.introCallTimeDateInput;
+  const timeSelect = els.introCallTimeSelect;
+  const tzSelect = els.introCallTimeZoneSelect;
+  const errEl = els.introCallTimeError;
+  const confirmBtn = els.introCallTimeConfirmBtn;
+
+  const today = new Date();
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+  dateInput.value = today.toISOString().slice(0, 10);
+  timeSelect.innerHTML = timeOptionsHTML("", { includeNoTime: false });
+  tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
+  errEl.classList.add("hidden");
+
+  modal.classList.remove("hidden");
+
+  const onConfirmClick = async () => {
+    const val = dateInput.value;
+    const time = timeSelect.value;
+    const timezone = tzSelect.value;
+    if (!val || !time) {
+      errEl.textContent = "Please enter both a date and time.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    confirmBtn.disabled = true;
+    const eventDate = zonedTimeToUtcIso(val, time, timezone);
+    const { error } = await supabase.from("client_events").insert({
+      client_id: client.id,
+      event_type: "intro_call",
+      event_date: eventDate,
+      details: { via: "calendly", time, timezone },
+      created_by: profile.id,
+    });
+    confirmBtn.disabled = false;
+    if (error) {
+      errEl.textContent = error.message || String(error);
+      errEl.classList.remove("hidden");
+      return;
+    }
+    cleanup();
+  };
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    confirmBtn.removeEventListener("click", onConfirmClick);
+  };
+  confirmBtn.addEventListener("click", onConfirmClick);
 }
 
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));

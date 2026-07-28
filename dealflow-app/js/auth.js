@@ -1,6 +1,11 @@
 import { supabase } from "./supabaseClient.js";
 import { setOwnEmail } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
+import { cacheGet, cacheSet, isNetworkError } from "./offlineCache.js";
+
+function hidePageLoadingOverlay() {
+  document.getElementById("pageLoadingOverlay")?.classList.add("hidden");
+}
 
 /**
  * Call at the top of every protected page. Redirects to login.html if
@@ -23,10 +28,26 @@ export async function requireSession() {
     .eq("id", session.user.id)
     .single();
 
+  // A plain network hiccup fetching the profile used to be treated exactly
+  // like "not logged in" and forced a redirect straight to login.html, even
+  // though the session itself was perfectly valid — that was the main
+  // source of the app "glitching" on bad wifi (a real connection blip would
+  // bounce someone clean out of the app). Now: on a network-shaped failure,
+  // fall back to whichever profile was cached from the last successful load
+  // (see cacheSet below) and keep going instead of redirecting. Only a
+  // genuinely missing session, or a real (non-network) error with nothing
+  // cached yet, still sends someone to login.
+  let resolvedProfile = profile;
   if (error || !profile) {
-    console.error("Could not load profile", error);
-    window.location.href = "login.html";
-    return null;
+    const cached = isNetworkError(error) ? cacheGet("profile_" + session.user.id) : null;
+    if (!cached) {
+      console.error("Could not load profile", error);
+      window.location.href = "login.html";
+      return null;
+    }
+    resolvedProfile = cached;
+  } else {
+    cacheSet("profile_" + session.user.id, profile);
   }
 
   // Lets the shared "Email" instant-contact icon (js/contactIcons.js) try to
@@ -34,9 +55,9 @@ export async function requireSession() {
   // Google account the device/browser currently treats as default — see the
   // comment above setOwnEmail() for why this only ever helps Gmail addresses,
   // never phone numbers, and always falls back to a plain mailto: otherwise.
-  setOwnEmail(profile.email);
+  setOwnEmail(resolvedProfile.email);
 
-  renderNav(profile);
+  renderNav(resolvedProfile);
 
   // Real push notifications (see js/push.js) — subscribes this browser/
   // device once (upserted by endpoint, so re-running here on every page
@@ -45,9 +66,16 @@ export async function requireSession() {
   // client-side daily check are gone — the daily "upcoming events" check
   // now runs server-side (see run_daily_event_notifications() /
   // push_notifications_infra migration).
-  subscribeToPush(profile);
+  subscribeToPush(resolvedProfile);
 
-  return { user: session.user, profile };
+  // Removes the full-page loading overlay (see profile.html/clients.html/
+  // dials.html) now that there's real content to show instead of it —
+  // covers the blank-white-screen gap that used to show while the session/
+  // profile fetch was in flight, which was most of what read as "delay
+  // between loading screens" on a slow connection.
+  hidePageLoadingOverlay();
+
+  return { user: session.user, profile: resolvedProfile };
 }
 
 // Used by the desktop top bar's Sign out button, and (imported directly)

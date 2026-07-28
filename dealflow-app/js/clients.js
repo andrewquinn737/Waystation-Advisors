@@ -16,6 +16,8 @@ import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { wireNotificationsToggle } from "./notifications.js";
+import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
+import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone } from "./eventTime.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -237,27 +239,6 @@ function contractSubtypesFor(clientType) {
   return clientType === "buyer" ? BUYER_CONTRACT_SUBTYPES : SELLER_CONTRACT_SUBTYPES;
 }
 
-// Every half hour, midnight to 11:30pm — the "choose a time (optional)"
-// dropdown shared by every Timeline "+" category (see openEventDetailsModal).
-function timeOptionsHTML() {
-  const opts = ['<option value="">No time</option>'];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += 30) {
-      const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-      const label = new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-      opts.push(`<option value="${value}">${label}</option>`);
-    }
-  }
-  return opts.join("");
-}
-
-// Formats a "HH:MM" 24-hour value (see timeOptionsHTML) back into a
-// locale-formatted time string, for display on a logged Timeline event.
-function formatTimeValue(value) {
-  const [hh, mm] = value.split(":").map(Number);
-  return new Date(2000, 0, 1, hh, mm).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
 let clients = [];
 let currentClient = null; // null while creating a new client
 let currentMode = "create"; // 'create' | 'view' | 'edit'
@@ -304,6 +285,8 @@ const els = {
   eventDateModalTitle: document.getElementById("eventDateModalTitle"),
   eventDateInput: document.getElementById("eventDateInput"),
   eventTimeInput: document.getElementById("eventTimeInput"),
+  eventTimezoneWrap: document.getElementById("eventTimezoneWrap"),
+  eventTimezoneInput: document.getElementById("eventTimezoneInput"),
   eventSubtypeWrap: document.getElementById("eventSubtypeWrap"),
   eventSubtypeSelect: document.getElementById("eventSubtypeSelect"),
   eventTaskWrap: document.getElementById("eventTaskWrap"),
@@ -323,6 +306,8 @@ const els = {
   editEventModal: document.getElementById("editEventModal"),
   editEventDateInput: document.getElementById("editEventDateInput"),
   editEventTimeInput: document.getElementById("editEventTimeInput"),
+  editEventTimezoneWrap: document.getElementById("editEventTimezoneWrap"),
+  editEventTimezoneInput: document.getElementById("editEventTimezoneInput"),
   editEventReportWrap: document.getElementById("editEventReportWrap"),
   editEventReportInput: document.getElementById("editEventReportInput"),
   editEventSaveBtn: document.getElementById("editEventSaveBtn"),
@@ -378,13 +363,29 @@ function clientCompanyAndLocation(c) {
 // ---------------------------------------------------------------------------
 
 async function loadClients() {
+  const cacheKey = "clients_" + getDealSide();
   const { data, error } = await supabase
     .from("clients")
     .select("*")
     .eq("client_type", getDealSide())
     .order("created_at", { ascending: false });
-  if (error) return showError(els.errorBox, error);
+  if (error) {
+    // A real (non-network) error keeps its original behavior — an inline
+    // error message, since falling back to stale data would hide an actual
+    // bug (bad RLS, bad query, etc). Only a network-shaped failure (see
+    // js/offlineCache.js) falls back to the last successfully loaded list.
+    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    const cached = cacheGet(cacheKey);
+    if (!cached) return showOfflineNotice(false);
+    clients = cached;
+    showOfflineNotice(true);
+    await loadClientProgressStages();
+    renderTable();
+    return;
+  }
+  hideOfflineNotice();
   clients = data || [];
+  cacheSet(cacheKey, clients);
   await loadClientProgressStages();
   renderTable();
 }
@@ -484,7 +485,7 @@ function renderTable() {
             <div class="mc-name">${escapeHtml(clientDisplayName(c))}</div>
             <div class="mc-sub">${escapeHtml(clientCompanyAndLocation(c))}</div>
           </div>
-          ${contactActionIcons({ phone: c.mobile_phone, email: c.email })}
+          ${contactActionIcons({ phone: c.mobile_phone || c.company_phone, email: c.email })}
         </div>`
         )
         .join("")}
@@ -910,11 +911,14 @@ function positionProgressConnectors() {
 function timelineEventDateStr(e) {
   const d = new Date(e.event_date);
   const dateStr = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  // The optional 30-min-increment time chosen in openEventDetailsModal is
-  // stored as a "HH:MM" string in details.time (separate from event_date's
-  // own noon-anchored timestamp — see openEventDetailsModal) — appended here
-  // when present.
-  return e.details?.time ? `${dateStr}, ${formatTimeValue(e.details.time)}` : dateStr;
+  // Once a time is chosen, event_date IS the real UTC instant for it (see
+  // openEventDetailsModal/js/eventTime.js), so toLocaleTimeString here
+  // already shows it correctly converted to whichever device is viewing it
+  // — no separate details.time read needed. A bare date with no time shows
+  // "No set time" instead of silently implying midnight/noon.
+  if (!e.details?.time) return `${dateStr}, No set time`;
+  const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${dateStr}, ${timeStr}`;
 }
 
 // What shows on the Timeline row's 2nd line — normally just the type label,
@@ -945,24 +949,14 @@ function isFutureDate(dateStr) {
   return d.getTime() > today.getTime();
 }
 
-// The actual instant to sort an event by. event_date alone isn't enough —
-// manually-logged events are all noon-anchored regardless of the time the
-// user picked (see openEventDetailsModal), so two events on the same
-// calendar date used to sort in whatever order they happened to be
-// inserted, NOT by the time-of-day the user actually chose. That's the "time
-// order is backwards" bug: later-in-the-day entries could end up below
-// earlier ones. Folding details.time (a "HH:MM" string) into the event's own
-// calendar date fixes that — same-day events now sort by their real chosen
-// time, consistent with the newest-first date ordering below. Events with no
-// time picked keep using event_date's own (noon) instant, unchanged from
-// before.
+// The actual instant to sort an event by. Now just event_date's own value —
+// once a time is chosen it's baked directly into event_date as a real UTC
+// instant (see openEventDetailsModal/js/eventTime.js), so same-day events
+// already sort by their real chosen time with no extra folding-in needed. A
+// bare date with no time still sorts by its noon-anchored placeholder,
+// unchanged from before.
 function eventSortInstant(e) {
-  const d = new Date(e.event_date);
-  if (e.details?.time) {
-    const [hh, mm] = e.details.time.split(":").map(Number);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0).getTime();
-  }
-  return d.getTime();
+  return new Date(e.event_date).getTime();
 }
 
 // event_type strings that only ever mean "contract advancement" on EITHER
@@ -1160,12 +1154,12 @@ function wireTimelineTab() {
 // client_events row directly.
 // ---------------------------------------------------------------------------
 function openTimelineAddFlow(category) {
-  openEventDetailsModal(category, currentClient.client_type, ({ eventDate, time, subtype, taskDescription }) => {
-    const details = time ? { time } : null;
+  openEventDetailsModal(category, currentClient.client_type, ({ eventDate, time, timezone, subtype, taskDescription }) => {
+    const details = time ? { time, timezone } : null;
     if (category === "task") {
       logClientEvent("task", eventDate, { ...(details || {}), task_description: taskDescription }, category);
     } else if (subtype === "intro_call") {
-      openTimelineIntroCall(eventDate, time);
+      openTimelineIntroCall(eventDate, time, timezone);
     } else if (SHARED_EVENT_TYPES.has(subtype)) {
       // category ("meeting" or "contract_advancement") is stashed in
       // details.category on both sides' rows (see logSharedClientEvent) so
@@ -1175,7 +1169,7 @@ function openTimelineAddFlow(category) {
       // subtype on the other's (see meetingSubtypesFor/contractSubtypesFor)
       // — the event_type string alone can't tell you which one it was
       // logged as.
-      openCounterpartPicker((counterpart) => logSharedClientEvent(subtype, eventDate, time, counterpart, category));
+      openCounterpartPicker((counterpart) => logSharedClientEvent(subtype, eventDate, time, timezone, counterpart, category));
     } else {
       logClientEvent(subtype, eventDate, details, category);
     }
@@ -1193,6 +1187,8 @@ function openEventDetailsModal(category, clientType, onConfirm) {
   const modal = els.eventDateModal;
   const input = els.eventDateInput;
   const timeSelect = els.eventTimeInput;
+  const tzWrap = els.eventTimezoneWrap;
+  const tzSelect = els.eventTimezoneInput;
   const subtypeWrap = els.eventSubtypeWrap;
   const subtypeSelect = els.eventSubtypeSelect;
   const taskWrap = els.eventTaskWrap;
@@ -1207,6 +1203,12 @@ function openEventDetailsModal(category, clientType, onConfirm) {
   input.value = today.toISOString().slice(0, 10);
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = "";
+  // Time zone only matters once a time is actually picked — see
+  // js/eventTime.js. Defaults to this device's own zone.
+  tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
+  tzWrap.classList.add("hidden");
+  const onTimeChange = () => tzWrap.classList.toggle("hidden", !timeSelect.value);
+  timeSelect.addEventListener("change", onTimeChange);
 
   const showSubtype = category === "meeting" || category === "contract_advancement";
   subtypeWrap.classList.toggle("hidden", !showSubtype);
@@ -1225,6 +1227,7 @@ function openEventDetailsModal(category, clientType, onConfirm) {
     modal.classList.add("hidden");
     confirmBtn.removeEventListener("click", onConfirmClick);
     cancelBtn.removeEventListener("click", onCancelClick);
+    timeSelect.removeEventListener("change", onTimeChange);
   };
   const onConfirmClick = () => {
     const val = input.value;
@@ -1235,13 +1238,19 @@ function openEventDetailsModal(category, clientType, onConfirm) {
       return;
     }
     const time = timeSelect.value || null;
+    const timezone = time ? tzSelect.value : null;
     const subtype = showSubtype ? subtypeSelect.value : null;
     const taskDescription = isTask ? taskInput.value.trim() : null;
     cleanup();
-    // Noon UTC-relative to the chosen calendar day (not midnight) so the
+    // When a time was chosen, event_date becomes the real UTC instant for
+    // that wall-clock time in the chosen zone (see js/eventTime.js) — every
+    // viewer's own device then shows it correctly converted automatically,
+    // with no further timezone math needed downstream (Timeline, Upcoming
+    // events, push notifications all just format event_date directly). A
+    // bare date with no time keeps the old noon-UTC-relative anchor, so the
     // date can never accidentally roll back a day in a timezone behind UTC.
-    const eventDate = new Date(`${val}T12:00:00`).toISOString();
-    onConfirm({ eventDate, time, subtype, taskDescription });
+    const eventDate = time ? zonedTimeToUtcIso(val, time, timezone) : new Date(`${val}T12:00:00`).toISOString();
+    onConfirm({ eventDate, time, timezone, subtype, taskDescription });
   };
   const onCancelClick = () => cleanup();
   confirmBtn.addEventListener("click", onConfirmClick);
@@ -1388,13 +1397,14 @@ async function logClientEvent(eventType, eventDate, details = null, category = n
 // supabase/schema.sql), so this calls the log_shared_client_event()
 // security-definer function instead, which checks the caller actually owns
 // `currentClient` and then inserts both sides.
-async function logSharedClientEvent(eventType, eventDate, time, counterpart, category = null) {
+async function logSharedClientEvent(eventType, eventDate, time, timezone, counterpart, category = null) {
   const { error } = await supabase.rpc("log_shared_client_event", {
     p_client_id: currentClient.id,
     p_counterpart_client_id: counterpart.id,
     p_event_type: eventType,
     p_event_date: eventDate,
     p_time: time || null,
+    p_timezone: timezone || null,
     p_created_by: profile.id,
     p_category: category,
   });
@@ -1496,17 +1506,27 @@ function openEditEventModal(eventId) {
   const modal = els.editEventModal;
   const dateInput = els.editEventDateInput;
   const timeSelect = els.editEventTimeInput;
+  const tzWrap = els.editEventTimezoneWrap;
+  const tzSelect = els.editEventTimezoneInput;
   const reportWrap = els.editEventReportWrap;
   const reportInput = els.editEventReportInput;
   const saveBtn = els.editEventSaveBtn;
   const deleteBtn = els.editEventDeleteBtn;
   const cancelBtn = els.editEventCancelBtn;
 
-  const d = new Date(e.event_date);
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  dateInput.value = d.toISOString().slice(0, 10);
+  // Prefilled in the zone this event was originally scheduled in (falling
+  // back to this device's own zone for an older row with no details.timezone
+  // stored yet) rather than the editor's own device zone — so reopening an
+  // event for editing shows the date/time the creator actually picked even
+  // when the editor is in a different timezone.
+  const existingTz = e.details?.timezone || defaultTimezone();
+  dateInput.value = dateStrInZone(e.event_date, existingTz);
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = e.details?.time || "";
+  tzSelect.innerHTML = timezoneOptionsHTML(existingTz);
+  tzWrap.classList.toggle("hidden", !timeSelect.value);
+  const onTimeChange = () => tzWrap.classList.toggle("hidden", !timeSelect.value);
+  timeSelect.addEventListener("change", onTimeChange);
 
   reportWrap.classList.toggle("hidden", !e.confirmed || !eventIsMeeting(e));
   reportInput.value = e.details?.report || "";
@@ -1518,21 +1538,25 @@ function openEditEventModal(eventId) {
     saveBtn.removeEventListener("click", onSaveClick);
     deleteBtn.removeEventListener("click", onDeleteClick);
     cancelBtn.removeEventListener("click", onCancelClick);
+    timeSelect.removeEventListener("change", onTimeChange);
   };
   const onSaveClick = async () => {
     const val = dateInput.value;
     if (!val) return;
     cleanup();
-    // Same noon-UTC-relative anchoring as openEventDetailsModal, so this can
-    // never accidentally roll the date back a day in a timezone behind UTC.
-    const eventDate = new Date(`${val}T12:00:00`).toISOString();
-    // update_client_event() RPC mirrors date/time/report onto the paired
-    // event on the counterpart's timeline too, if this is a shared event
-    // (see log_shared_client_event / paired_event_id).
+    const time = timeSelect.value || null;
+    const timezone = time ? tzSelect.value : null;
+    // Same real-instant-when-timed approach as openEventDetailsModal; a bare
+    // date with no time keeps the old noon-UTC-relative anchor.
+    const eventDate = time ? zonedTimeToUtcIso(val, time, timezone) : new Date(`${val}T12:00:00`).toISOString();
+    // update_client_event() RPC mirrors date/time/timezone/report onto the
+    // paired event on the counterpart's timeline too, if this is a shared
+    // event (see log_shared_client_event / paired_event_id).
     const { error } = await supabase.rpc("update_client_event", {
       p_event_id: eventId,
       p_event_date: eventDate,
-      p_time: timeSelect.value || null,
+      p_time: time,
+      p_timezone: timezone,
       p_report: e.confirmed && eventIsMeeting(e) ? reportInput.value.trim() : null,
     });
     if (error) return showError(document.getElementById("clientModalError"), error);
@@ -1553,7 +1577,7 @@ function openEditEventModal(eventId) {
 // — here the client already exists, so it's passed directly (no createClient
 // callback needed). eventDate/time are whatever was chosen in
 // openEventDetailsModal.
-function openTimelineIntroCall(eventDate, time) {
+function openTimelineIntroCall(eventDate, time, timezone) {
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowSkip: true });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
@@ -1570,7 +1594,7 @@ function openTimelineIntroCall(eventDate, time) {
         client_id: client.id,
         event_type: "intro_call",
         event_date: eventDate || new Date().toISOString(),
-        details: { via: "calendly_link", time: time || null },
+        details: { via: "calendly_link", time: time || null, timezone: time ? timezone : null },
         created_by: profile.id,
       });
       setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);

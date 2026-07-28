@@ -35,6 +35,9 @@
 <script src="js/noZoom.js"></script>
 </head>
 <body data-page="dials.html">
+  <!-- Hidden by requireSession() (js/auth.js) once the session/profile fetch
+       resolves — see .page-loading-overlay in css/style.css. -->
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="page-loading-spinner"></div></div>
   <nav class="topnav" id="topnav"></nav>
 
   <main>
@@ -121,6 +124,7 @@
     <div class="select-mode-hint hidden" id="selectMoveHint">Tap a tab above to move the selected dials there.</div>
 
     <div id="errorBox" class="error-msg hidden"></div>
+    <div id="offlineNotice" class="offline-notice hidden"></div>
 
     <div class="dials-tabbar">
       <div class="dials-tabs" id="dialTabs"></div>
@@ -289,6 +293,29 @@
       <div id="introCallPopupBody"></div>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="introCallPopupClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shown right after the Calendly popup auto-closes on a confirmed
+       booking (see wireIntroCallForm's onCalendlyClosed in js/introCall.js,
+       wired from handleScheduleIntroCallFromDial in js/dials.js). Calendly's
+       own postMessage doesn't expose the real chosen date/time/timezone, so
+       this confirms it manually and logs the new client's intro call with
+       that real data instead of "now". -->
+  <div class="modal-backdrop hidden" id="introCallTimeModal">
+    <div class="modal">
+      <h2>Confirm the scheduled time</h2>
+      <p class="help-text">Enter the date/time you and the client just picked in Calendly.</p>
+      <label for="introCallTimeDateInput">Date</label>
+      <input type="date" id="introCallTimeDateInput" />
+      <label for="introCallTimeSelect">Time</label>
+      <select id="introCallTimeSelect"></select>
+      <label for="introCallTimeZoneSelect">Time zone</label>
+      <select id="introCallTimeZoneSelect"></select>
+      <div id="introCallTimeError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="introCallTimeConfirmBtn">Save</button>
       </div>
     </div>
   </div>

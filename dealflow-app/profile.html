@@ -29,6 +29,9 @@
 <script src="js/noZoom.js"></script>
 </head>
 <body data-page="profile.html">
+  <!-- Hidden by requireSession() (js/auth.js) once the session/profile fetch
+       resolves — see .page-loading-overlay in css/style.css. -->
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="page-loading-spinner"></div></div>
   <nav class="topnav" id="topnav"></nav>
 
   <main>
@@ -92,6 +95,7 @@
       </button>
     </div>
     <div id="errorBox" class="error-msg hidden"></div>
+    <div id="offlineNotice" class="offline-notice hidden"></div>
 
     <!-- Hidden file input driving the avatar upload — see
          handleAvatarFileSelected() in js/profile.js. Only reachable by
