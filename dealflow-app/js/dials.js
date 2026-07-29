@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
-import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
+import { STATES, escapeHtml, defaultClient, fullNameOf, splitFullName } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
@@ -404,6 +404,11 @@ function parseCSV(text) {
 const DIAL_FIELD_ALIASES = {
   first_name: ["first name", "firstname", "first"],
   last_name: ["last name", "lastname", "last"],
+  // A single "Full Name"/"Name" column splits into first_name/last_name on
+  // last word (see splitFullName in js/clientForm.js, shared with the
+  // edit-form fields this mirrors) — special-cased in rowsToDials below,
+  // same pattern as contact_status's own translation step.
+  full_name: ["full name", "fullname", "name", "client name", "contact name"],
   company_name: ["company name", "company", "business name", "business"],
   email: ["email", "email address", "e mail"],
   // "Phone - Mobile" (some CRM exports' own naming for the personal cell
@@ -554,6 +559,20 @@ function rowsToDials(rows, listId) {
           } else {
             d.contact_status = "uncontacted";
           }
+          return;
+        }
+        // A "Full Name"/"Name" column (see DIAL_FIELD_ALIASES.full_name)
+        // splits into first_name/last_name the same way the edit form's own
+        // Full name field does (see splitFullName in js/clientForm.js) —
+        // only fills them in if a separate First/Last Name column in this
+        // same CSV hasn't already set them (checked here rather than relying
+        // on column order, since fieldMap iteration follows the CSV's own
+        // column order, not this object's).
+        if (field === "full_name") {
+          if (!v) return;
+          const { first_name, last_name } = splitFullName(v);
+          if (!d.first_name) d.first_name = first_name;
+          if (!d.last_name && last_name) d.last_name = last_name;
           return;
         }
         if (v) d[field] = v;
@@ -1721,10 +1740,8 @@ function buildDialViewHTML(dial) {
 function buildDialEditHTML(dial) {
   const isBuyer = currentType === "buyer";
   return `
-    <div class="form-row">
-      <div><label for="d_first_name">First name</label><input id="d_first_name" value="${escapeHtml(dial.first_name)}" /></div>
-      <div><label for="d_last_name">Last name</label><input id="d_last_name" value="${escapeHtml(dial.last_name)}" /></div>
-    </div>
+    <label for="d_full_name">Full name</label>
+    <input id="d_full_name" value="${escapeHtml(fullNameOf(dial))}" />
     ${isBuyer ? "" : `<label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />`}
     <div class="form-row">
       <div><label for="d_city">City</label><input id="d_city" value="${escapeHtml(dial.city)}" /></div>
@@ -1757,9 +1774,10 @@ function collectDialFormData() {
   // and is not part of the edit form, so leaving it out of this object means
   // saving other fields never touches/overwrites it.
   const isBuyer = currentType === "buyer";
+  const { first_name, last_name } = splitFullName(document.getElementById("d_full_name").value);
   const data = {
-    first_name: document.getElementById("d_first_name").value.trim() || null,
-    last_name: document.getElementById("d_last_name").value.trim() || null,
+    first_name: first_name || null,
+    last_name: last_name || null,
     city: document.getElementById("d_city").value.trim() || null,
     state: document.getElementById("d_state").value || null,
     email: document.getElementById("d_email").value.trim() || null,

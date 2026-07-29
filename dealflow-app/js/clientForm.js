@@ -25,6 +25,30 @@ export function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Clients and dials are both still stored as first_name/last_name (every
+// list/sort/search/display/Timeline-counterpart-naming call site across the
+// app already relies on that split) — only the CREATE/EDIT form itself
+// switched to one "Full name" input, per feedback. These two helpers are the
+// single seam between the two: fullNameOf joins the stored columns back
+// into one string for the input's value; splitFullName reverses it on save.
+// Shared by clientForm.js's own form, dials.js's separate dial-edit form,
+// and dials.js's CSV import (a "Full Name" column splits the same way).
+export function fullNameOf(entity) {
+  return `${entity?.first_name || ""} ${entity?.last_name || ""}`.trim();
+}
+
+// Last word = last name, everything before it = first name (the common
+// convention, and what most CSV exports/contact lists assume) — a
+// single-word name (e.g. "Cher") becomes first_name only, with an empty
+// last_name, rather than being rejected as incomplete.
+export function splitFullName(fullName) {
+  const parts = String(fullName || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { first_name: "", last_name: "" };
+  if (parts.length === 1) return { first_name: parts[0], last_name: "" };
+  const last_name = parts.pop();
+  return { first_name: parts.join(" "), last_name };
+}
+
 // Briefly merged into a single "Notes" box (see project history) — reverted
 // back to two separate boxes per feedback. "What they're looking for in a
 // buyer" is a seller client's own counterpart; a buyer client (see
@@ -68,16 +92,8 @@ function personalAndContactSectionsHTML(client) {
     <div class="accordion-section open" data-section="personal">
       <div class="accordion-header"><span>Personal information</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
-        <div class="form-row">
-          <div>
-            <div class="field-label-row"><label for="f_first_name">First name</label><span class="field-required-msg hidden" data-field="first_name">required</span></div>
-            <input id="f_first_name" value="${escapeHtml(client.first_name)}" />
-          </div>
-          <div>
-            <div class="field-label-row"><label for="f_last_name">Last name</label><span class="field-required-msg hidden" data-field="last_name">required</span></div>
-            <input id="f_last_name" value="${escapeHtml(client.last_name)}" />
-          </div>
-        </div>
+        <div class="field-label-row"><label for="f_full_name">Full name</label><span class="field-required-msg hidden" data-field="full_name">required</span></div>
+        <input id="f_full_name" value="${escapeHtml(fullNameOf(client))}" />
         <div class="form-row">
           <div>
             <div class="field-label-row"><label for="f_city">City</label><span class="field-required-msg hidden" data-field="city">required</span></div>
@@ -217,9 +233,10 @@ export function wireEditableFormEvents(container) {
 // never change what side a client is on).
 export function collectFormData(container, clientType) {
   const isBuyer = clientType === "buyer";
+  const { first_name, last_name } = splitFullName(container.querySelector("#f_full_name").value);
   const data = {
-    first_name: container.querySelector("#f_first_name").value.trim(),
-    last_name: container.querySelector("#f_last_name").value.trim(),
+    first_name,
+    last_name,
     client_type: clientType,
     city: container.querySelector("#f_city").value.trim(),
     state: container.querySelector("#f_state").value,
@@ -272,10 +289,13 @@ export function getMissingFields(data) {
   const popupLabels = [];
   const isBuyer = data.client_type === "buyer";
 
-  let nameMissing = false;
-  if (!data.first_name) { missing.push("first_name"); nameMissing = true; }
-  if (!data.last_name) { missing.push("last_name"); nameMissing = true; }
-  if (nameMissing) popupLabels.push("Name");
+  // splitFullName always fills in first_name for any non-blank entry (even
+  // a single word, with last_name left empty) — so this alone catches "the
+  // Full name field was left blank entirely" without requiring a last name.
+  if (!data.first_name) {
+    missing.push("full_name");
+    popupLabels.push("Name");
+  }
 
   // Company name/industry only exist on a seller's form at all (see
   // buildEditableSections) — never required for a buyer.
