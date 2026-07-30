@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
-import { STATES, escapeHtml, defaultClient, fullNameOf, splitFullName } from "./clientForm.js";
+import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
@@ -292,7 +292,7 @@ function rfWebsite(label, value) {
 }
 
 function dialDisplayName(d) {
-  return `${d.first_name || ""} ${d.last_name || ""}`.trim() || "Unnamed dial";
+  return d.full_name || "Unnamed dial";
 }
 function dialLocation(d) {
   return [d.city, d.state].filter(Boolean).join(", ") || "—";
@@ -319,7 +319,7 @@ function dialSubtitleHTML(d) {
 }
 function emptyDial() {
   return {
-    first_name: "", last_name: "", city: "", state: "", email: "",
+    full_name: "", city: "", state: "", email: "",
     mobile_phone: "", company_phone: "", linkedin: "", company_name: "",
     website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted",
     called_today_date: null,
@@ -402,13 +402,14 @@ function parseCSV(text) {
 // its raw cell values aren't dial field text, they're CSV export statuses
 // that need translating through CSV_STATUS_VALUE_MAP (see rowsToDials).
 const DIAL_FIELD_ALIASES = {
+  // A single "Full Name" column maps straight to the dial's own full_name
+  // column; separate "First Name"/"Last Name" columns (still real, still
+  // seen in some sheets) get joined into one at the end of the row-building
+  // loop instead — see the special-casing in rowsToDials below, same
+  // pattern as contact_status's own translation step.
+  full_name: ["full name", "fullname", "name", "client name", "contact name"],
   first_name: ["first name", "firstname", "first"],
   last_name: ["last name", "lastname", "last"],
-  // A single "Full Name"/"Name" column splits into first_name/last_name on
-  // last word (see splitFullName in js/clientForm.js, shared with the
-  // edit-form fields this mirrors) — special-cased in rowsToDials below,
-  // same pattern as contact_status's own translation step.
-  full_name: ["full name", "fullname", "name", "client name", "contact name"],
   company_name: ["company name", "company", "business name", "business"],
   email: ["email", "email address", "e mail"],
   // "Phone - Mobile" (some CRM exports' own naming for the personal cell
@@ -561,22 +562,20 @@ function rowsToDials(rows, listId) {
           }
           return;
         }
-        // A "Full Name"/"Name" column (see DIAL_FIELD_ALIASES.full_name)
-        // splits into first_name/last_name the same way the edit form's own
-        // Full name field does (see splitFullName in js/clientForm.js) —
-        // only fills them in if a separate First/Last Name column in this
-        // same CSV hasn't already set them (checked here rather than relying
-        // on column order, since fieldMap iteration follows the CSV's own
-        // column order, not this object's).
-        if (field === "full_name") {
-          if (!v) return;
-          const { first_name, last_name } = splitFullName(v);
-          if (!d.first_name) d.first_name = first_name;
-          if (!d.last_name && last_name) d.last_name = last_name;
-          return;
-        }
         if (v) d[field] = v;
       });
+      // dials no longer has separate first_name/last_name columns (see the
+      // full_name migration) — a CSV with those (instead of, or alongside, a
+      // "Full Name" column) gets them joined into one full_name value here.
+      // An explicit Full Name column (set directly above, same as any other
+      // field) always wins if this same CSV happened to have both; first_name/
+      // last_name are just temporary holders, deleted below either way.
+      if (!d.full_name) {
+        const combined = `${d.first_name || ""} ${d.last_name || ""}`.trim();
+        if (combined) d.full_name = combined;
+      }
+      delete d.first_name;
+      delete d.last_name;
       return d;
     });
 }
@@ -1588,9 +1587,9 @@ async function loadDials() {
     return;
   }
   hideOfflineNotice();
-  // Alphabetical A-Z by first name (case/locale-insensitive) rather than
+  // Alphabetical A-Z by name (case/locale-insensitive) rather than
   // import/creation order.
-  dials = (data || []).slice().sort((a, b) => (a.first_name || "").localeCompare(b.first_name || "", undefined, { sensitivity: "base" }));
+  dials = (data || []).slice().sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "", undefined, { sensitivity: "base" }));
   cacheSet(cacheKey, dials);
   renderDialsTable();
 }
@@ -1741,7 +1740,7 @@ function buildDialEditHTML(dial) {
   const isBuyer = currentType === "buyer";
   return `
     <label for="d_full_name">Full name</label>
-    <input id="d_full_name" value="${escapeHtml(fullNameOf(dial))}" />
+    <input id="d_full_name" value="${escapeHtml(dial.full_name)}" />
     ${isBuyer ? "" : `<label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />`}
     <div class="form-row">
       <div><label for="d_city">City</label><input id="d_city" value="${escapeHtml(dial.city)}" /></div>
@@ -1774,10 +1773,8 @@ function collectDialFormData() {
   // and is not part of the edit form, so leaving it out of this object means
   // saving other fields never touches/overwrites it.
   const isBuyer = currentType === "buyer";
-  const { first_name, last_name } = splitFullName(document.getElementById("d_full_name").value);
   const data = {
-    first_name: first_name || null,
-    last_name: last_name || null,
+    full_name: document.getElementById("d_full_name").value.trim() || null,
     city: document.getElementById("d_city").value.trim() || null,
     state: document.getElementById("d_state").value || null,
     email: document.getElementById("d_email").value.trim() || null,
@@ -2202,10 +2199,7 @@ function getMissingDialClientFields(dial) {
   const labels = [];
   const isBuyer = currentType === "buyer";
 
-  let nameMissing = false;
-  if (!dial.first_name) { missing.push("first_name"); nameMissing = true; }
-  if (!dial.last_name) { missing.push("last_name"); nameMissing = true; }
-  if (nameMissing) labels.push("Name");
+  if (!dial.full_name) { missing.push("full_name"); labels.push("Name"); }
 
   if (!isBuyer && !dial.company_name) { missing.push("company_name"); labels.push("Company name"); }
 
@@ -2254,8 +2248,7 @@ async function handleScheduleIntroCallFromDial(dial) {
       const isBuyer = currentType === "buyer";
       const data = defaultClient(profile, {
         client_type: currentType,
-        first_name: dial.first_name || "",
-        last_name: dial.last_name || "",
+        full_name: dial.full_name || "",
         city: dial.city || "",
         state: dial.state || "",
         email: dial.email || "",

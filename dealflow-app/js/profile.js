@@ -1611,7 +1611,7 @@ async function loadUpcomingEvents() {
   const cacheKey = "upcomingEvents_" + ids.join(",");
   const { data, error } = await supabase
     .from("client_events")
-    .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, first_name, last_name, created_by)")
+    .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, full_name, created_by)")
     .gte("event_date", startOfToday.toISOString())
     .in("clients.created_by", ids)
     .order("event_date", { ascending: true });
@@ -1640,7 +1640,7 @@ async function loadUpcomingEvents() {
   els.upcomingEventsBox.innerHTML = rows
     .map((r) => {
       const c = r.clients;
-      const name = `${c.first_name} ${c.last_name}`.trim();
+      const name = c.full_name || "";
       const typeLabel = UPCOMING_EVENT_TYPE_LABELS[r.event_type] || r.event_type;
       const hasTime = !!r.details?.time;
       return `

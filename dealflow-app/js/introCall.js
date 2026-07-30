@@ -71,7 +71,7 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 
 // container: element the form HTML above was injected into.
 // opts: { client, createClient, internEmail, userId, logToGraph, onCalendlyClosed(client), onScheduled(client) }
-//   - client: an already-existing client row ({first_name,last_name,email,id,...}).
+//   - client: an already-existing client row ({full_name,email,id,...}).
 //   - createClient: alternative to `client` — an async function called the
 //     moment "Open Calendly" is clicked, which should create the client
 //     record and return it (or throw/return null on failure, showing its own
@@ -143,7 +143,7 @@ export function wireIntroCallForm(container, opts) {
       return;
     }
 
-    const name = `${client.first_name || ""} ${client.last_name || ""}`.trim();
+    const name = client.full_name || "";
     window.Calendly.initPopupWidget({
       url: CALENDLY_BOOKING_URL,
       prefill: { name, email: client.email },

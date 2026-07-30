@@ -343,7 +343,7 @@ function monthName(m) {
   return MONTH_NAMES[m] || "";
 }
 function clientDisplayName(c) {
-  return `${c.first_name || ""} ${c.last_name || ""}`.trim() || "—";
+  return c.full_name || "—";
 }
 function clientLocation(c) {
   return [c.city, c.state].filter(Boolean).join(", ") || "—";
@@ -1301,10 +1301,10 @@ async function openCounterpartPicker(onSelect) {
   if (!eventsError && eligibleIds.length) {
     const { data, error } = await supabase
       .from("clients")
-      .select("id, first_name, last_name, company_name, client_type, created_by")
+      .select("id, full_name, company_name, client_type, created_by")
       .eq("client_type", counterpartType)
       .in("id", eligibleIds)
-      .order("first_name", { ascending: true });
+      .order("full_name", { ascending: true });
     options = error ? [] : data || [];
   }
   const visibleAccountIds = getVisibleAccountIds();
