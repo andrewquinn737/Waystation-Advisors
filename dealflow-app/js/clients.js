@@ -222,15 +222,16 @@ const SELLER_CONTRACT_SUBTYPES = SELLER_PROGRESS_STEPS.filter((s) => s.type !== 
   value: s.type,
   label: s.label,
 }));
+// Negotiations and Client approval used to sit here — reclassified below as
+// Contract advancement instead, since that's what they actually are (they
+// were never real meetings, same as Contract signed/LOI/etc).
 const BUYER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
   { value: "intro_call", label: "Intro call" },
-  { value: "negotiations", label: "Negotiations" },
-  { value: "client_approval", label: "Client approval" },
   { value: "client_meeting", label: "Client meeting" },
 ];
 const BUYER_CONTRACT_SUBTYPES = BUYER_PROGRESS_STEPS.filter((s) =>
-  ["contract_signed", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
+  ["negotiations", "contract_signed", "client_approval", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
 ).map((s) => ({ value: s.type, label: s.label }));
 function meetingSubtypesFor(clientType) {
   return clientType === "buyer" ? BUYER_MEETING_SUBTYPES : SELLER_MEETING_SUBTYPES;
@@ -284,6 +285,7 @@ const els = {
   eventDateModal: document.getElementById("eventDateModal"),
   eventDateModalTitle: document.getElementById("eventDateModalTitle"),
   eventDateInput: document.getElementById("eventDateInput"),
+  eventTimeWrap: document.getElementById("eventTimeWrap"),
   eventTimeInput: document.getElementById("eventTimeInput"),
   eventTimezoneWrap: document.getElementById("eventTimezoneWrap"),
   eventTimezoneInput: document.getElementById("eventTimezoneInput"),
@@ -305,6 +307,7 @@ const els = {
   eventReportCancelBtn: document.getElementById("eventReportCancelBtn"),
   editEventModal: document.getElementById("editEventModal"),
   editEventDateInput: document.getElementById("editEventDateInput"),
+  editEventTimeWrap: document.getElementById("editEventTimeWrap"),
   editEventTimeInput: document.getElementById("editEventTimeInput"),
   editEventTimezoneWrap: document.getElementById("editEventTimezoneWrap"),
   editEventTimezoneInput: document.getElementById("editEventTimezoneInput"),
@@ -955,8 +958,18 @@ function isFutureDate(dateStr) {
 // already sort by their real chosen time with no extra folding-in needed. A
 // bare date with no time still sorts by its noon-anchored placeholder,
 // unchanged from before.
-function eventSortInstant(e) {
-  return new Date(e.event_date).getTime();
+// Two events with no time chosen on the same calendar date noon-anchor to
+// the exact same event_date instant (see openEventDetailsModal/
+// js/eventTime.js), so a plain event_date comparison alone leaves them
+// tied — whichever was logged first is treated as having happened earlier
+// in the day, so this breaks the tie by created_at. A timed event's
+// event_date is already a real, distinct instant (see the timezone
+// migration), so this tiebreak only ever actually applies between two
+// no-time events.
+function compareEventOrder(a, b) {
+  const diff = new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
+  if (diff !== 0) return diff;
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
 
 // event_type strings that only ever mean "contract advancement" on EITHER
@@ -987,7 +1000,7 @@ function buildTimelineHTML(events) {
   // future-dated events sort above today/past ones, they end up clustered
   // together at the top, letting the divider below sit at a single clean
   // boundary rather than needing to be threaded between scattered items.
-  const sorted = [...events].sort((a, b) => eventSortInstant(b) - eventSortInstant(a));
+  const sorted = [...events].sort((a, b) => compareEventOrder(b, a));
   const futureFlags = sorted.map((e) => isFutureDate(e.event_date));
   const hasFuture = futureFlags.some(Boolean);
   const hasPastOrToday = futureFlags.some((f) => !f);
@@ -1186,6 +1199,7 @@ function openTimelineAddFlow(category) {
 function openEventDetailsModal(category, clientType, onConfirm) {
   const modal = els.eventDateModal;
   const input = els.eventDateInput;
+  const timeWrap = els.eventTimeWrap;
   const timeSelect = els.eventTimeInput;
   const tzWrap = els.eventTimezoneWrap;
   const tzSelect = els.eventTimezoneInput;
@@ -1203,10 +1217,13 @@ function openEventDetailsModal(category, clientType, onConfirm) {
   input.value = today.toISOString().slice(0, 10);
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = "";
-  // Always shown, not just once a time is picked — see js/eventTime.js.
-  // Defaults to this device's own zone.
   tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
-  tzWrap.classList.remove("hidden");
+  // Time/timezone only make sense for a Meeting — a Contract advancement or
+  // Task either happened or it didn't, no specific time-of-day to log (same
+  // reasoning as the report step being meeting-only, see eventIsMeeting).
+  const isMeeting = category === "meeting";
+  timeWrap.classList.toggle("hidden", !isMeeting);
+  tzWrap.classList.toggle("hidden", !isMeeting);
 
   const showSubtype = category === "meeting" || category === "contract_advancement";
   subtypeWrap.classList.toggle("hidden", !showSubtype);
@@ -1234,7 +1251,7 @@ function openEventDetailsModal(category, clientType, onConfirm) {
       els.requiredPopup.classList.remove("hidden");
       return;
     }
-    const time = timeSelect.value || null;
+    const time = isMeeting ? timeSelect.value || null : null;
     const timezone = time ? tzSelect.value : null;
     const subtype = showSubtype ? subtypeSelect.value : null;
     const taskDescription = isTask ? taskInput.value.trim() : null;
@@ -1261,10 +1278,15 @@ function openEventDetailsModal(category, clientType, onConfirm) {
 // opposite-side client this account can currently see (same Sellers/Buyers +
 // Accounts visible scoping used everywhere else — see js/dealSide.js,
 // js/accountsVisible.js) who's ELIGIBLE to have a shared event logged against
-// them: from a seller, only buyers with a confirmed Contract signed
-// milestone; from a buyer, only sellers with a confirmed Intro call
-// milestone (per spec). Searchable, requires picking exactly one before
-// Continue is enabled.
+// them: a confirmed Intro call with THIS side, on either side of the
+// pairing — you can't log a real meeting/LOI/etc with someone you haven't
+// even had an intro call with yet. (This used to require a confirmed
+// Contract signed milestone from the seller side specifically, which came
+// AFTER most of these shared milestones in the buyer's own step order —
+// with real data, that meant no buyer could ever qualify, so a seller could
+// never do a shared meeting at all. Intro call, the very first step on both
+// sides' lists, is the right gate.) Searchable, requires picking exactly one
+// before Continue is enabled.
 // ---------------------------------------------------------------------------
 function counterpartDisplayName(c) {
   // Always the person's own name, never their company name — even for a
@@ -1290,11 +1312,10 @@ function counterpartSearchText(c) {
 async function openCounterpartPicker(onSelect) {
   const isSeller = currentClient.client_type !== "buyer";
   const counterpartType = isSeller ? "buyer" : "seller";
-  const eligibleEventType = isSeller ? "contract_signed" : "intro_call";
   const { data: eventRows, error: eventsError } = await supabase
     .from("client_events")
     .select("client_id")
-    .eq("event_type", eligibleEventType)
+    .eq("event_type", "intro_call")
     .eq("confirmed", true);
   const eligibleIds = Array.from(new Set((eventRows || []).map((r) => r.client_id)));
   let options = [];
@@ -1502,6 +1523,7 @@ function openEditEventModal(eventId) {
 
   const modal = els.editEventModal;
   const dateInput = els.editEventDateInput;
+  const timeWrap = els.editEventTimeWrap;
   const timeSelect = els.editEventTimeInput;
   const tzWrap = els.editEventTimezoneWrap;
   const tzSelect = els.editEventTimezoneInput;
@@ -1510,6 +1532,8 @@ function openEditEventModal(eventId) {
   const saveBtn = els.editEventSaveBtn;
   const deleteBtn = els.editEventDeleteBtn;
   const cancelBtn = els.editEventCancelBtn;
+
+  const isMeeting = eventIsMeeting(e);
 
   // Prefilled in the zone this event was originally scheduled in (falling
   // back to this device's own zone for an older row with no details.timezone
@@ -1525,9 +1549,12 @@ function openEditEventModal(eventId) {
   // curated zone currently shares its offset so the dropdown still opens
   // with the right one highlighted, instead of none matching at all.
   tzSelect.innerHTML = timezoneOptionsHTML(nearestCuratedZone(existingTz));
-  tzWrap.classList.remove("hidden");
+  // Time/timezone only make sense for a Meeting — same reasoning as the
+  // report step below being meeting-only.
+  timeWrap.classList.toggle("hidden", !isMeeting);
+  tzWrap.classList.toggle("hidden", !isMeeting);
 
-  reportWrap.classList.toggle("hidden", !e.confirmed || !eventIsMeeting(e));
+  reportWrap.classList.toggle("hidden", !e.confirmed || !isMeeting);
   reportInput.value = e.details?.report || "";
 
   modal.classList.remove("hidden");
@@ -1542,7 +1569,7 @@ function openEditEventModal(eventId) {
     const val = dateInput.value;
     if (!val) return;
     cleanup();
-    const time = timeSelect.value || null;
+    const time = isMeeting ? timeSelect.value || null : null;
     const timezone = time ? tzSelect.value : null;
     // Same real-instant-when-timed approach as openEventDetailsModal; a bare
     // date with no time keeps the old noon-UTC-relative anchor.
@@ -1555,7 +1582,7 @@ function openEditEventModal(eventId) {
       p_event_date: eventDate,
       p_time: time,
       p_timezone: timezone,
-      p_report: e.confirmed && eventIsMeeting(e) ? reportInput.value.trim() : null,
+      p_report: e.confirmed && isMeeting ? reportInput.value.trim() : null,
     });
     if (error) return showError(document.getElementById("clientModalError"), error);
     await loadClientEvents();

@@ -177,12 +177,15 @@
       <h2 id="eventDateModalTitle">Schedule event</h2>
       <label for="eventDateInput">Date</label>
       <input type="date" id="eventDateInput" />
-      <label for="eventTimeInput">Time (optional, 7 AM–7 PM)</label>
-      <select id="eventTimeInput"></select>
-      <!-- Shown only once a time is picked (see openEventDetailsModal in
-           js/clients.js) — a bare date has no timezone to speak of. Defaults
-           to this device's own zone; changing it only matters for scheduling
-           something for someone in a different one. -->
+      <!-- Time/timezone only matter for Meeting-category events (hidden for
+           Contract advancement/Task — see openEventDetailsModal in
+           js/clients.js), same reasoning as the report step being
+           meeting-only: a contract advancement or task is either done or it
+           isn't, there's no specific time-of-day to speak of. -->
+      <div id="eventTimeWrap">
+        <label for="eventTimeInput">Time (optional, 7 AM–7 PM)</label>
+        <select id="eventTimeInput"></select>
+      </div>
       <div class="hidden" id="eventTimezoneWrap">
         <label for="eventTimezoneInput">Time zone</label>
         <select id="eventTimezoneInput"></select>
@@ -229,8 +232,10 @@
       <h2>Edit event</h2>
       <label for="editEventDateInput">Date</label>
       <input type="date" id="editEventDateInput" />
-      <label for="editEventTimeInput">Time (optional, 7 AM–7 PM)</label>
-      <select id="editEventTimeInput"></select>
+      <div id="editEventTimeWrap">
+        <label for="editEventTimeInput">Time (optional, 7 AM–7 PM)</label>
+        <select id="editEventTimeInput"></select>
+      </div>
       <div class="hidden" id="editEventTimezoneWrap">
         <label for="editEventTimezoneInput">Time zone</label>
         <select id="editEventTimezoneInput"></select>
