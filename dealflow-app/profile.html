@@ -62,10 +62,11 @@
         <span class="menu-item-label">Teams</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
       </button>
-      <!-- Opens shareAppPopup below with Open/Copy for the app's Google Drive
-           link — see wireShareAppPopup() in js/profile.js. -->
-      <button type="button" class="page-header-menu-item" id="menuShareAppBtn">
-        <span class="menu-item-label">Share app</span>
+      <!-- Opens linksPopup below, listing the app's install link plus
+           training material links, each with Open/Send/Copy — see
+           renderLinksList()/APP_LINKS in js/profile.js. -->
+      <button type="button" class="page-header-menu-item" id="menuLinksBtn">
+        <span class="menu-item-label">Links</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></span>
       </button>
       <button type="button" class="page-header-menu-item" id="menuCallsViewBtn" data-view="outreach">
@@ -167,20 +168,30 @@
     </div>
   </div>
 
-  <!-- "Share app" popup (see menuShareAppBtn above / wireShareAppPopup() in
-       js/profile.js) — Open launches the Drive link in a new tab, Copy link
-       copies it to the clipboard (same pattern as the existing copy-icon
-       buttons elsewhere on this page). -->
-  <div class="modal-backdrop hidden" id="shareAppPopup">
+  <!-- "Links" popup (see menuLinksBtn above / renderLinksList() in
+       js/profile.js) — one row per link (Share app, Outreach training,
+       Leadership training — the last one team-lead/admin-only), each with
+       Open/Send/Copy icon buttons (same .contact-action-btn style already
+       used for the phone/email quick-actions elsewhere in the app). -->
+  <div class="modal-backdrop hidden" id="linksPopup">
     <div class="modal">
-      <h2>Share app</h2>
-      <p class="help-text">Send this link to anyone who needs to install Waystation Advisors.</p>
+      <h2>Links</h2>
+      <div id="linksList"></div>
       <div class="form-actions">
-        <button type="button" class="btn" id="shareAppOpenBtn">Open</button>
-        <button type="button" class="btn secondary" id="shareAppCopyBtn">Copy link</button>
-        <button type="button" class="btn secondary" id="shareAppCloseBtn">Close</button>
+        <button type="button" class="btn secondary" id="linksPopupClose">Close</button>
       </div>
     </div>
+  </div>
+
+  <!-- "Send" fallback — shown near the clicked Send icon only when
+       navigator.share isn't available (most desktop browsers); on anything
+       that supports the real share sheet (basically all mobile browsers,
+       and modern desktop Chrome/Edge/Safari) that opens directly instead and
+       this never appears. Same fixed-position small-popover pattern as
+       teamsAddMenu. -->
+  <div class="teams-add-menu hidden" id="sendFallbackMenu">
+    <button type="button" class="page-header-menu-item" id="sendFallbackTextBtn">Text message</button>
+    <button type="button" class="page-header-menu-item" id="sendFallbackEmailBtn">Email</button>
   </div>
 
   <div class="fullscreen-modal hidden" id="teamsModal">

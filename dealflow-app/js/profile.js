@@ -59,11 +59,13 @@ const els = {
   callsChart: document.getElementById("callsChart"),
   introCallsThisWeekText: document.getElementById("introCallsThisWeekText"),
   introCallsChart: document.getElementById("introCallsChart"),
-  menuShareAppBtn: document.getElementById("menuShareAppBtn"),
-  shareAppPopup: document.getElementById("shareAppPopup"),
-  shareAppOpenBtn: document.getElementById("shareAppOpenBtn"),
-  shareAppCopyBtn: document.getElementById("shareAppCopyBtn"),
-  shareAppCloseBtn: document.getElementById("shareAppCloseBtn"),
+  menuLinksBtn: document.getElementById("menuLinksBtn"),
+  linksPopup: document.getElementById("linksPopup"),
+  linksList: document.getElementById("linksList"),
+  linksPopupClose: document.getElementById("linksPopupClose"),
+  sendFallbackMenu: document.getElementById("sendFallbackMenu"),
+  sendFallbackTextBtn: document.getElementById("sendFallbackTextBtn"),
+  sendFallbackEmailBtn: document.getElementById("sendFallbackEmailBtn"),
   menuTeamsBtn: document.getElementById("menuTeamsBtn"),
   teamsModal: document.getElementById("teamsModal"),
   teamsCloseBtn: document.getElementById("teamsCloseBtn"),
@@ -1673,28 +1675,125 @@ els.teamsCloseBtn.addEventListener("click", () => {
 });
 els.profileSignOutBtn.addEventListener("click", signOut);
 
-// Share app popup — Open launches the install link in a new tab, Copy link
-// copies it to the clipboard (briefly relabeling the button, same
-// lightweight feedback idea as wireTapCopy's toast above).
-const SHARE_APP_URL = "https://drive.google.com/file/d/10qawN0VVOel8dwf1zm0EXYEqTSKAHzOG/view?usp=sharing";
-els.menuShareAppBtn.addEventListener("click", (e) => {
+// ---------------------------------------------------------------------------
+// "Links" popup — one row per link below, each with Open/Send/Copy icon
+// buttons (see renderLinksList). Leadership training is team-lead/admin-only
+// (isAdminSync/isTeamLeadSync, set at module load from the signed-in
+// profile's own role); the other two are visible to every role.
+// ---------------------------------------------------------------------------
+const APP_LINKS = [
+  { key: "share_app", label: "Share app", url: "https://drive.google.com/file/d/10qawN0VVOel8dwf1zm0EXYEqTSKAHzOG/view?usp=sharing" },
+  { key: "outreach_training", label: "Outreach training", url: "https://drive.google.com/drive/folders/19dHkISovDPv-i0IRUswl5hO-qrv8ZBM3?usp=drive_link" },
+  {
+    key: "leadership_training",
+    label: "Leadership training",
+    url: "https://drive.google.com/drive/folders/1AnNcij9FwlR-ZYGxwSykNnqEhY0BhtqS?usp=sharing",
+    leadOrAdminOnly: true,
+  },
+];
+
+const LINK_ACTION_ICONS = {
+  open: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+  send: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+};
+
+// Reuses the same .rf-value-row (label left, icons right) and
+// .contact-actions/.contact-action-btn (compact icon cluster) classes
+// already used everywhere else in the app for quick-action rows, rather
+// than inventing new ones.
+function renderLinksList() {
+  const visible = APP_LINKS.filter((l) => !l.leadOrAdminOnly || isAdminSync || isTeamLeadSync);
+  els.linksList.innerHTML = visible
+    .map(
+      (l) => `
+    <div class="rf-value-row" style="padding: 8px 0;">
+      <div class="rf-value">${escapeHtml(l.label)}</div>
+      <div class="contact-actions">
+        <button type="button" class="contact-action-btn" data-key="${l.key}" data-action="open" title="Open">${LINK_ACTION_ICONS.open}</button>
+        <button type="button" class="contact-action-btn" data-key="${l.key}" data-action="send" title="Send">${LINK_ACTION_ICONS.send}</button>
+        <button type="button" class="contact-action-btn" data-key="${l.key}" data-action="copy" title="Copy">${LINK_ACTION_ICONS.copy}</button>
+      </div>
+    </div>`
+    )
+    .join("");
+
+  els.linksList.querySelectorAll(".contact-action-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const link = APP_LINKS.find((l) => l.key === btn.dataset.key);
+      if (!link) return;
+      const action = btn.dataset.action;
+      if (action === "open") {
+        window.open(link.url, "_blank", "noopener");
+      } else if (action === "copy") {
+        try {
+          await navigator.clipboard.writeText(link.url);
+          const original = btn.title;
+          btn.title = "Copied!";
+          setTimeout(() => (btn.title = original), 1200);
+        } catch {
+          // Clipboard access can fail (permissions, insecure context, etc.) —
+          // silently ignore, Open still works as a fallback.
+        }
+      } else if (action === "send") {
+        // navigator.share opens the device's real share sheet (Messages,
+        // Mail, WhatsApp, etc.) — supported on effectively all mobile
+        // browsers and most modern desktop ones. Where it isn't available,
+        // fall back to a tiny Text/Email menu (see sendFallbackMenu).
+        if (navigator.share) {
+          try {
+            await navigator.share({ title: link.label, url: link.url });
+          } catch {
+            // User backed out of the share sheet — not an error.
+          }
+        } else {
+          openSendFallback(link, btn);
+        }
+      }
+    });
+  });
+}
+
+// sms:/mailto: links, same pattern as the instant-contact icons elsewhere in
+// the app (js/contactIcons.js) — prefilled with the link so all the other
+// person has to do is hit send.
+function openSendFallback(link, anchorBtn) {
+  const rect = anchorBtn.getBoundingClientRect();
+  els.sendFallbackMenu.style.left = `${Math.max(8, rect.right - 140)}px`;
+  els.sendFallbackMenu.style.top = `${rect.bottom + 6}px`;
+  els.sendFallbackMenu.classList.remove("hidden");
+
+  const cleanup = () => {
+    els.sendFallbackMenu.classList.add("hidden");
+    els.sendFallbackTextBtn.removeEventListener("click", onText);
+    els.sendFallbackEmailBtn.removeEventListener("click", onEmail);
+  };
+  const onText = () => {
+    cleanup();
+    window.location.href = `sms:?&body=${encodeURIComponent(`${link.label}: ${link.url}`)}`;
+  };
+  const onEmail = () => {
+    cleanup();
+    const subject = encodeURIComponent(link.label);
+    const body = encodeURIComponent(link.url);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+  els.sendFallbackTextBtn.addEventListener("click", onText);
+  els.sendFallbackEmailBtn.addEventListener("click", onEmail);
+}
+document.addEventListener("click", (e) => {
+  if (els.sendFallbackMenu.classList.contains("hidden")) return;
+  if (e.target.closest("#sendFallbackMenu")) return;
+  els.sendFallbackMenu.classList.add("hidden");
+});
+
+els.menuLinksBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   closePageHeaderMenu();
-  els.shareAppPopup.classList.remove("hidden");
+  renderLinksList();
+  els.linksPopup.classList.remove("hidden");
 });
-els.shareAppCloseBtn.addEventListener("click", () => els.shareAppPopup.classList.add("hidden"));
-els.shareAppOpenBtn.addEventListener("click", () => window.open(SHARE_APP_URL, "_blank", "noopener"));
-els.shareAppCopyBtn.addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText(SHARE_APP_URL);
-    const original = els.shareAppCopyBtn.textContent;
-    els.shareAppCopyBtn.textContent = "Copied!";
-    setTimeout(() => (els.shareAppCopyBtn.textContent = original), 1200);
-  } catch {
-    // Clipboard access can fail (permissions, insecure context, etc.) —
-    // silently ignore, Open still works as a fallback.
-  }
-});
+els.linksPopupClose.addEventListener("click", () => els.linksPopup.classList.add("hidden"));
 
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
 
