@@ -1737,7 +1737,7 @@ function openTimelineIntroCall(eventDate, time, timezone) {
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
-    userId: profile.id,
+    profile,
     // The Profile page's "Intro calls" graph should only count calls actually
     // scheduled from the Dials page (see handleScheduleIntroCallFromDial in
     // js/dials.js, which leaves logToGraph at its default true) — logging an
@@ -1875,18 +1875,16 @@ function renderModalBody() {
     ${bodyHTML}
     ${
       currentMode === "edit"
-        ? `<div class="form-actions">
+        ? `<div class="form-actions${canConvertType ? " client-edit-actions" : ""}">
         <button type="button" class="btn" id="saveClientBtn">Save</button>
         <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
+        ${
+          canConvertType
+            ? `<button type="button" class="btn secondary" id="convertClientTypeBtn">Convert to ${currentClient.client_type === "buyer" ? "Seller" : "Buyer"}</button>`
+            : ""
+        }
         <button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>
-      </div>
-      ${
-        canConvertType
-          ? `<div class="form-actions" style="margin-top:8px;">
-        <button type="button" class="btn secondary" id="convertClientTypeBtn">Convert to ${currentClient.client_type === "buyer" ? "Seller" : "Buyer"}</button>
       </div>`
-          : ""
-      }`
         : ""
     }
   `;

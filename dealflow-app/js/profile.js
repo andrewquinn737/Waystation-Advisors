@@ -7,6 +7,7 @@ import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
+import { getMainAdmin } from "./mainAdmin.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -27,6 +28,13 @@ const isTeamLeadSync = profile?.role === "team_lead";
 // me" instead of "Select all" — a no-op every subsequent load (see
 // js/accountsVisible.js).
 initDefaultToSelf(profile.id);
+
+// The admin account listed the longest — see js/mainAdmin.js. Resolved once
+// up front (same timing as the sync role checks above) since both the Teams
+// popup highlight and the Calendly-link section need it and neither should
+// have to wait on its own separate fetch later.
+const mainAdmin = await getMainAdmin();
+const mainAdminId = mainAdmin?.id || null;
 
 const els = {
   errorBox: document.getElementById("errorBox"),
@@ -53,6 +61,8 @@ const els = {
   profilePhone: document.getElementById("profilePhone"),
   profileEmail: document.getElementById("profileEmail"),
   profileMultiNote: document.getElementById("profileMultiNote"),
+  calendlyLinkSection: document.getElementById("calendlyLinkSection"),
+  calendlyLinkText: document.getElementById("calendlyLinkText"),
   outreachCallsSection: document.getElementById("outreachCallsSection"),
   introCallsSection: document.getElementById("introCallsSection"),
   callsThisWeekText: document.getElementById("callsThisWeekText"),
@@ -191,7 +201,7 @@ async function loadAllAccountsForSelection() {
   if (allAccountsForSelection) return allAccountsForSelection;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role, phone, email, avatar_url, team_id")
+    .select("id, full_name, role, phone, email, avatar_url, team_id, calendly_link")
     .order("full_name", { ascending: true });
   allAccountsForSelection = error ? [] : data || [];
   return allAccountsForSelection;
@@ -248,6 +258,19 @@ async function renderProfileHeader() {
     els.profileEmail.classList.add("hidden");
   }
   if (els.profileMultiNote) els.profileMultiNote.classList.toggle("hidden", !isMultiple);
+
+  // Calendly link — only the main admin and team leads ever have one that
+  // means anything (see js/mainAdmin.js/js/introCall.js), so the section
+  // only shows for whichever of those the currently-displayed account is.
+  const showsCalendly = showAccount.role === "team_lead" || showAccount.id === mainAdminId;
+  if (els.calendlyLinkSection) {
+    els.calendlyLinkSection.classList.toggle("hidden", !showsCalendly);
+    if (showsCalendly) {
+      els.calendlyLinkText.innerHTML = showAccount.calendly_link
+        ? `<a href="${escapeHtml(showAccount.calendly_link)}" target="_blank" rel="noopener">${escapeHtml(showAccount.calendly_link)}</a>`
+        : "No Calendly link listed";
+    }
+  }
 
   // Editing only makes sense for your own account — hide "Edit" only while
   // actually viewing someone ELSE's single account (isSingleOther). A
@@ -307,7 +330,23 @@ function enterProfileEditMode() {
   els.profileEmail.classList.remove("hidden");
   els.profileEmail.replaceWith(emailInput);
 
-  profileEditInputs = { nameInput, phoneInput, emailInput };
+  // Calendly link is only ever editable for your own account (edit mode is
+  // always self — see requireSession()'s Edit-button gating) when you're the
+  // main admin or a team lead (see js/mainAdmin.js) — the section itself is
+  // already shown/hidden to match by renderProfileHeader, so this just
+  // decides whether to swap in an input at all.
+  const canEditCalendly = profile.id === mainAdminId || profile.role === "team_lead";
+  let calendlyInput = null;
+  if (canEditCalendly) {
+    calendlyInput = document.createElement("input");
+    calendlyInput.type = "url";
+    calendlyInput.className = "profile-edit-input";
+    calendlyInput.value = profile.calendly_link || "";
+    calendlyInput.placeholder = "Calendly link";
+    els.calendlyLinkText.replaceWith(calendlyInput);
+  }
+
+  profileEditInputs = { nameInput, phoneInput, emailInput, calendlyInput };
   nameInput.focus();
   nameInput.select();
 }
@@ -316,28 +355,34 @@ async function exitProfileEditMode() {
   if (!profileEditMode) return;
   profileEditMode = false;
   els.avatarInitials.classList.remove("editable");
-  const { nameInput, phoneInput, emailInput } = profileEditInputs;
+  const { nameInput, phoneInput, emailInput, calendlyInput } = profileEditInputs;
   profileEditInputs = null;
 
   const newName = nameInput.value.trim() || profile.full_name;
   const newPhone = phoneInput.value.trim();
   const newEmail = emailInput.value.trim();
+  const newCalendlyLink = calendlyInput ? calendlyInput.value.trim() : null;
   nameInput.replaceWith(els.profileName);
   phoneInput.replaceWith(els.profilePhone);
   emailInput.replaceWith(els.profileEmail);
+  if (calendlyInput) calendlyInput.replaceWith(els.calendlyLinkText);
 
-  const changed = newName !== profile.full_name || newPhone !== (profile.phone || "") || newEmail !== (profile.email || "");
+  const changed =
+    newName !== profile.full_name ||
+    newPhone !== (profile.phone || "") ||
+    newEmail !== (profile.email || "") ||
+    (calendlyInput && newCalendlyLink !== (profile.calendly_link || ""));
   if (changed) {
-    const { error } = await supabase
-      .from("profiles")
-      .update({ full_name: newName, phone: newPhone || null, email: newEmail || null })
-      .eq("id", profile.id);
+    const updatePayload = { full_name: newName, phone: newPhone || null, email: newEmail || null };
+    if (calendlyInput) updatePayload.calendly_link = newCalendlyLink || null;
+    const { error } = await supabase.from("profiles").update(updatePayload).eq("id", profile.id);
     if (error) {
       showError(els.errorBox, error);
     } else {
       profile.full_name = newName;
       profile.phone = newPhone;
       profile.email = newEmail;
+      if (calendlyInput) profile.calendly_link = newCalendlyLink;
     }
   }
   await renderProfileHeader();
@@ -709,7 +754,7 @@ function memberCardHTML(m) {
   const pwRevealed = revealedPasswordMemberIds.has(m.id);
   return `
     <div class="team-member-card-wrap">
-      <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""} ${m.role === "team_lead" ? "is-team-lead" : ""}" data-member-id="${m.id}">
+      <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""} ${m.role === "team_lead" ? "is-team-lead" : ""} ${m.id === mainAdminId ? "is-main-admin" : ""}" data-member-id="${m.id}">
         <div class="mc-left">
           ${memberAvatarHTML(m)}
           <div class="mc-main">

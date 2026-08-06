@@ -366,6 +366,16 @@ textarea { resize: vertical; min-height: 60px; }
 .form-row { display: flex; gap: 12px; }
 .form-row > div { flex: 1; }
 .form-actions { margin-top: 16px; display: flex; gap: 8px; }
+/* Client edit form only, when Convert-to-Buyer/Seller is present (see
+   canConvertType in js/clients.js) — 4 buttons (Save/Cancel/Convert/Delete)
+   need to fit in the same row width the 3-button version did. Only
+   horizontal padding and the gap shrink — vertical padding/font-size are
+   untouched, so button height stays identical to every other .form-actions
+   row. Save's left edge and Delete's right edge (still pinned via
+   margin-left:auto on Delete) land in the same place as before either way,
+   since the row's own width comes from its parent, not its buttons. */
+.client-edit-actions { gap: 4px; }
+.client-edit-actions .btn { padding-left: 8px; padding-right: 8px; }
 
 /* ---- Table ---- */
 table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
@@ -564,14 +574,15 @@ tr.clickable-row { cursor: pointer; }
 #requiredPopup, #confirmDeleteModal, #introCallPopup, #eventDateModal,
 #addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal,
 /* eventReportModal ("write a report" on checking a Timeline event),
-   editEventModal (its Edit button), and transferOwnershipModal ("Person
-   responsible" click-to-transfer) were all added later (see js/clients.js)
-   and were missing from this list — left at the base .modal-backdrop
-   z-index of 50, well under the client modal's fullscreen z-index of 100, so
-   they rendered invisibly underneath it. counterpartModal has the same
-   "opens while the client modal is already open" shape, so it's included
-   too even though it wasn't reported broken. */
-#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal { z-index: 200; }
+   editEventModal (its Edit button), transferOwnershipModal ("Person
+   responsible" click-to-transfer), and confirmConvertModal (the
+   Convert-to-Buyer/Seller confirmation) were all added later (see
+   js/clients.js) and were missing from this list — left at the base
+   .modal-backdrop z-index of 50, well under the client modal's fullscreen
+   z-index of 100, so they rendered invisibly underneath it. counterpartModal
+   has the same "opens while the client modal is already open" shape, so
+   it's included too even though it wasn't reported broken. */
+#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
@@ -1194,7 +1205,11 @@ html.is-mobile-device .mobile-list { display: block; }
    js/profile.js): instead of a separator line between them and the rest of
    the box, their own card gets a slightly darker/heavier border all the way
    around. */
-.team-member-card.is-team-lead { border-color: var(--text-muted); border-width: 2px; }
+/* is-main-admin (the admin account listed the longest — see js/mainAdmin.js)
+   gets the exact same treatment as is-team-lead, just its own class since
+   it's a different concept — not sorted to the top of its box the way a
+   team lead is, only highlighted. */
+.team-member-card.is-team-lead, .team-member-card.is-main-admin { border-color: var(--text-muted); border-width: 2px; }
 .team-member-card {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -1236,7 +1251,7 @@ html.is-mobile-device .team-member-card { touch-action: none; }
 /* Keep the detail box's side/bottom border matching when it's expanded out
    from underneath a team lead's highlighted card, so the seam between them
    doesn't visually mismatch. */
-.team-member-card.is-team-lead + .team-member-detail { border-color: var(--text-muted); border-width: 0 2px 2px; }
+.team-member-card.is-team-lead + .team-member-detail, .team-member-card.is-main-admin + .team-member-detail { border-color: var(--text-muted); border-width: 0 2px 2px; }
 .team-member-detail .readonly-field:first-child { border-top: none; }
 .copy-toast { font-size: 11px; font-weight: 600; color: var(--success); }
 

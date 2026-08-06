@@ -115,6 +115,17 @@
            above, this just makes that explicit. -->
       <p class="help-text profile-multi-note hidden" id="profileMultiNote">(Multiple accounts shown)</p>
 
+      <!-- Calendly link — shown only for the main admin account (the admin
+           listed the longest, see js/mainAdmin.js) and team leads, the two
+           roles intro-call scheduling can route to (see js/introCall.js).
+           Read-only display of whichever account renderProfileHeader() is
+           currently showing; editable in profile edit mode for your own
+           account when you qualify (see enterProfileEditMode). -->
+      <div class="profile-calls-section hidden" id="calendlyLinkSection">
+        <p class="profile-calls-text">Calendly link</p>
+        <p class="help-text" id="calendlyLinkText">No Calendly link listed</p>
+      </div>
+
       <!-- Outreach calls (default) — the existing weekly "people called" text
            + chart with the 50/week quota line. -->
       <div class="profile-calls-section" id="outreachCallsSection">

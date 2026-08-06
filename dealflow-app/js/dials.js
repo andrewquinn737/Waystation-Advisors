@@ -13,8 +13,7 @@ import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIs
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
-const { profile, user } = session;
-const internEmail = user?.email || "";
+const { profile } = session;
 const isAdmin = profile?.role === "admin";
 // Team leads get the settings gear (Sellers/Buyers + Accounts visible) like
 // admins do, but Accounts visible only ever lists their own teammates (see
@@ -2242,8 +2241,7 @@ async function handleScheduleIntroCallFromDial(dial) {
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
-    internEmail,
-    userId: profile.id,
+    profile,
     createClient: async () => {
       // client_type must match whichever side (Sellers/Buyers toggle) this
       // dial actually belongs to — defaultClient()'s own default is

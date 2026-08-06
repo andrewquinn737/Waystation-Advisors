@@ -20,10 +20,7 @@
 // themselves.
 
 import { supabase } from "./supabaseClient.js";
-
-// Public Calendly link for the 30-minute intro call event. Update this if
-// the Calendly account or event type ever changes.
-const CALENDLY_BOOKING_URL = "https://calendly.com/mason-waystationadvisors/30min";
+import { resolveCalendlyLink } from "./mainAdmin.js";
 
 // Lazily injects Calendly's embed script/stylesheet once per page load and
 // resolves once window.Calendly is ready to use. Safe to call repeatedly —
@@ -70,7 +67,7 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 }
 
 // container: element the form HTML above was injected into.
-// opts: { client, createClient, internEmail, userId, logToGraph, onCalendlyClosed(client), onScheduled(client) }
+// opts: { client, createClient, profile, logToGraph, onCalendlyClosed(client), onScheduled(client) }
 //   - client: an already-existing client row ({full_name,email,id,...}).
 //   - createClient: alternative to `client` — an async function called the
 //     moment "Open Calendly" is clicked, which should create the client
@@ -79,10 +76,14 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 //     isn't actually created in the database until Calendly is opened —
 //     clicking "Schedule Intro Call" itself only validates the dial's info
 //     and opens this form, it no longer creates anything.
-//   - userId: the signed-in profile's id — logged to intro_call_log (see
-//     supabase/schema.sql) so the Profile page's "Intro calls" tracker can
+//   - profile: the signed-in profile row (id, role, team_id) — used both to
+//     log intro_call_log (so the Profile page's "Intro calls" tracker can
 //     count every time this flow is used, from either Dials or Clients,
-//     independent of client_events/Timeline.
+//     independent of client_events/Timeline) and to resolve which Calendly
+//     link to open (see resolveCalendlyLink in js/mainAdmin.js: the main
+//     admin's own link for anyone who isn't an intern, otherwise the
+//     signed-in intern's own team lead's link, falling back to the main
+//     admin's).
 //   - logToGraph: defaults to true. The Clients Timeline's "+" > Intro call
 //     flow passes false when the chosen date is in the future — a call that
 //     hasn't happened yet shouldn't count toward the graph until its date
@@ -96,10 +97,9 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 //     postMessage doesn't expose the actual chosen time (see the top-of-file
 //     comment).
 //   - onScheduled(client): fired after onCalendlyClosed, same as before.
-// (internEmail is accepted but unused in this simplified version — the
-// booking link isn't per-intern.)
 export function wireIntroCallForm(container, opts) {
-  const { client: initialClient, createClient, userId, logToGraph = true, onCalendlyClosed, onScheduled } = opts;
+  const { client: initialClient, createClient, profile, logToGraph = true, onCalendlyClosed, onScheduled } = opts;
+  const userId = profile?.id;
   const btn = container.querySelector("#scheduleCallBtn");
   const skipBtn = container.querySelector("#skipCalendlyBtn");
   const errEl = container.querySelector("#introCallError");
@@ -135,6 +135,13 @@ export function wireIntroCallForm(container, opts) {
       return;
     }
 
+    const calendlyUrl = await resolveCalendlyLink(profile);
+    if (!calendlyUrl) {
+      errEl.textContent = "Scheduling isn't set up yet — no Calendly link on file.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+
     try {
       await loadCalendlyWidget();
     } catch {
@@ -145,7 +152,7 @@ export function wireIntroCallForm(container, opts) {
 
     const name = client.full_name || "";
     window.Calendly.initPopupWidget({
-      url: CALENDLY_BOOKING_URL,
+      url: calendlyUrl,
       prefill: { name, email: client.email },
     });
 
