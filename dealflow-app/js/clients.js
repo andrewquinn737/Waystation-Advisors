@@ -1875,7 +1875,7 @@ function renderModalBody() {
     ${bodyHTML}
     ${
       currentMode === "edit"
-        ? `<div class="form-actions${canConvertType ? " client-edit-actions" : ""}">
+        ? `<div class="form-actions client-edit-actions${canConvertType ? " has-convert" : ""}">
         <button type="button" class="btn" id="saveClientBtn">Save</button>
         <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
         ${
@@ -1883,7 +1883,7 @@ function renderModalBody() {
             ? `<button type="button" class="btn secondary" id="convertClientTypeBtn">Convert to ${currentClient.client_type === "buyer" ? "Seller" : "Buyer"}</button>`
             : ""
         }
-        <button type="button" class="btn danger" id="deleteClientBtn"${canConvertType ? "" : ' style="margin-left:auto;"'}>Delete</button>
+        <button type="button" class="btn danger" id="deleteClientBtn">Delete</button>
       </div>`
         : ""
     }

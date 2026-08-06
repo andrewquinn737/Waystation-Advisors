@@ -366,20 +366,18 @@ textarea { resize: vertical; min-height: 60px; }
 .form-row { display: flex; gap: 12px; }
 .form-row > div { flex: 1; }
 .form-actions { margin-top: 16px; display: flex; gap: 8px; }
-/* Client edit form only, when Convert-to-Buyer/Seller is present (see
-   canConvertType in js/clients.js) — 4 buttons (Save/Cancel/Convert/Delete)
-   need to fit in the same row width the 3-button version did, evenly spaced
-   rather than Delete sitting off on its own past a big gap. Delete's
-   margin-left:auto (used in the plain 3-button row) is only applied there —
-   here justify-content:space-between spreads all 4 buttons' gaps equally
-   instead. Horizontal padding shrinks too so the wider label ("Convert to
-   Seller"/"Convert to Buyer") still fits; vertical padding/font-size are
-   untouched, so button height stays identical to every other .form-actions
-   row. Save's left edge and Delete's right edge still land in the same
-   place as before either way, since the row's own width comes from its
-   parent, not its buttons. */
-.client-edit-actions { justify-content: space-between; gap: 4px; }
-.client-edit-actions .btn { padding-left: 8px; padding-right: 8px; }
+/* Client edit form's Save/Cancel/[Convert]/Delete row (see canConvertType
+   in js/clients.js — Convert only shows for admin/team-lead on a client
+   with no Timeline history yet). Desktop default here is a plain clustered
+   row: Delete sits directly after Cancel/Convert, same as every other
+   .form-actions row — no far-right push. Mobile keeps its own look below
+   (html.is-mobile-device section): Delete pinned to the far right when
+   there's no Convert button, or all 4 buttons evenly spaced when there is
+   one, since a clustered row doesn't fit as comfortably at phone widths.
+   .has-convert only matters for the mobile override — desktop treats both
+   cases identically. */
+.client-edit-actions { gap: 4px; }
+.client-edit-actions.has-convert .btn { padding-left: 8px; padding-right: 8px; }
 
 /* ---- Table ---- */
 table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
@@ -1098,6 +1096,14 @@ html.is-mobile-device .mobile-only { display: block; }
 html.is-mobile-device .fab { bottom: 98px; }
 html.is-mobile-device .timeline-add-btn { bottom: 98px; }
 html.is-mobile-device .timeline-add-menu { bottom: 154px; }
+
+/* Client edit form's action row (see the desktop-default version and
+   .has-convert explanation above, near .client-edit-actions) — mobile only:
+   Delete stays pinned to the far right when there's no Convert button, or
+   spreads all 4 buttons evenly when there is one, since phone widths don't
+   comfortably fit a clustered row the way desktop does. */
+html.is-mobile-device .client-edit-actions.has-convert { justify-content: space-between; }
+html.is-mobile-device .client-edit-actions:not(.has-convert) #deleteClientBtn { margin-left: auto; }
 
 /* Forms: two-column rows (first/last name, city/state, revenue/employees,
    min/max spend, etc.) stack into one column. */
