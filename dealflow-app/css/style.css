@@ -368,16 +368,18 @@ textarea { resize: vertical; min-height: 60px; }
 .form-actions { margin-top: 16px; display: flex; gap: 8px; }
 /* Client edit form's Save/Cancel/[Convert]/Delete row (see canConvertType
    in js/clients.js — Convert only shows for admin/team-lead on a client
-   with no Timeline history yet). Desktop default here is a plain clustered
-   row: Delete sits directly after Cancel/Convert, same as every other
-   .form-actions row — no far-right push. Mobile keeps its own look below
-   (html.is-mobile-device section): Delete pinned to the far right when
-   there's no Convert button, or all 4 buttons evenly spaced when there is
-   one, since a clustered row doesn't fit as comfortably at phone widths.
-   .has-convert only matters for the mobile override — desktop treats both
-   cases identically. */
+   with no Timeline history yet). Desktop default here: Cancel/Convert
+   cluster right after Save, Delete pins to the far right (see the
+   html.is-desktop-device rule below) — same far-right placement Delete
+   has always had, just with Convert now clustered on the left instead of
+   also being spread out. Mobile keeps its own look below
+   (html.is-mobile-device section): Delete pinned far right when there's
+   no Convert button, or all 4 buttons evenly spaced when there is one,
+   since a clustered row doesn't fit as comfortably at phone widths.
+   .has-convert only matters for the mobile override. */
 .client-edit-actions { gap: 4px; }
 .client-edit-actions.has-convert .btn { padding-left: 8px; padding-right: 8px; }
+html.is-desktop-device .client-edit-actions #deleteClientBtn { margin-left: auto; }
 
 /* ---- Table ---- */
 table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
