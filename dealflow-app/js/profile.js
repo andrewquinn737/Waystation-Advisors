@@ -591,6 +591,17 @@ async function loadTeams() {
       members.unshift(lead);
     }
   });
+  // The main admin (see js/mainAdmin.js) gets the same top-of-box treatment
+  // within the Admins group specifically — the loop above never touches it
+  // since none of its members are ever role === "team_lead".
+  const adminMembers = teamMembersByGroup[ADMINS_KEY];
+  if (adminMembers && mainAdminId) {
+    const mainIdx = adminMembers.findIndex((m) => m.id === mainAdminId);
+    if (mainIdx > 0) {
+      const [main] = adminMembers.splice(mainIdx, 1);
+      adminMembers.unshift(main);
+    }
+  }
   renderTeams();
 }
 

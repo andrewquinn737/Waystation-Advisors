@@ -1883,7 +1883,7 @@ function renderModalBody() {
             ? `<button type="button" class="btn secondary" id="convertClientTypeBtn">Convert to ${currentClient.client_type === "buyer" ? "Seller" : "Buyer"}</button>`
             : ""
         }
-        <button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>
+        <button type="button" class="btn danger" id="deleteClientBtn"${canConvertType ? "" : ' style="margin-left:auto;"'}>Delete</button>
       </div>`
         : ""
     }
