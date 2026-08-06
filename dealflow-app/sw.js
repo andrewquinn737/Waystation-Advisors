@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v8";
+const CACHE = "waystation-shell-v9";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/finance.html", "/css/style.css",
@@ -36,60 +36,21 @@ self.addEventListener("fetch", (event) => {
   // (Supabase API, jsdelivr CDN) goes straight to the network untouched.
   if (url.origin !== self.location.origin || req.method !== "GET") return;
 
-  // Stale-while-revalidate: answer instantly from our own Cache Storage
-  // (a disk lookup, no network round trip) when we have something, while a
-  // real network fetch runs in the background to refresh that entry for
-  // NEXT time. This is different from a plain browser-HTTP-cache hit — we
-  // still hit the network on every single load via { cache: "no-store" }
-  // (which skips the browser's HTTP disk cache and can't be silently
-  // satisfied without a real request, same protection as before), it just
-  // no longer blocks the response on that round trip finishing first.
-  //
-  // Tradeoff vs. the old network-first-with-no-store approach: right after
-  // a deploy, the very next load of a changed file can still serve the
-  // previous version (whatever was cached from the last visit) instead of
-  // the new one — but the background fetch that same load updates the
-  // cache, so the load right after that is fresh. That's a world apart
-  // from the original incident this no-store fix targeted (real users
-  // stuck on an old dials.js for HOURS because the browser's own HTTP
-  // cache satisfied every request without ever reaching the network at
-  // all) — this always reaches the network, it just doesn't make you wait
-  // for it before you can see anything.
+  // { cache: "no-store" } forces this fetch to skip the browser's own HTTP
+  // disk cache and always hit the network — without it, a plain fetch(req)
+  // can be silently satisfied out of HTTP cache (depending on Vercel's
+  // response cache-control headers) even though this handler LOOKS like
+  // network-first. That's exactly what let real users keep running an old
+  // cached copy of dials.js for hours after a fix had already shipped and
+  // was confirmed live server-side — this closes that gap for good.
   event.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(req);
-
-      if (cached) {
-        // Background refresh only — this response has exactly one reader
-        // (cache.put), so hand it over directly instead of cloning it.
-        // response.clone() splits the body into two independent streams;
-        // if only one of the two ever gets read, iOS/Safari's
-        // ReadableStream implementation can corrupt what actually lands
-        // in Cache Storage, silently writing a 0-byte entry instead of
-        // the real page. That's what caused pages to intermittently show
-        // as an empty "Document — Zero KB" needing an app picker instead
-        // of rendering. Not cloning here means there's only ever one
-        // reader, so that failure mode can't happen.
-        event.waitUntil(
-          fetch(req, { cache: "no-store" })
-            .then((res) => cache.put(req, res))
-            .catch(() => {})
-        );
-        return cached;
-      }
-
-      // Nothing cached yet (first-ever visit to this file) — this
-      // response genuinely needs two independent readers (the page AND
-      // the cache), so clone() is required, and safe, since both halves
-      // actually get fully consumed here.
-      try {
-        const res = await fetch(req, { cache: "no-store" });
-        cache.put(req, res.clone());
+    fetch(req, { cache: "no-store" })
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((cache) => cache.put(req, copy));
         return res;
-      } catch {
-        return caches.match("/index.html");
-      }
-    })
+      })
+      .catch(() => caches.match(req).then((cached) => cached || caches.match("/index.html")))
   );
 });
 
