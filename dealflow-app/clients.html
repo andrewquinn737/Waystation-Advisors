@@ -311,6 +311,21 @@
     </div>
   </div>
 
+  <!-- Convert-side confirmation — see #convertClientTypeBtn/wireConvertClientType
+       in js/clients.js. Only reachable when there are no logged Timeline
+       events yet (see the eligibility check there), so this never has to
+       reconcile side-specific event history. -->
+  <div class="modal-backdrop hidden" id="confirmConvertModal">
+    <div class="modal">
+      <h2 id="confirmConvertTitle">Convert this client?</h2>
+      <p class="help-text">This changes which info fields are shown — company/industry details or buyer preferences won't carry over to the other side.</p>
+      <div class="form-actions">
+        <button type="button" class="btn" id="confirmConvertYesBtn">Convert</button>
+        <button type="button" class="btn secondary" id="confirmConvertNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="js/clients.js"></script>
 </body>
 </html>

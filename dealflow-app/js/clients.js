@@ -307,6 +307,10 @@ const els = {
   transferOwnershipConfirmBtn: document.getElementById("transferOwnershipConfirmBtn"),
   transferOwnershipCancelBtn: document.getElementById("transferOwnershipCancelBtn"),
   confirmDeleteTitle: document.getElementById("confirmDeleteTitle"),
+  confirmConvertModal: document.getElementById("confirmConvertModal"),
+  confirmConvertTitle: document.getElementById("confirmConvertTitle"),
+  confirmConvertYesBtn: document.getElementById("confirmConvertYesBtn"),
+  confirmConvertNoBtn: document.getElementById("confirmConvertNoBtn"),
   eventReportModal: document.getElementById("eventReportModal"),
   eventReportInput: document.getElementById("eventReportInput"),
   eventReportConfirmBtn: document.getElementById("eventReportConfirmBtn"),
@@ -336,6 +340,27 @@ function openConfirmDelete(onConfirm, title) {
   const noBtn = document.getElementById("confirmDeleteNoBtn");
   const cleanup = () => {
     els.confirmDeleteModal.classList.add("hidden");
+    yesBtn.removeEventListener("click", onYes);
+    noBtn.removeEventListener("click", onNo);
+  };
+  const onYes = () => {
+    cleanup();
+    onConfirm();
+  };
+  const onNo = () => cleanup();
+  yesBtn.addEventListener("click", onYes);
+  noBtn.addEventListener("click", onNo);
+}
+
+// Same shape as openConfirmDelete above, own modal (own confirm-button
+// wording — "Convert" reads oddly on a button that says "Delete").
+function openConfirmConvert(onConfirm, title) {
+  els.confirmConvertTitle.textContent = title || "Convert this client?";
+  els.confirmConvertModal.classList.remove("hidden");
+  const yesBtn = els.confirmConvertYesBtn;
+  const noBtn = els.confirmConvertNoBtn;
+  const cleanup = () => {
+    els.confirmConvertModal.classList.add("hidden");
     yesBtn.removeEventListener("click", onYes);
     noBtn.removeEventListener("click", onNo);
   };
@@ -1838,6 +1863,13 @@ function renderModalBody() {
     bodyHTML = buildClientViewHTML(currentClient);
   }
 
+  // Convert to Buyer/Seller — admin/team-lead only, and only while the
+  // Timeline has nothing logged yet besides the auto-inserted "created"
+  // entry (every() is vacuously true for an empty array too), so there's
+  // never any seller-only/buyer-only event history left stranded on the
+  // other side after switching.
+  const canConvertType = (isAdmin || isTeamLead) && currentClientEvents.every((e) => e.event_type === "created");
+
   els.clientModalBody.innerHTML = `
     <div id="clientModalError" class="error-msg hidden"></div>
     ${bodyHTML}
@@ -1847,7 +1879,14 @@ function renderModalBody() {
         <button type="button" class="btn" id="saveClientBtn">Save</button>
         <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
         <button type="button" class="btn danger" id="deleteClientBtn" style="margin-left:auto;">Delete</button>
+      </div>
+      ${
+        canConvertType
+          ? `<div class="form-actions" style="margin-top:8px;">
+        <button type="button" class="btn secondary" id="convertClientTypeBtn">Convert to ${currentClient.client_type === "buyer" ? "Seller" : "Buyer"}</button>
       </div>`
+          : ""
+      }`
         : ""
     }
   `;
@@ -1861,6 +1900,13 @@ function renderModalBody() {
     });
     const delBtn = document.getElementById("deleteClientBtn");
     if (delBtn) delBtn.addEventListener("click", handleDelete);
+    const convertBtn = document.getElementById("convertClientTypeBtn");
+    if (convertBtn) {
+      convertBtn.addEventListener("click", () => {
+        const newType = currentClient.client_type === "buyer" ? "seller" : "buyer";
+        openConfirmConvert(() => convertClientType(newType), `Convert this client to a ${newType}?`);
+      });
+    }
   } else if (currentSubTab === "timeline") {
     wireTimelineTab();
   } else if (currentSubTab === "progress") {
@@ -1903,6 +1949,37 @@ function handleDelete() {
     closeModal();
     await loadClients();
   });
+}
+
+// Only reachable via convertClientTypeBtn, which is itself only rendered
+// when canConvertType is true (admin/team-lead, no logged Timeline events
+// yet — see renderModalBody). Nulls out whichever side-specific fields don't
+// apply to the new side, same as collectFormData's own null-out logic in
+// js/clientForm.js, so the record is never left with stale seller-only or
+// buyer-only data hanging around with no field left in the UI to show or
+// edit it. looking_for is deliberately left untouched either direction —
+// it's a shared field on both sides, just relabeled per side (see
+// lookingForLabel in js/clientForm.js).
+async function convertClientType(newType) {
+  const data = { client_type: newType };
+  if (newType === "buyer") {
+    data.company_name = null;
+    data.industry = null;
+    data.annual_revenue = null;
+    data.employee_count = null;
+    data.founded_year = null;
+    data.founded_month = null;
+  } else {
+    data.money_to_spend_min = null;
+    data.money_to_spend_max = null;
+  }
+  const { error } = await supabase.from("clients").update(data).eq("id", currentClient.id);
+  if (error) return showError(document.getElementById("clientModalError"), error);
+  Object.assign(currentClient, data);
+  const idx = clients.findIndex((c) => c.id === currentClient.id);
+  if (idx !== -1) Object.assign(clients[idx], data);
+  renderModalBody();
+  await loadClients();
 }
 
 function openCreateModal() {
