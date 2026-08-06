@@ -1075,7 +1075,7 @@ function buildTimelineHTML(events) {
     ${listHTML}
     <button type="button" class="timeline-add-btn" id="timelineAddBtn" title="Add event">+</button>
     <div class="timeline-add-menu hidden" id="timelineAddMenu">
-      ${TIMELINE_CATEGORIES.filter((c) => isAdmin || c.value !== "contract_advancement")
+      ${TIMELINE_CATEGORIES.filter((c) => isAdmin || isTeamLead || c.value !== "contract_advancement")
         .map((c) => `<button type="button" data-category="${c.value}">${escapeHtml(c.label)}</button>`)
         .join("")}
     </div>
