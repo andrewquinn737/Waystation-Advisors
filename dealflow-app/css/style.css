@@ -563,14 +563,15 @@ tr.clickable-row { cursor: pointer; }
 /* ---- Popups need to sit above the full-screen client modal ---- */
 #requiredPopup, #confirmDeleteModal, #introCallPopup, #eventDateModal,
 #addAccountModal, #addTeamModal, #confirmDeleteTeamModal, #confirmDeleteAccountModal,
-/* eventReportModal ("write a report" on checking a Timeline event) and
-   editEventModal (its Edit button) were added later (see js/clients.js) and
-   were missing from this list — left at the base .modal-backdrop z-index of
-   50, well under the client modal's fullscreen z-index of 100, so they
-   rendered invisibly underneath it. counterpartModal has the same "opens
-   while the client modal is already open" shape, so it's included too even
-   though it wasn't reported broken. */
-#eventReportModal, #editEventModal, #counterpartModal { z-index: 200; }
+/* eventReportModal ("write a report" on checking a Timeline event),
+   editEventModal (its Edit button), and transferOwnershipModal ("Person
+   responsible" click-to-transfer) were all added later (see js/clients.js)
+   and were missing from this list — left at the base .modal-backdrop
+   z-index of 50, well under the client modal's fullscreen z-index of 100, so
+   they rendered invisibly underneath it. counterpartModal has the same
+   "opens while the client modal is already open" shape, so it's included
+   too even though it wasn't reported broken. */
+#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
