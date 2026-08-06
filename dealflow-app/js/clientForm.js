@@ -83,8 +83,12 @@ function personalAndContactSectionsHTML(client) {
             </select>
           </div>
         </div>
-        <div class="field-label-row"><label for="f_intern_name">Intern's name</label><span class="field-required-msg hidden" data-field="intern_name">required</span></div>
-        <input id="f_intern_name" value="${escapeHtml(client.intern_name)}" readonly style="background:var(--bg); color:var(--text-muted);" />
+        <!-- Renamed from "Intern's name" — still just intern_name under the
+             hood (a display-label change, not a data-model one; see
+             wireTransferOwnershipClick in js/clients.js for the click-to-
+             transfer behavior this field gained). -->
+        <div class="field-label-row"><label for="f_intern_name">Person responsible</label><span class="field-required-msg hidden" data-field="intern_name">required</span></div>
+        <input id="f_intern_name" value="${escapeHtml(client.intern_name)}" readonly title="Click to transfer ownership" style="background:var(--bg); color:var(--text-muted); cursor:pointer;" />
       </div>
     </div>
 
@@ -283,7 +287,7 @@ export function getMissingFields(data) {
 
   if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
 
-  if (!data.intern_name) { missing.push("intern_name"); popupLabels.push("Intern's name"); }
+  if (!data.intern_name) { missing.push("intern_name"); popupLabels.push("Person responsible"); }
 
   return { missing, popupLabels };
 }

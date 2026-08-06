@@ -269,6 +269,25 @@
     </div>
   </div>
 
+  <!-- Clicking "Person responsible" in the edit form opens this — hands the
+       client off to another team lead or admin (see
+       wireTransferOwnershipClick/transfer_client_ownership() in
+       js/clients.js). Same searchable single-pick shape as counterpartModal
+       above. Lists team leads and admins only. -->
+  <div class="modal-backdrop hidden" id="transferOwnershipModal">
+    <div class="modal">
+      <h2>Transfer ownership</h2>
+      <p class="help-text">Hand this client off to another team lead or admin. Once transferred, you can only still edit it if you're an admin.</p>
+      <input type="search" id="transferOwnershipSearchInput" placeholder="Search..." />
+      <div id="transferOwnershipList" class="accounts-visible-list"></div>
+      <div id="transferOwnershipError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="transferOwnershipConfirmBtn" disabled>Transfer</button>
+        <button type="button" class="btn secondary" id="transferOwnershipCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Small centered popup summarizing missing required fields -->
   <div class="modal-backdrop hidden" id="requiredPopup">
     <div class="modal">

@@ -300,6 +300,12 @@ const els = {
   counterpartList: document.getElementById("counterpartList"),
   counterpartConfirmBtn: document.getElementById("counterpartConfirmBtn"),
   counterpartCancelBtn: document.getElementById("counterpartCancelBtn"),
+  transferOwnershipModal: document.getElementById("transferOwnershipModal"),
+  transferOwnershipSearchInput: document.getElementById("transferOwnershipSearchInput"),
+  transferOwnershipList: document.getElementById("transferOwnershipList"),
+  transferOwnershipError: document.getElementById("transferOwnershipError"),
+  transferOwnershipConfirmBtn: document.getElementById("transferOwnershipConfirmBtn"),
+  transferOwnershipCancelBtn: document.getElementById("transferOwnershipCancelBtn"),
   confirmDeleteTitle: document.getElementById("confirmDeleteTitle"),
   eventReportModal: document.getElementById("eventReportModal"),
   eventReportInput: document.getElementById("eventReportInput"),
@@ -459,7 +465,7 @@ function renderTable() {
   els.tableWrap.innerHTML = `
     <table>
       <thead>
-        <tr><th>Name</th><th>Company</th><th>Location</th><th>Intern's name</th></tr>
+        <tr><th>Name</th><th>Company</th><th>Location</th><th>Person responsible</th></tr>
       </thead>
       <tbody>
         ${rows
@@ -469,7 +475,7 @@ function renderTable() {
             <td data-label="Name">${escapeHtml(clientDisplayName(c))}</td>
             <td class="muted" data-label="Company">${escapeHtml(clientSecondary(c))}</td>
             <td class="muted" data-label="Location">${escapeHtml(clientLocation(c))}</td>
-            <td class="muted" data-label="Intern's name">${escapeHtml(c.intern_name || "—")}</td>
+            <td class="muted" data-label="Person responsible">${escapeHtml(c.intern_name || "—")}</td>
           </tr>`
           )
           .join("")}
@@ -651,20 +657,23 @@ if (isAdmin || isTeamLead) {
     closePageHeaderMenu: closePageHeaderMenu,
     myProfileId: profile.id,
     getAllAccounts: async () => {
-      // Admins see everyone; a team lead only ever sees their own teammates
-      // (same team_id) — never every account. Requires clients_select_own to
-      // also allow is_team_lead_of() (see supabase/schema.sql), otherwise a
-      // team lead's session could never fetch a teammate's clients in the
-      // first place, filter or no filter.
+      // Admins see everyone. A team lead only ever sees themselves plus the
+      // interns on their own team (same team_id, role = intern) — never an
+      // admin or another team lead who happens to share that team_id, and
+      // never every account. Requires clients_select_own to also allow
+      // is_team_lead_of() (now intern-only, see supabase/schema.sql),
+      // otherwise a team lead's session could never fetch a teammate's
+      // clients in the first place, filter or no filter.
       if (isAdmin) {
         const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
-      if (!profile.team_id) return [];
+      if (!profile.team_id) return [profile];
       const { data, error } = await supabase
         .from("profiles")
         .select("id, full_name")
         .eq("team_id", profile.team_id)
+        .or(`role.eq.intern,id.eq.${profile.id}`)
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
@@ -798,7 +807,7 @@ function buildClientViewHTML(client) {
     ${rfContact("Email", client.email, "email")}
     ${buildPhoneNumbersHTML(client)}
     ${rfLink("LinkedIn", client.linkedin)}
-    ${rf("Intern's name", client.intern_name)}
+    ${rf("Person responsible", client.intern_name)}
     ${isBuyer ? "" : rf("Industry sector", client.industry)}
     ${isBuyer ? "" : rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
     ${isBuyer ? "" : rf("Employees", client.employee_count)}
@@ -1385,6 +1394,102 @@ async function openCounterpartPicker(onSelect) {
   cancelBtn.addEventListener("click", onCancelClick);
 }
 
+// ---------------------------------------------------------------------------
+// "Person responsible" click-to-transfer — only wired in edit mode (see
+// renderModalBody), since a brand-new client being created has no id yet to
+// transfer. Lists team leads and admins only (transfer_client_ownership()
+// enforces the same target restriction server-side); the current owner is
+// excluded from the list, same as dial-tab transfer excludes the tab's
+// current owner from its own target list.
+// ---------------------------------------------------------------------------
+function wireTransferOwnershipClick() {
+  const input = document.getElementById("f_intern_name");
+  if (!input) return;
+  input.addEventListener("click", () => openTransferOwnershipPicker());
+}
+
+async function openTransferOwnershipPicker() {
+  const { data, error: loadError } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .in("role", ["team_lead", "admin"])
+    .neq("id", currentClient.created_by)
+    .order("full_name", { ascending: true });
+  const options = loadError ? [] : data || [];
+
+  const modal = els.transferOwnershipModal;
+  const searchInput = els.transferOwnershipSearchInput;
+  const listEl = els.transferOwnershipList;
+  const errEl = els.transferOwnershipError;
+  const confirmBtn = els.transferOwnershipConfirmBtn;
+  const cancelBtn = els.transferOwnershipCancelBtn;
+
+  let selectedId = null;
+
+  function render() {
+    const q = searchInput.value.trim().toLowerCase();
+    const filtered = options.filter((p) => (p.full_name || "").toLowerCase().includes(q));
+    listEl.innerHTML = filtered.length
+      ? filtered
+          .map(
+            (p) => `
+        <button type="button" class="accounts-visible-row ${p.id === selectedId ? "selected" : ""}" data-id="${p.id}">
+          ${escapeHtml(p.full_name)}
+        </button>`
+          )
+          .join("")
+      : `<div class="accounts-visible-empty">No matches.</div>`;
+    listEl.querySelectorAll("[data-id]").forEach((row) => {
+      row.addEventListener("click", () => {
+        selectedId = row.dataset.id;
+        confirmBtn.disabled = false;
+        render();
+      });
+    });
+  }
+
+  searchInput.value = "";
+  selectedId = null;
+  confirmBtn.disabled = true;
+  errEl.classList.add("hidden");
+  render();
+  modal.classList.remove("hidden");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    searchInput.removeEventListener("input", onSearchInput);
+    confirmBtn.removeEventListener("click", onConfirmClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onSearchInput = () => render();
+  const onConfirmClick = async () => {
+    if (!selectedId) return;
+    confirmBtn.disabled = true;
+    const { error } = await supabase.rpc("transfer_client_ownership", {
+      p_client_id: currentClient.id,
+      p_new_owner: selectedId,
+    });
+    if (error) {
+      errEl.textContent = error.message || String(error);
+      errEl.classList.remove("hidden");
+      confirmBtn.disabled = false;
+      return;
+    }
+    cleanup();
+    // The client just left this account's ownership (unless is_admin() kept
+    // it visible) — closing the modal and reloading the list is simplest,
+    // same as how a transferred dial tab disappears from the transferring
+    // account's own Dials page right after (see completeTransfer in
+    // js/dials.js).
+    closeModal();
+    await loadClients();
+  };
+  const onCancelClick = () => cleanup();
+  searchInput.addEventListener("input", onSearchInput);
+  confirmBtn.addEventListener("click", onConfirmClick);
+  cancelBtn.addEventListener("click", onCancelClick);
+}
+
 async function loadClientEvents() {
   if (!currentClient) {
     currentClientEvents = [];
@@ -1748,6 +1853,7 @@ function renderModalBody() {
   `;
   if (currentMode === "edit") {
     wireEditableFormEvents(els.clientModalBody);
+    wireTransferOwnershipClick();
     document.getElementById("saveClientBtn").addEventListener("click", handleEditSave);
     document.getElementById("cancelClientBtn").addEventListener("click", () => {
       currentMode = "view";

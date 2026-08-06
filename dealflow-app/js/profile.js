@@ -205,13 +205,15 @@ async function loadAllAccountsForSelection() {
 async function resolveSelectedAccounts() {
   if (!isAdminSync && !isTeamLeadSync) return [profile];
   const all = await loadAllAccountsForSelection();
-  // Team leads only ever get their own teammates back here, even though
-  // loadAllAccountsForSelection() itself fetches every account — filtering
-  // happens client-side, same as the getAllAccounts callback passed to
-  // wireAccountsVisiblePopup near the bottom of this file (which is what
-  // actually controls which accounts a team lead can pick from in the first
-  // place — this just needs to agree with that scope).
-  const pool = isAdminSync ? all : all.filter((a) => a.id === profile.id || (profile.team_id && a.team_id === profile.team_id));
+  // Team leads only ever get themselves + their own team's interns back
+  // here, even though loadAllAccountsForSelection() itself fetches every
+  // account — filtering happens client-side, same as the getAllAccounts
+  // callback passed to wireAccountsVisiblePopup near the bottom of this file
+  // (which is what actually controls which accounts a team lead can pick
+  // from in the first place — this just needs to agree with that scope).
+  const pool = isAdminSync
+    ? all
+    : all.filter((a) => a.id === profile.id || (profile.team_id && a.team_id === profile.team_id && a.role === "intern"));
   const visible = getVisibleAccountIds();
   if (!visible) return pool.length ? pool : [profile];
   const picked = pool.filter((a) => visible.has(a.id));
@@ -1830,21 +1832,24 @@ if (isAdminSync || isTeamLeadSync) {
     closePageHeaderMenu: closePageHeaderMenu,
     myProfileId: profile.id,
     getAllAccounts: async () => {
-      // Admins see everyone; a team lead only ever sees their own teammates
-      // (same team_id) — never every account. Requires
-      // client_events_select_own/intro_call_log_select_own to also allow
-      // is_team_lead_of() (see supabase/schema.sql), otherwise a team lead's
+      // Admins see everyone. A team lead only ever sees themselves plus the
+      // interns on their own team (same team_id, role = intern) — never an
+      // admin or another team lead who happens to share that team_id, and
+      // never every account. Requires client_events_select_own/
+      // intro_call_log_select_own to also allow is_team_lead_of() (now
+      // intern-only, see supabase/schema.sql), otherwise a team lead's
       // session could never fetch a teammate's numbers/events in the first
       // place, filter or no filter.
       if (isAdminSync) {
         const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
-      if (!profile.team_id) return [];
+      if (!profile.team_id) return [profile];
       const { data, error } = await supabase
         .from("profiles")
         .select("id, full_name")
         .eq("team_id", profile.team_id)
+        .or(`role.eq.intern,id.eq.${profile.id}`)
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },

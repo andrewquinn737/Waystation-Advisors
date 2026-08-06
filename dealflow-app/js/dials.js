@@ -228,11 +228,13 @@ const els = {
   massContactWarningCancelBtn: document.getElementById("massContactWarningCancelBtn"),
 };
 
-// Transfer stays strictly admin-only. CSV import is now also available to
-// team leads (see isTeamLead comment above) — only Transfer remains gated to
-// isAdmin alone.
+// CSV import and Transfer are both available to team leads too now (see
+// transfer_dial_list() in supabase/schema.sql, which enforces a team lead
+// can only transfer their own or their team's tabs, and only to an admin or
+// an intern on their own team — openTransferMenu below applies that same
+// scoping to the target-account list it shows).
 if (isAdmin || isTeamLead) els.menuImportBtn.classList.remove("hidden");
-if (isAdmin) els.dialTabTransferBtn.classList.remove("hidden");
+if (isAdmin || isTeamLead) els.dialTabTransferBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
 // Notifications on/off — everyone gets this (see js/notifications.js),
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
@@ -889,16 +891,21 @@ async function openTransferMenu() {
   els.dialTabTransferMenu.classList.remove("hidden");
   positionTransferMenu();
 
-  // Normally every OTHER account in the company — never the admin doing the
-  // transferring, since a tab can't be "transferred" to its own owner. BUT
-  // if the tab being transferred belongs to someone else (the admin is
-  // viewing another account's tab via Accounts visible), the admin's own
-  // name IS included, so they have the option to transfer it back to
-  // themselves rather than only ever being able to hand it off sideways to
-  // a third account.
+  // Normally every OTHER account in the company (or, for a team lead, every
+  // admin plus every intern on their own team — see transfer_dial_list() in
+  // supabase/schema.sql, which enforces this same scoping server-side) —
+  // never the account doing the transferring, since a tab can't be
+  // "transferred" to its own owner. BUT if the tab being transferred belongs
+  // to someone else (viewing another account's tab via Accounts visible),
+  // the caller's own name IS included, so they have the option to transfer
+  // it back to themselves rather than only ever being able to hand it off
+  // sideways to a third account.
   const list = filteredLists().find((l) => l.id === archiveMenuTabId);
   const isOwnTab = !list || list.created_by === profile.id;
   let query = supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+  if (isTeamLead) {
+    query = query.or(`role.eq.admin,and(role.eq.intern,team_id.eq.${profile.team_id}),id.eq.${profile.id}`);
+  }
   if (isOwnTab) query = query.neq("id", profile.id);
   const { data, error } = await query;
 
@@ -2444,21 +2451,23 @@ if (isAdmin || isTeamLead) {
     closePageHeaderMenu: closePageHeaderMenu,
     myProfileId: profile.id,
     getAllAccounts: async () => {
-      // Admins see everyone; a team lead only ever sees their own teammates
-      // (same team_id) — never every account. Requires
-      // dial_lists_select_own/dials_select_own to also allow
-      // is_team_lead_of() (see supabase/schema.sql), otherwise a team lead's
-      // session could never fetch a teammate's tabs/dials in the first
-      // place, filter or no filter.
+      // Admins see everyone. A team lead only ever sees themselves plus the
+      // interns on their own team (same team_id, role = intern) — never an
+      // admin or another team lead who happens to share that team_id, and
+      // never every account. Requires dial_lists_select_own/dials_select_own
+      // to also allow is_team_lead_of() (now intern-only, see
+      // supabase/schema.sql), otherwise a team lead's session could never
+      // fetch a teammate's tabs/dials in the first place, filter or no filter.
       if (isAdmin) {
         const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
-      if (!profile.team_id) return [];
+      if (!profile.team_id) return [profile];
       const { data, error } = await supabase
         .from("profiles")
         .select("id, full_name")
         .eq("team_id", profile.team_id)
+        .or(`role.eq.intern,id.eq.${profile.id}`)
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
