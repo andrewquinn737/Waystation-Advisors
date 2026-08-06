@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v6";
+const CACHE = "waystation-shell-v7";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/finance.html", "/css/style.css",
@@ -36,21 +36,44 @@ self.addEventListener("fetch", (event) => {
   // (Supabase API, jsdelivr CDN) goes straight to the network untouched.
   if (url.origin !== self.location.origin || req.method !== "GET") return;
 
-  // { cache: "no-store" } forces this fetch to skip the browser's own HTTP
-  // disk cache and always hit the network — without it, a plain fetch(req)
-  // can be silently satisfied out of HTTP cache (depending on Vercel's
-  // response cache-control headers) even though this handler LOOKS like
-  // network-first. That's exactly what let real users keep running an old
-  // cached copy of dials.js for hours after a fix had already shipped and
-  // was confirmed live server-side — this closes that gap for good.
+  // Stale-while-revalidate: answer instantly from our own Cache Storage
+  // (a disk lookup, no network round trip) when we have something, while a
+  // real network fetch runs in the background to refresh that entry for
+  // NEXT time. This is different from a plain browser-HTTP-cache hit — we
+  // still hit the network on every single load via { cache: "no-store" }
+  // (which skips the browser's HTTP disk cache and can't be silently
+  // satisfied without a real request, same protection as before), it just
+  // no longer blocks the response on that round trip finishing first.
+  //
+  // Tradeoff vs. the old network-first-with-no-store approach: right after
+  // a deploy, the very next load of a changed file can still serve the
+  // previous version (whatever was cached from the last visit) instead of
+  // the new one — but the background fetch that same load updates the
+  // cache, so the load right after that is fresh. That's a world apart
+  // from the original incident this no-store fix targeted (real users
+  // stuck on an old dials.js for HOURS because the browser's own HTTP
+  // cache satisfied every request without ever reaching the network at
+  // all) — this always reaches the network, it just doesn't make you wait
+  // for it before you can see anything.
   event.respondWith(
-    fetch(req, { cache: "no-store" })
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(req, copy));
-        return res;
-      })
-      .catch(() => caches.match(req).then((cached) => cached || caches.match("/index.html")))
+    caches.open(CACHE).then(async (cache) => {
+      const cached = await cache.match(req);
+      const networkFetch = fetch(req, { cache: "no-store" })
+        .then((res) => {
+          cache.put(req, res.clone());
+          return res;
+        })
+        .catch(() => null);
+
+      if (cached) {
+        event.waitUntil(networkFetch);
+        return cached;
+      }
+
+      // Nothing cached yet (first-ever visit to this file) — same
+      // network-first-with-offline-fallback behavior as before.
+      return (await networkFetch) || caches.match("/index.html");
+    })
   );
 });
 
