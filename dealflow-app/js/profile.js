@@ -249,9 +249,15 @@ async function renderProfileHeader() {
   }
   if (els.profileMultiNote) els.profileMultiNote.classList.toggle("hidden", !isMultiple);
 
-  // Editing only makes sense for your own account — hide "Edit" entirely
-  // while viewing someone else's info or an aggregated multi-account view.
-  if (els.menuEditProfileBtn) els.menuEditProfileBtn.classList.toggle("hidden", isMultiple || isSingleOther);
+  // Editing only makes sense for your own account — hide "Edit" only while
+  // actually viewing someone ELSE's single account (isSingleOther). A
+  // multi-select (or the no-op zero-selected case) still falls back to
+  // showing your own info above (see showAccount), so Edit should stay
+  // available then too — it used to also hide whenever exactly one account
+  // wasn't selected, which meant an admin (whose Accounts-visible default is
+  // typically several/all accounts, not "just me" like everyone else) could
+  // never edit their own profile at all.
+  if (els.menuEditProfileBtn) els.menuEditProfileBtn.classList.toggle("hidden", isSingleOther);
 
   return selected;
 }
