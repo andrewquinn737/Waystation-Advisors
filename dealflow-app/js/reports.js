@@ -83,9 +83,9 @@ function fmtPeriodLabel(periodStart, type) {
 }
 
 // Inclusive start / exclusive end ISO bounds for a period — used only by
-// the raw call_status_changes query behind the "Contacted dials" list
-// (everything else in this module reads pre-aggregated rollup tables keyed
-// by period_type/period_start and never needs actual date bounds).
+// the raw call_status_changes query behind the "Contacted business owners"
+// list (everything else in this module reads pre-aggregated rollup tables
+// keyed by period_type/period_start and never needs actual date bounds).
 function periodBoundsISO(periodStart, type) {
   const start = new Date(periodStart);
   const end = new Date(periodStart);
@@ -205,19 +205,22 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     });
   }
 
-  // Raw call_status_changes rows for the "Contacted dials" static list —
-  // the one place this module queries something other than a pre-computed
-  // rollup table, since there's no aggregate to read here: every logged
-  // call in range, as-is. Caller guarantees selectedBuyerIds is a Set of
-  // exactly one id (possibly null, for "Not attached to buyer") before
-  // calling this.
+  // Raw call_status_changes rows for the "Contacted business owners" static
+  // list — the one place this module queries something other than a
+  // pre-computed rollup table, since there's no aggregate to read here:
+  // every logged call in range, as-is. Caller guarantees selectedBuyerIds is
+  // a Set of exactly one id (possibly null, for "Not attached to buyer")
+  // before calling this. contact_name/company_name are only ever populated
+  // for calls logged after those columns existed (or the small slice of
+  // older rows whose dial hadn't been deleted at backfill time) — older
+  // rows show "—" for name/company but keep their real date/category.
   async function fetchContactedDials(accounts) {
     const singleBuyerId = [...selectedBuyerIds][0];
     const accountIds = accounts.map((a) => a.id);
     const { startISO, endISO } = periodBoundsISO(selectedPeriodStart, periodType);
     let query = supabase
       .from("call_status_changes")
-      .select("company_name, contact_status_at_call, changed_at")
+      .select("contact_name, company_name, contact_status_at_call, changed_at")
       .eq("dial_type", "seller")
       .in("user_id", accountIds)
       .gte("changed_at", startISO)
@@ -244,12 +247,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const bodyHTML = rows.length
       ? `
         <table>
-          <thead><tr><th>Company name</th><th>Date contacted</th><th>Category</th></tr></thead>
+          <thead><tr><th>Name</th><th>Company name</th><th>Date contacted</th><th>Category</th></tr></thead>
           <tbody>
             ${rows
               .map(
                 (r) => `
               <tr>
+                <td>${escapeHtml(r.contact_name || "—")}</td>
                 <td>${escapeHtml(r.company_name || "—")}</td>
                 <td>${escapeHtml(new Date(r.changed_at).toLocaleDateString())}</td>
                 <td>${escapeHtml(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—")}</td>
@@ -258,8 +262,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
               .join("")}
           </tbody>
         </table>`
-      : `<p class="help-text">No contacted dials in this range.</p>`;
-    els.reportsContactedDialsWrap.innerHTML = `<h3>Contacted dials</h3>${bodyHTML}`;
+      : `<p class="help-text">No contacted business owners in this range.</p>`;
+    els.reportsContactedDialsWrap.innerHTML = `<h3>Contacted business owners</h3>${bodyHTML}`;
   }
 
   async function fetchTeamRows(accounts) {
