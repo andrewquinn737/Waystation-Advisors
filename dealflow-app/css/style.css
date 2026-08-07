@@ -439,6 +439,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
    header (see .dial-modal-subtitle). */
 .fs-header-main { min-width: 0; }
 .fs-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-top: 2px; }
+/* Reports popup only (see js/reports.js): the dropdown-arrow toggle sits
+   directly left of the report-type button, both on desktop and mobile.
+   align-items:stretch makes the arrow (height:auto here, overriding
+   .page-header-toggle's fixed 26px) grow to match the button's own height,
+   so their top and bottom edges line up — scoped to its own class rather
+   than changed on .fs-header-main itself, which elsewhere just wraps a
+   plain title + optional subtitle stacked vertically. */
+.reports-header-left { display: flex; align-items: stretch; gap: 8px; }
+.reports-header-left #reportsMenuToggle { width: 32px; height: auto; }
 .fullscreen-modal .fs-body { flex: 1; overflow-y: auto; padding: 24px; max-width: 720px; margin: 0 auto; width: 100%; }
 .fs-close {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
@@ -595,11 +604,12 @@ tr.clickable-row { cursor: pointer; }
    has the same "opens while the client modal is already open" shape, so
    it's included too even though it wasn't reported broken. */
 #eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal,
-/* reportsAccountsVisiblePopup and reportsSelectTabsPopup (see js/reports.js)
-   are modal-backdrop popups opened from inside reportsModal, itself a
-   fullscreen-modal — same "opens on top of a fullscreen-modal" shape as the
-   client-modal popups above, so they need the same override. */
-#reportsAccountsVisiblePopup, #reportsSelectTabsPopup { z-index: 200; }
+/* reportsAccountsVisiblePopup, reportsSelectTabsPopup, and
+   reportsSelectPeriodPopup (see js/reports.js) are modal-backdrop popups
+   opened from inside reportsModal, itself a fullscreen-modal — same "opens
+   on top of a fullscreen-modal" shape as the client-modal popups above, so
+   they need the same override. */
+#reportsAccountsVisiblePopup, #reportsSelectTabsPopup, #reportsSelectPeriodPopup { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }

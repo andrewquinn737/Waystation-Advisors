@@ -217,20 +217,39 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   function renderOptionsMenu() {
-    els.reportsPeriodTypeRow.classList.toggle("hidden", reportType !== "outreach");
-    els.reportsSelectPeriodRow.classList.remove("hidden");
+    els.reportsRangeBtn.classList.toggle("hidden", reportType !== "outreach");
     els.reportsSelectTabsBtn.classList.toggle("hidden", reportType !== "outreach");
     els.reportsShowIndividualsBtn.classList.toggle("hidden", reportType !== "outreach");
 
-    els.reportsPeriodTypeToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.value === periodType));
-
-    const count = reportType === "team" ? 3 : 12;
-    const options = generatePeriodOptions(reportType === "team" ? "week" : periodType, count);
-    els.reportsPeriodSelect.innerHTML = options
-      .map((d, i) => `<option value="${isoDate(d)}" ${i === 0 ? "selected" : ""}>${escapeHtml(fmtPeriodLabel(d, reportType === "team" ? "week" : periodType))}</option>`)
-      .join("");
-
+    const rangeLabel = reportType === "team" ? "week" : periodType;
+    els.reportsRangeBtn.querySelector(".menu-item-label").textContent = `Range: ${periodType === "month" ? "Month" : "Week"}`;
+    els.reportsSelectPeriodLabel.textContent = `Select ${rangeLabel}`;
     els.reportsShowIndividualsLabel.textContent = `Show individuals: ${showIndividuals ? "On" : "Off"}`;
+  }
+
+  function renderSelectPeriodPopup() {
+    const type = reportType === "team" ? "week" : periodType;
+    const count = reportType === "team" ? 3 : 12;
+    const options = generatePeriodOptions(type, count);
+    const selectedStr = isoDate(selectedPeriodStart);
+    els.reportsSelectPeriodTitle.textContent = `Select ${type}`;
+    els.reportsSelectPeriodBody.innerHTML = `
+      <div class="accounts-visible-list">
+        ${options
+          .map((d) => {
+            const v = isoDate(d);
+            return `<button type="button" class="accounts-visible-row${v === selectedStr ? " selected" : ""}" data-value="${v}">${escapeHtml(fmtPeriodLabel(d, type))}</button>`;
+          })
+          .join("")}
+      </div>
+    `;
+    els.reportsSelectPeriodBody.querySelectorAll(".accounts-visible-row[data-value]").forEach((row) => {
+      row.addEventListener("click", () => {
+        selectedPeriodStart = new Date(`${row.dataset.value}T00:00:00`);
+        els.reportsSelectPeriodPopup.classList.add("hidden");
+        refresh();
+      });
+    });
   }
 
   async function refresh() {
@@ -299,30 +318,32 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     unlockPageScroll();
   });
 
-  wirePageHeaderMenu({ toggleBtn: els.reportsMenuToggle, menuEl: els.reportsOptionsMenu });
-
-  els.reportsTypeToggle.querySelectorAll("button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      reportType = btn.dataset.value;
-      els.reportsTypeToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
-      periodType = "week";
-      selectedPeriodStart = mondayOf(new Date());
-      renderOptionsMenu();
-      refresh();
-    });
+  // The three sub-popups (Accounts visible, Select tabs, Select period) are
+  // registered as extraCloseEl so pageHeaderMenu.js's outside-click
+  // detection treats clicks inside them as "inside" the Reports dropdown,
+  // not outside it — that's what keeps the dropdown open underneath while
+  // one of them is in use, and closing it (via the arrow, or a genuine
+  // outside click) also closes whichever of the three happens to be open.
+  wirePageHeaderMenu({
+    toggleBtn: els.reportsMenuToggle,
+    menuEl: els.reportsOptionsMenu,
+    extraCloseEl: [els.reportsAccountsVisiblePopup, els.reportsSelectTabsPopup, els.reportsSelectPeriodPopup],
   });
 
-  els.reportsPeriodTypeToggle.querySelectorAll("button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      periodType = btn.dataset.value;
-      selectedPeriodStart = periodType === "week" ? mondayOf(new Date()) : firstOfMonth(new Date());
-      renderOptionsMenu();
-      refresh();
-    });
+  els.reportsTypeBtn.addEventListener("click", () => {
+    reportType = reportType === "outreach" ? "team" : "outreach";
+    els.reportsTypeBtn.dataset.value = reportType;
+    els.reportsTypeBtn.textContent = reportType === "outreach" ? "Outreach report" : "Team report";
+    periodType = "week";
+    selectedPeriodStart = mondayOf(new Date());
+    renderOptionsMenu();
+    refresh();
   });
 
-  els.reportsPeriodSelect.addEventListener("change", () => {
-    selectedPeriodStart = new Date(`${els.reportsPeriodSelect.value}T00:00:00`);
+  els.reportsRangeBtn.addEventListener("click", () => {
+    periodType = periodType === "week" ? "month" : "week";
+    selectedPeriodStart = periodType === "week" ? mondayOf(new Date()) : firstOfMonth(new Date());
+    renderOptionsMenu();
     refresh();
   });
 
@@ -333,7 +354,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   });
 
   els.reportsSelectTabsBtn.addEventListener("click", () => {
-    closeAllPageHeaderMenus();
     els.reportsSelectTabsPopup.classList.remove("hidden");
     renderSelectTabsPopup();
   });
@@ -341,12 +361,19 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     els.reportsSelectTabsPopup.classList.add("hidden");
   });
 
+  els.reportsSelectPeriodBtn.addEventListener("click", () => {
+    els.reportsSelectPeriodPopup.classList.remove("hidden");
+    renderSelectPeriodPopup();
+  });
+  els.reportsSelectPeriodClose.addEventListener("click", () => {
+    els.reportsSelectPeriodPopup.classList.add("hidden");
+  });
+
   wireAccountsVisiblePopup({
     menuBtn: els.reportsAccountsVisibleBtn,
     popupEl: els.reportsAccountsVisiblePopup,
     bodyEl: els.reportsAccountsVisibleBody,
     closeBtn: els.reportsAccountsVisibleClose,
-    closePageHeaderMenu: closeAllPageHeaderMenus,
     myProfileId: profile.id,
     getAllAccounts,
     storageKey: REPORTS_ACCOUNTS_KEY,

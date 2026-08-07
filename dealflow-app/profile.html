@@ -169,39 +169,36 @@
   </main>
 
   <!-- Reports (team lead/admin-only) — see js/reports.js. Full-screen popup:
-       dropdown-arrow options menu (left) + Outreach/Team report toggle
-       (right), a data table in the middle, and a PDF export at the bottom. -->
+       dropdown-arrow (stretched to match the report-type button's height —
+       see .reports-header-left in css/style.css) directly followed by a
+       single button showing/cycling Outreach report <-> Team report, a data
+       table in the middle, and a PDF export at the bottom. -->
   <div class="fullscreen-modal hidden" id="reportsModal">
     <div class="fs-header">
-      <div class="fs-header-main">
+      <div class="fs-header-main reports-header-left">
         <button type="button" class="page-header-toggle" id="reportsMenuToggle" title="Options">
           <svg viewBox="0 0 16 16" width="10" height="10"><path d="M2 10 L8 4 L14 10 Z" fill="currentColor"/></svg>
         </button>
+        <button type="button" class="btn secondary" id="reportsTypeBtn" data-value="outreach">Outreach report</button>
       </div>
       <div class="fs-header-actions">
-        <div class="segmented" id="reportsTypeToggle">
-          <button type="button" data-value="outreach">Outreach report</button>
-          <button type="button" data-value="team">Team report</button>
-        </div>
         <button class="fs-close" id="reportsCloseBtn">✕</button>
       </div>
     </div>
-    <!-- Week/Month, select-period, select-tabs, and show-individuals are
-         hidden entirely for Team report (see js/reports.js) — Team report is
-         always weekly, has no tab concept, and always shows every account. -->
+    <!-- Range (week/month), select-period, select-tabs, and show-individuals
+         are hidden entirely for Team report (see js/reports.js) — Team
+         report is always weekly, has no tab concept, and always shows every
+         account. -->
     <div class="page-header-menu hidden" id="reportsOptionsMenu">
       <button type="button" class="page-header-menu-item" id="reportsAccountsVisibleBtn">
         <span class="menu-item-label">Accounts visible</span>
       </button>
-      <div class="page-header-menu-item" id="reportsPeriodTypeRow">
-        <div class="segmented small" id="reportsPeriodTypeToggle">
-          <button type="button" data-value="week">Week</button>
-          <button type="button" data-value="month">Month</button>
-        </div>
-      </div>
-      <div class="page-header-menu-item" id="reportsSelectPeriodRow">
-        <select id="reportsPeriodSelect"></select>
-      </div>
+      <button type="button" class="page-header-menu-item" id="reportsRangeBtn" data-value="week">
+        <span class="menu-item-label">Range: Week</span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="reportsSelectPeriodBtn">
+        <span class="menu-item-label" id="reportsSelectPeriodLabel">Select week</span>
+      </button>
       <button type="button" class="page-header-menu-item" id="reportsSelectTabsBtn">
         <span class="menu-item-label">Select tabs</span>
       </button>
@@ -214,6 +211,19 @@
       <div id="reportsTableWrap"></div>
       <div class="form-actions">
         <button type="button" class="btn" id="reportsCreatePdfBtn">Create PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Select period (Outreach report only) — replaces the old native
+       <select>; a row per available week/month, single-tap to pick and
+       close. See js/reports.js. -->
+  <div class="modal-backdrop hidden" id="reportsSelectPeriodPopup">
+    <div class="modal">
+      <h2 id="reportsSelectPeriodTitle">Select week</h2>
+      <div id="reportsSelectPeriodBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="reportsSelectPeriodClose">Close</button>
       </div>
     </div>
   </div>
