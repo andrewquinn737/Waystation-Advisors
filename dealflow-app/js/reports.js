@@ -688,10 +688,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         // landed on an odd or even row. theme: "plain" turns the built-in
         // striping off entirely, leaving didParseCell's fillColor as the
         // only background source, so every row of a given category is the
-        // exact same color regardless of position.
+        // exact same color regardless of position. "plain" also drops the
+        // default theme's blue header fill, so that's set back explicitly
+        // below (same blue/white jspdf-autotable used by default before).
         theme: "plain",
         styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak", lineWidth: 0.1, lineColor: 200 },
-        headStyles: { fontStyle: "bold" },
+        headStyles: { fontStyle: "bold", fillColor: [41, 128, 185], textColor: 255 },
         didParseCell: (data) => {
           if (data.section !== "body") return;
           const color = CONTACT_STATUS_PDF_COLORS[rowCategories[data.row.index]];
