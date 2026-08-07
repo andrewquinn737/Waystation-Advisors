@@ -57,6 +57,39 @@ const CONTACT_STATUS_LABELS = {
   intro_call_scheduled: "Intro call scheduled",
 };
 
+// Same light-mode background shades as CONTACT_STATUSES' `bg` in
+// js/dials.js (css/style.css's --status-*-bg custom properties) — PDFs have
+// no concept of a CSS variable or a dark-mode toggle, so these are the
+// literal light-mode hex values, used to tint each "Contacted business
+// owners" PDF row by its category.
+const CONTACT_STATUS_PDF_COLORS = {
+  uncontacted: "#ffffff",
+  unable_to_contact: "#eef0f2",
+  not_interested: "#fdecec",
+  no_response: "#ffeede",
+  callback_interested: "#fff6e0",
+  intro_call_scheduled: "#e7f8ee",
+};
+
+// PDF-only text cleanup (the on-screen table shows the raw values as-is) —
+// strips emoji (\p{Extended_Pictographic} is the proper Unicode property for
+// this, not an ad-hoc code-point range) and the invisible joiner/variation-
+// selector characters emoji sequences use, without touching legitimate
+// accented letters in a real name — jsPDF's standard fonts render Á/é/ñ/etc
+// fine, just not emoji (those show up as blank boxes). Then title-cases the
+// result so every name/company/category reads consistently regardless of
+// how it was originally typed in.
+function sanitizeForPdf(text) {
+  if (!text) return "";
+  const stripped = String(text)
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/[\u{FE0F}\u{200D}]/gu, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
 function mondayOf(d) {
   const dd = new Date(d);
   const day = dd.getDay(); // 0=Sun..6=Sat
@@ -211,6 +244,43 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       .order("changed_at", { ascending: true });
     query = singleBuyerId === null ? query.is("buyer_id", null) : query.eq("buyer_id", singleBuyerId);
     const { data, error } = await query;
+    return error ? [] : data || [];
+  }
+
+  // PDF-only "Total confirmed leads since contract was signed" table (see
+  // buildReportPdf) — a seller client counts as a "lead" here once it has a
+  // confirmed intro_call event AND its clients.source_list_id resolves
+  // (via dial_lists) to one of the currently selected real buyers. This is
+  // only possible because of how Intro calls completed is tracked: a new
+  // seller client created from a dial captures which tab it came from
+  // (source_list_id), and that tab is always attached to a buyer — so
+  // "which buyer does this lead belong to" is answerable at all. Cumulative
+  // across ALL time, not the selected week/month period — "since contract
+  // was signed" has no period boundary of its own (a tab can only ever be
+  // attached to a buyer with an already-confirmed Contract signed, so every
+  // result here inherently postdates that signing without needing an
+  // explicit date filter). Excludes the null "Not attached to buyer"
+  // bucket entirely — there's no contract to be "since" for unattached
+  // data — and returns [] outright if that's the only thing selected.
+  //
+  // get_confirmed_leads_since_signed() is a SECURITY DEFINER RPC rather
+  // than a plain multi-table query — the join chain (client_events ->
+  // clients -> dial_lists -> clients again for the buyer) crosses ownership
+  // boundaries plain RLS wasn't built for: dial_lists_select_own only lets
+  // a team lead see tabs they own/lead, but a buyer their team has real
+  // call activity against could easily be attached to a tab owned by
+  // someone else (most commonly an admin) — same shape of gap
+  // get_reports_available_buyers exists to close for the buyer picker.
+  async function fetchConfirmedLeadsSinceSigned(accounts) {
+    let buyerIds = null;
+    if (selectedBuyerIds) {
+      buyerIds = [...selectedBuyerIds].filter((id) => id !== null);
+      if (!buyerIds.length) return [];
+    }
+    const { data, error } = await supabase.rpc("get_confirmed_leads_since_signed", {
+      p_account_ids: accounts.map((a) => a.id),
+      p_buyer_ids: buyerIds,
+    });
     return error ? [] : data || [];
   }
 
@@ -558,23 +628,63 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const doc = new jsPDF();
     doc.text(`${title} — ${periodLabel}`, 14, 16);
     doc.autoTable({ startY: 22, head: [lastTableData.columns], body: lastTableData.rows });
+
+    // "Total confirmed leads since contract was signed" — sits between the
+    // main KPI table and Contacted business owners, but only when there's
+    // actually at least one lead to show (no empty table/heading otherwise).
+    // Only possible at all because Intro calls completed is tracked via
+    // clients.source_list_id (which buyer a seller client's originating
+    // tab was attached to) — see fetchConfirmedLeadsSinceSigned above.
+    const accounts = await resolveAccounts();
+    const confirmedLeads = await fetchConfirmedLeadsSinceSigned(accounts);
+    if (confirmedLeads.length) {
+      const leadsY = doc.lastAutoTable.finalY + 10;
+      doc.text("Total confirmed leads since contract was signed", 14, leadsY);
+      doc.autoTable({
+        startY: leadsY + 4,
+        head: [["Name", "Company name", "Buyer", "Date"]],
+        body: confirmedLeads.map((r) => [
+          sanitizeForPdf(r.contact_name) || "—",
+          sanitizeForPdf(r.company_name) || "—",
+          sanitizeForPdf(r.buyer_name) || "—",
+          new Date(r.event_date).toLocaleDateString(),
+        ]),
+        styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
+        headStyles: { fontStyle: "bold" },
+      });
+    }
+
     // Contacted business owners on-screen is boxed with its own internal
     // scroll (see .reports-contacted-dials-scroll) so a long list doesn't
     // push the rest of the page down — that constraint doesn't apply to a
-    // PDF, so here it's just a second full table underneath the first,
-    // relying on jspdf-autotable's own pagination if it runs long.
+    // PDF, so here it's just a full table of its own, relying on
+    // jspdf-autotable's own pagination if it runs long. Cell text is
+    // sanitized/title-cased for the PDF specifically (see sanitizeForPdf) —
+    // the on-screen table keeps the raw values as typed. Each row is tinted
+    // by its category using the same colors as the on-screen status dots
+    // (see CONTACT_STATUS_PDF_COLORS) via didParseCell, matched back to the
+    // row's real category through rowCategories (autoTable only gives the
+    // already-sanitized display text in each cell, not the original key).
     if (lastContactedDialsRows && lastContactedDialsRows.length) {
       const contactedY = doc.lastAutoTable.finalY + 10;
-      doc.text("Contacted business owners", 14, contactedY);
+      doc.text(`Contacted business owners — ${periodLabel}`, 14, contactedY);
+      const rowCategories = lastContactedDialsRows.map((r) => r.contact_status_at_call);
       doc.autoTable({
         startY: contactedY + 4,
         head: [["Name", "Company name", "Date contacted", "Category"]],
         body: lastContactedDialsRows.map((r) => [
-          r.contact_name || "—",
-          r.company_name || "—",
+          sanitizeForPdf(r.contact_name) || "—",
+          sanitizeForPdf(r.company_name) || "—",
           new Date(r.changed_at).toLocaleDateString(),
-          CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—",
+          sanitizeForPdf(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call) || "—",
         ]),
+        styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
+        headStyles: { fontStyle: "bold" },
+        didParseCell: (data) => {
+          if (data.section !== "body") return;
+          const color = CONTACT_STATUS_PDF_COLORS[rowCategories[data.row.index]];
+          if (color) data.cell.styles.fillColor = color;
+        },
       });
     }
     const filename = `${title.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
