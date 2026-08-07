@@ -191,6 +191,7 @@ const els = {
   newListModal: document.getElementById("newListModal"),
   newListError: document.getElementById("newListError"),
   newListNameInput: document.getElementById("newListNameInput"),
+  newListBuyerSelect: document.getElementById("newListBuyerSelect"),
   newListCreateBtn: document.getElementById("newListCreateBtn"),
   newListCancelBtn: document.getElementById("newListCancelBtn"),
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
@@ -208,6 +209,7 @@ const els = {
   importDialsFileInput: document.getElementById("importDialsFileInput"),
   importDialsChooseBtn: document.getElementById("importDialsChooseBtn"),
   importDialsFileName: document.getElementById("importDialsFileName"),
+  importDialsBuyerSelect: document.getElementById("importDialsBuyerSelect"),
   importDialsImportBtn: document.getElementById("importDialsImportBtn"),
   importDialsCancelBtn: document.getElementById("importDialsCancelBtn"),
   selectModeBar: document.getElementById("selectModeBar"),
@@ -1206,11 +1208,61 @@ function startRenameTab(btn, list) {
   });
 }
 
+// Every seller-side tab is sourced on behalf of a specific buyer (or
+// explicitly "Not assigned to buyer") — see the "Buyer" picker required on
+// both New list and Import dials. Only buyers with a CONFIRMED
+// "Contract signed" Timeline event (client_events.event_type='contract_signed',
+// confirmed=true) are offered, scoped the same way every other
+// admin/team-lead account pool is scoped in this app: admins see every
+// buyer, team leads only see buyers owned by themselves or an intern on
+// their own team.
+async function loadContractSignedBuyers() {
+  let ownerIds = null;
+  if (!isAdmin) {
+    if (profile.team_id) {
+      const { data: teamProfiles } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("team_id", profile.team_id)
+        .or(`role.eq.intern,id.eq.${profile.id}`);
+      ownerIds = (teamProfiles || []).map((p) => p.id);
+    } else {
+      ownerIds = [profile.id];
+    }
+  }
+
+  let query = supabase.from("clients").select("id, full_name").eq("client_type", "buyer").order("full_name", { ascending: true });
+  if (ownerIds) query = query.in("created_by", ownerIds);
+  const { data: buyers, error } = await query;
+  if (error || !buyers?.length) return [];
+
+  const { data: events } = await supabase
+    .from("client_events")
+    .select("client_id")
+    .eq("event_type", "contract_signed")
+    .eq("confirmed", true)
+    .in("client_id", buyers.map((b) => b.id));
+  const signedIds = new Set((events || []).map((e) => e.client_id));
+  return buyers.filter((b) => signedIds.has(b.id));
+}
+
+async function populateBuyerSelect(selectEl) {
+  selectEl.innerHTML = `<option value="">Not assigned to buyer</option>`;
+  const buyers = await loadContractSignedBuyers();
+  for (const b of buyers) {
+    const opt = document.createElement("option");
+    opt.value = b.id;
+    opt.textContent = b.full_name;
+    selectEl.appendChild(opt);
+  }
+}
+
 els.addTabBtn.addEventListener("click", () => {
   els.newListError.classList.add("hidden");
   els.newListNameInput.value = "";
   els.newListModal.classList.remove("hidden");
   els.newListNameInput.focus();
+  populateBuyerSelect(els.newListBuyerSelect);
 });
 
 els.newListCancelBtn.addEventListener("click", () => els.newListModal.classList.add("hidden"));
@@ -1225,7 +1277,7 @@ async function createNewList() {
   const sortOrder = filteredLists().length;
   const { data, error } = await supabase
     .from("dial_lists")
-    .insert({ name, dial_type: currentType, status: currentStatus, sort_order: sortOrder })
+    .insert({ name, dial_type: currentType, status: currentStatus, sort_order: sortOrder, buyer_id: els.newListBuyerSelect.value || null })
     .select()
     .single();
   if (error) {
@@ -1328,6 +1380,7 @@ function openImportDialsModal() {
   els.importDialsFileInput.value = "";
   selectedImportFile = null;
   els.importDialsModal.classList.remove("hidden");
+  populateBuyerSelect(els.importDialsBuyerSelect);
 }
 
 els.menuImportBtn.addEventListener("click", () => {
@@ -1364,7 +1417,7 @@ els.importDialsImportBtn.addEventListener("click", async () => {
     const sortOrder = allLists.filter((l) => l.dial_type === currentType && l.status === "current").length;
     const { data: newList, error: listErr } = await supabase
       .from("dial_lists")
-      .insert({ name: tabName, dial_type: currentType, status: "current", sort_order: sortOrder })
+      .insert({ name: tabName, dial_type: currentType, status: "current", sort_order: sortOrder, buyer_id: els.importDialsBuyerSelect.value || null })
       .select()
       .single();
     if (listErr) throw listErr;
@@ -2041,18 +2094,24 @@ async function toggleDidCallToday() {
     // holds the active tab's rows), so this needs no extra lookup. Lets the
     // Profile page's Outreach calls counter/graph filter to just the
     // currently-active side (see loadCallsChart in js/profile.js).
-    // list_id/contact_status_at_call are a permanent snapshot for the
-    // Reports feature (see js/reports.js) — dial_lists rows are hard-deleted
-    // (cascading to their dials) when a tab is removed, so this is the only
-    // place these two facts survive that deletion. Not foreign keys on
-    // purpose; they just need to keep their original value forever, even
-    // once the tab/dial they came from no longer exists.
+    // list_id/contact_status_at_call/buyer_id are a permanent snapshot for
+    // the Reports feature (see js/reports.js) — dial_lists rows are
+    // hard-deleted (cascading to their dials) when a tab is removed, so
+    // this is the only place these facts survive that deletion. Not foreign
+    // keys on purpose; they just need to keep their original value forever,
+    // even once the tab/dial/buyer-assignment they came from no longer
+    // resolves to anything. buyer_id comes from the dial's own list (looked
+    // up in the already-in-memory allLists — dial_lists.buyer_id, see the
+    // "Buyer" picker required on tab creation) since a dial row itself has
+    // no buyer_id column of its own.
+    const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
     await supabase.from("call_status_changes").insert({
       user_id: profile.id,
       dial_id: currentDial.id,
       dial_type: currentType,
       list_id: currentDial.list_id,
       contact_status_at_call: currentDial.contact_status,
+      buyer_id: currentListForBuyer?.buyer_id || null,
     });
   }
 
@@ -2280,6 +2339,15 @@ async function handleScheduleIntroCallFromDial(dial) {
         other_notes: dial.call_notes || "",
       });
       data.assigned_to = profile.id;
+      // Which dial list this seller client was sourced from — a permanent,
+      // FK-less snapshot (see the matching comment in toggleDidCallToday())
+      // so it survives the tab later being deleted. Prospective-only: this
+      // is the one and only place a client's origin gets captured, so
+      // clients created before this existed have no way to backfill it.
+      // Lets "Intro calls completed" be attributed to the buyer the tab was
+      // assigned to (dial_lists.buyer_id), not just to whoever's account
+      // owns the resulting client.
+      data.source_list_id = dial.list_id || null;
 
       const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
       if (error) throw error;

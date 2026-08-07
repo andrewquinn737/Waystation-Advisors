@@ -238,13 +238,18 @@
     </div>
   </div>
 
-  <!-- New-list dialog (in-app, replacing window.prompt) -->
+  <!-- New-list dialog (in-app, replacing window.prompt). Buyer is required
+       (see js/dials.js loadContractSignedBuyers()) — every seller-side tab
+       is sourced on behalf of a specific buyer with a signed contract, or
+       explicitly "Not assigned to buyer". -->
   <div class="modal-backdrop hidden" id="newListModal">
     <div class="modal">
       <h2>New list</h2>
       <div id="newListError" class="error-msg hidden"></div>
       <label for="newListNameInput">List name</label>
       <input id="newListNameInput" placeholder="e.g. Q3 outreach" />
+      <label for="newListBuyerSelect">Buyer</label>
+      <select id="newListBuyerSelect"></select>
       <div class="form-actions">
         <button type="button" class="btn" id="newListCreateBtn">Create</button>
         <button type="button" class="btn secondary" id="newListCancelBtn">Cancel</button>
@@ -255,7 +260,8 @@
   <!-- Import dials from CSV (admin-only, see menuImportBtn in js/dials.js).
        The CSV's filename (minus extension) becomes the name of a new tab
        under Current; one dial is created per row, with columns matched by
-       header name to the closest dial field. -->
+       header name to the closest dial field. Buyer is required, same as
+       New list above. -->
   <div class="modal-backdrop hidden" id="importDialsModal">
     <div class="modal">
       <h2>Import dials from CSV</h2>
@@ -264,6 +270,8 @@
       <input type="file" id="importDialsFileInput" accept=".csv,text/csv" class="hidden" />
       <button type="button" class="btn secondary" id="importDialsChooseBtn">Choose CSV</button>
       <div id="importDialsFileName" class="help-text"></div>
+      <label for="importDialsBuyerSelect">Buyer</label>
+      <select id="importDialsBuyerSelect"></select>
       <div class="form-actions">
         <button type="button" class="btn" id="importDialsImportBtn" disabled>Import</button>
         <button type="button" class="btn secondary" id="importDialsCancelBtn">Cancel</button>
