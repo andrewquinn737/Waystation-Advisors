@@ -237,6 +237,10 @@ const els = {
 if (isAdmin || isTeamLead) els.menuImportBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.dialTabTransferBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
+// Manual "+ new tab" creation — same admin/team-lead-only scope as CSV
+// import above (interns can't create tabs at all; enforced server-side too,
+// see the dial_lists_insert_own RLS policy).
+if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // Notifications on/off — everyone gets this (see js/notifications.js),
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
 // only.
