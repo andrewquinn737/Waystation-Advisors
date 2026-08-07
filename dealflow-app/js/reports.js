@@ -23,6 +23,10 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 // already has exactly the right grain, one row per intern per week), pruned
 // to the last 3 weeks by the same prune job. Always weekly, no tabs, no
 // Totals row, always shows every account.
+//
+// Seller-side only for now (buyer support may come later) — this is
+// hardcoded, not a UI toggle, at every query in compute_report_rollups()
+// (dial_type/client_type = 'seller') and in loadAvailableTabs() below.
 // ---------------------------------------------------------------------------
 
 const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible";
@@ -109,7 +113,10 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   async function loadAvailableTabs(accountIds) {
-    const { data, error } = await supabase.from("dial_lists").select("id, name").in("created_by", accountIds);
+    // Seller-only for now, matching every other query in this module (see
+    // the top-of-file comment) — buyer-side tabs would otherwise show up
+    // here even though nothing in this report ever reflects their data.
+    const { data, error } = await supabase.from("dial_lists").select("id, name").in("created_by", accountIds).eq("dial_type", "seller");
     const real = error ? [] : (data || []).map((t) => ({ id: t.id, name: t.name }));
     return [...real, { id: REMOVED_TAB_ID, name: REMOVED_TAB_LABEL }];
   }
