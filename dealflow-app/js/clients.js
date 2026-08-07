@@ -1308,19 +1308,22 @@ function openEventDetailsModal(category, clientType, onConfirm) {
 // ---------------------------------------------------------------------------
 // "Who's the meeting with?" step — shown for any SHARED_EVENT_TYPES milestone
 // (client_approval, client_meeting, loi, due_diligence, close — see
-// openTimelineAddFlow), not just Client meeting. Lists every
-// opposite-side client this account can currently see (same Sellers/Buyers +
-// Accounts visible scoping used everywhere else — see js/dealSide.js,
-// js/accountsVisible.js) who's ELIGIBLE to have a shared event logged against
-// them: a confirmed Intro call with THIS side, on either side of the
-// pairing — you can't log a real meeting/LOI/etc with someone you haven't
-// even had an intro call with yet. (This used to require a confirmed
-// Contract signed milestone from the seller side specifically, which came
-// AFTER most of these shared milestones in the buyer's own step order —
-// with real data, that meant no buyer could ever qualify, so a seller could
-// never do a shared meeting at all. Intro call, the very first step on both
-// sides' lists, is the right gate.) Searchable, requires picking exactly one
-// before Continue is enabled.
+// openTimelineAddFlow), not just Client meeting. Lists every ELIGIBLE
+// opposite-side client to log a shared event against — eligibility is
+// gated by a different confirmed milestone depending on which direction
+// you're picking in, since a seller and a buyer don't share a progress
+// list: picking a BUYER counterpart (from a seller client) requires a
+// confirmed Contract signed — buyer-only, the clearest "this buyer is
+// real" signal; picking a SELLER counterpart (from a buyer client)
+// requires a confirmed Client approval instead, since sellers have no
+// Contract signed step at all (see SELLER_PROGRESS_STEPS). Scoped the same
+// admin/team-lead-pool way as everywhere else in the app (admin = every
+// account, team lead/intern = everyone sharing their team_id) — unlike most
+// of those pools, this one deliberately includes the team lead's own
+// clients even when the acting user is an intern, so an intern can log a
+// shared event against a buyer/seller their team lead brought in, not just
+// their own. Searchable, requires picking exactly one before Continue is
+// enabled.
 // ---------------------------------------------------------------------------
 function counterpartDisplayName(c) {
   // Always the person's own name, never their company name — even for a
@@ -1346,24 +1349,19 @@ function counterpartSearchText(c) {
 async function openCounterpartPicker(onSelect) {
   const isSeller = currentClient.client_type !== "buyer";
   const counterpartType = isSeller ? "buyer" : "seller";
-  const { data: eventRows, error: eventsError } = await supabase
-    .from("client_events")
-    .select("client_id")
-    .eq("event_type", "intro_call")
-    .eq("confirmed", true);
-  const eligibleIds = Array.from(new Set((eventRows || []).map((r) => r.client_id)));
-  let options = [];
-  if (!eventsError && eligibleIds.length) {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("id, full_name, company_name, client_type, created_by")
-      .eq("client_type", counterpartType)
-      .in("id", eligibleIds)
-      .order("full_name", { ascending: true });
-    options = error ? [] : data || [];
-  }
-  const visibleAccountIds = getVisibleAccountIds();
-  if (visibleAccountIds) options = options.filter((c) => visibleAccountIds.has(c.created_by));
+  const gateEventType = counterpartType === "buyer" ? "contract_signed" : "client_approval";
+
+  // get_eligible_counterparts() is a SECURITY DEFINER RPC (see
+  // supabase/schema.sql) rather than a plain query against `clients` — the
+  // regular clients_select_own RLS policy only lets an intern see clients
+  // they created themselves, not a teammate's or their own team lead's,
+  // which is correct everywhere else but too narrow for this picker. The
+  // RPC does its own admin/team-scoped visibility check server-side instead.
+  const { data, error } = await supabase.rpc("get_eligible_counterparts", {
+    p_client_type: counterpartType,
+    p_gate_event_type: gateEventType,
+  });
+  let options = error ? [] : data || [];
 
   const modal = els.counterpartModal;
   const searchInput = els.counterpartSearchInput;
