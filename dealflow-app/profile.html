@@ -231,15 +231,17 @@
       <div id="reportsTableWrap"></div>
       <!-- Static "Contacted business owners" list — Outreach report only,
            and only when exactly one buyer is selected (see
-           renderContactedDialsSection in js/reports.js). Desktop-only per
-           its own request; unaffected by Show individuals, but responds to
-           the selected time range and accounts like everything else here.
-           Read-only snapshot info captured at call time
-           (call_status_changes.contact_name/company_name/
-           contact_status_at_call/changed_at) — survives the underlying
-           dial/tab being deleted later, same durability as the buyer
-           attribution the rest of this report relies on. -->
-      <div class="desktop-only hidden" id="reportsContactedDialsWrap"></div>
+           renderContactedDialsSection in js/reports.js). Available on
+           mobile too (was desktop-only at first, later opened up); scrolls
+           inside its own fixed-height box (see .reports-contacted-dials-
+           scroll in css/style.css) rather than growing the page. Unaffected
+           by Show individuals, but responds to the selected time range and
+           accounts like everything else here. Read-only snapshot info
+           captured at call time (call_status_changes.contact_name/
+           company_name/contact_status_at_call/changed_at) — survives the
+           underlying dial/tab being deleted later, same durability as the
+           buyer attribution the rest of this report relies on. -->
+      <div class="hidden" id="reportsContactedDialsWrap"></div>
       <div class="form-actions">
         <button type="button" class="btn" id="reportsCreatePdfBtn">Create PDF</button>
         <button type="button" class="btn secondary" id="reportsSendPdfBtn">Send PDF</button>
