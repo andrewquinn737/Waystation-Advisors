@@ -156,14 +156,51 @@
         <div class="upcoming-events-box" id="upcomingEventsBox"></div>
       </div>
 
-      <!-- Submit survey (left) + Log out (right), same row. Teams moved up
-           into the header menu (see #menuTeamsBtn above). -->
+      <!-- Submit survey (intern) / View Reports (team lead, admin) — left,
+           next to Log out on the right. Only one of the two is ever
+           unhidden, based on role (see js/profile.js). Teams moved up into
+           the header menu (see #menuTeamsBtn above). -->
       <div class="form-actions" style="margin-top:20px;">
-        <a class="btn secondary" id="surveyBtn" href="https://docs.google.com/forms/d/e/1FAIpQLSeAtlyF79wX5Q3u3iQM90p-PbXqFoq6mSpqVu2XB-D1qjZXwA/viewform" target="_blank" rel="noopener">Submit weekly survey</a>
+        <button type="button" class="btn yellow hidden" id="surveyBtn">Submit weekly survey</button>
+        <button type="button" class="btn hidden" id="reportsBtn">View Reports</button>
         <button class="btn danger" id="profileSignOutBtn">Log out</button>
       </div>
     </div>
   </main>
+
+  <!-- Weekly survey (intern-only) — see wireWeeklySurvey() in js/profile.js.
+       Q1-3 are auto-filled and start disabled; picking "No" on the accuracy
+       question unlocks them for a suggested correction (never touches real
+       dial/call data — just recorded alongside the original numbers). -->
+  <div class="modal-backdrop hidden" id="weeklySurveyModal">
+    <div class="modal">
+      <h2>Weekly survey</h2>
+      <p class="help-text" id="surveyWeekRange">—</p>
+      <div id="surveyError" class="error-msg hidden"></div>
+      <label for="surveyCallsInput">How many calls did you make this week?</label>
+      <input type="number" id="surveyCallsInput" min="0" disabled />
+      <label for="surveyOwnersTalkedInput">How many owners did you talk to?</label>
+      <input type="number" id="surveyOwnersTalkedInput" min="0" disabled />
+      <label for="surveyOwnersAgreedInput">How many owners agreed to an intro call?</label>
+      <input type="number" id="surveyOwnersAgreedInput" min="0" disabled />
+      <label>Are the above responses accurate?</label>
+      <div class="segmented" id="surveyAccurateToggle">
+        <button type="button" data-value="yes">Yes</button>
+        <button type="button" data-value="no">No</button>
+      </div>
+      <label>Did you do any financial modeling work?</label>
+      <div class="segmented" id="surveyModelingToggle">
+        <button type="button" data-value="yes">Yes</button>
+        <button type="button" data-value="no">No</button>
+      </div>
+      <label for="surveyQuestionsInput">Do you have any questions or concerns for us?</label>
+      <textarea id="surveyQuestionsInput" rows="3"></textarea>
+      <div class="form-actions">
+        <button type="button" class="btn" id="surveySubmitBtn" disabled>Submit</button>
+        <button type="button" class="btn secondary" id="surveyCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Admin-only "Accounts visible" popup (see menuAccountsVisibleBtn above).
        Same shared component as Clients/Dials (js/accountsVisible.js) — picking

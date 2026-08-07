@@ -2041,7 +2041,19 @@ async function toggleDidCallToday() {
     // holds the active tab's rows), so this needs no extra lookup. Lets the
     // Profile page's Outreach calls counter/graph filter to just the
     // currently-active side (see loadCallsChart in js/profile.js).
-    await supabase.from("call_status_changes").insert({ user_id: profile.id, dial_id: currentDial.id, dial_type: currentType });
+    // list_id/contact_status_at_call are a permanent snapshot for the
+    // Reports feature (see js/reports.js) — dial_lists rows are hard-deleted
+    // (cascading to their dials) when a tab is removed, so this is the only
+    // place these two facts survive that deletion. Not foreign keys on
+    // purpose; they just need to keep their original value forever, even
+    // once the tab/dial they came from no longer exists.
+    await supabase.from("call_status_changes").insert({
+      user_id: profile.id,
+      dial_id: currentDial.id,
+      dial_type: currentType,
+      list_id: currentDial.list_id,
+      contact_status_at_call: currentDial.contact_status,
+    });
   }
 
   const idx = dials.findIndex((d) => d.id === currentDial.id);

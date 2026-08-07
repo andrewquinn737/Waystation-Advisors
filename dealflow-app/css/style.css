@@ -361,6 +361,11 @@ textarea { resize: vertical; min-height: 60px; }
 @media (hover: hover) { .btn.danger:hover { background: #b53a31; } }
 .btn.yellow { background: #f2d34b; color: #5c4a05; }
 @media (hover: hover) { .btn.yellow:hover { background: #e6c53a; } }
+/* Weekly survey button once submitted (see js/profile.js) — stays fully
+   opaque/vivid while disabled, unlike the default .btn:disabled dimming,
+   since this reads as "done" rather than "unavailable". */
+.btn.green { background: var(--success); color: #fff; }
+.btn.green:disabled { opacity: 1; cursor: default; }
 .btn.small { padding: 4px 10px; font-size: 12px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .form-row { display: flex; gap: 12px; }

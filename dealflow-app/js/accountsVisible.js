@@ -4,38 +4,59 @@
 // ("Select all"); otherwise a Set of profile ids to show. Mirrors
 // js/dealSide.js's shared-localStorage-key pattern.
 //
-// The very first time this is ever touched (tracked separately by INIT_KEY,
-// since "Select all" is itself stored as an absent KEY — see persist() —
-// which would otherwise be indistinguishable from "never touched"), it
-// defaults to "just me" instead of "Select all" — see initDefaultToSelf().
-// Every launch/page load after that first initialization leaves whatever was
-// last explicitly chosen alone, including an explicit "Select all".
+// The very first time this is ever touched (tracked separately by an
+// "initialized" key, since "Select all" is itself stored as an absent KEY —
+// see persist() — which would otherwise be indistinguishable from "never
+// touched"), it defaults to "just me" instead of "Select all" — see
+// initDefaultToSelf(). Every launch/page load after that first
+// initialization leaves whatever was last explicitly chosen alone, including
+// an explicit "Select all".
+//
+// Every exported function takes an optional storageKey, defaulting to the
+// original shared key above — every existing caller (Profile/Clients/Dials)
+// passes none and keeps today's exact behavior untouched. This exists so the
+// Reports popup can have its own independent selection (a different
+// storageKey) instead of sharing state with the app-wide "Accounts visible"
+// setting everywhere else.
 
 const KEY = "waystation_visible_accounts";
 const INIT_KEY = "waystation_visible_accounts_initialized";
 
-let visibleAccountIds = null;
-let loaded = false;
+// Per-storageKey state, so more than one independent instance can be wired
+// up at once within the same page (e.g. Profile's own global picker AND the
+// Reports popup's separately-scoped one).
+const state = new Map(); // storageKey -> { visibleAccountIds, loaded }
 
-function load() {
-  if (loaded) return;
-  loaded = true;
+function stateFor(storageKey) {
+  let s = state.get(storageKey);
+  if (!s) {
+    s = { visibleAccountIds: null, loaded: false };
+    state.set(storageKey, s);
+  }
+  return s;
+}
+
+function load(storageKey) {
+  const s = stateFor(storageKey);
+  if (s.loaded) return;
+  s.loaded = true;
   try {
-    const saved = localStorage.getItem(KEY);
+    const saved = localStorage.getItem(storageKey);
     if (saved) {
       const arr = JSON.parse(saved);
-      if (Array.isArray(arr)) visibleAccountIds = new Set(arr);
+      if (Array.isArray(arr)) s.visibleAccountIds = new Set(arr);
     }
   } catch {
     // ignore (private browsing / storage disabled)
   }
 }
 
-function persist() {
+function persist(storageKey, initKey) {
+  const s = stateFor(storageKey);
   try {
-    if (visibleAccountIds === null) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, JSON.stringify([...visibleAccountIds]));
-    localStorage.setItem(INIT_KEY, "1");
+    if (s.visibleAccountIds === null) localStorage.removeItem(storageKey);
+    else localStorage.setItem(storageKey, JSON.stringify([...s.visibleAccountIds]));
+    localStorage.setItem(initKey, "1");
   } catch {
     // ignore
   }
@@ -46,37 +67,40 @@ function persist() {
 // time this shared setting is ever touched across the whole app, when it
 // narrows the default down to just the signed-in account instead of
 // everyone.
-export function initDefaultToSelf(myProfileId) {
-  load();
+export function initDefaultToSelf(myProfileId, storageKey = KEY) {
+  const initKey = storageKey === KEY ? INIT_KEY : `${storageKey}_initialized`;
+  const s = stateFor(storageKey);
+  load(storageKey);
   try {
-    if (localStorage.getItem(INIT_KEY)) {
+    if (localStorage.getItem(initKey)) {
       // Already initialized before — but as a safety net, if the persisted
       // state resolves to zero visible accounts (e.g. the tab was closed or
       // navigated away from mid-selection before the "at least one" guard in
       // wireAccountsVisiblePopup could catch it), fall back to "just me"
       // rather than leaving every page showing nothing on open.
-      if (visibleAccountIds && visibleAccountIds.size === 0) {
-        visibleAccountIds = new Set([myProfileId]);
-        persist();
+      if (s.visibleAccountIds && s.visibleAccountIds.size === 0) {
+        s.visibleAccountIds = new Set([myProfileId]);
+        persist(storageKey, initKey);
       }
       return;
     }
   } catch {
     return;
   }
-  visibleAccountIds = new Set([myProfileId]);
-  persist();
+  s.visibleAccountIds = new Set([myProfileId]);
+  persist(storageKey, initKey);
 }
 
 // null = no filter (every account passes).
-export function getVisibleAccountIds() {
-  load();
-  return visibleAccountIds;
+export function getVisibleAccountIds(storageKey = KEY) {
+  load(storageKey);
+  return stateFor(storageKey).visibleAccountIds;
 }
 
-export function isAccountVisible(id) {
-  load();
-  return !visibleAccountIds || visibleAccountIds.has(id);
+export function isAccountVisible(id, storageKey = KEY) {
+  load(storageKey);
+  const s = stateFor(storageKey);
+  return !s.visibleAccountIds || s.visibleAccountIds.has(id);
 }
 
 // Wires the shared "Accounts visible" popup for whichever page calls this.
@@ -92,7 +116,11 @@ export function isAccountVisible(id) {
 //     toggle) so the calling page can re-run its own filtered render.
 //   escapeHtml - the caller's own escapeHtml helper (kept a plain param so
 //     this module doesn't need its own copy or a shared import for it).
-export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, closePageHeaderMenu, myProfileId, getAllAccounts, onChange, escapeHtml }) {
+//   storageKey - optional, defaults to the shared app-wide key. Pass a
+//     distinct value to give this instance its own independent selection,
+//     persisted and read separately from every other instance.
+export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, closePageHeaderMenu, myProfileId, getAllAccounts, onChange, escapeHtml, storageKey = KEY }) {
+  const initKey = storageKey === KEY ? INIT_KEY : `${storageKey}_initialized`;
   let allAccounts = [];
   let accountsLoaded = false;
 
@@ -100,18 +128,20 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
   // popup can't be closed in that state (see closeBtn handler below) — the
   // close button is visually disabled and a hint is shown instead.
   function hasAnySelected() {
-    return !visibleAccountIds || visibleAccountIds.size > 0;
+    const s = stateFor(storageKey);
+    return !s.visibleAccountIds || s.visibleAccountIds.size > 0;
   }
 
   function render() {
-    load();
-    const allSelected = !visibleAccountIds;
+    load(storageKey);
+    const s = stateFor(storageKey);
+    const allSelected = !s.visibleAccountIds;
     const rowsHTML = allAccounts.length
       ? allAccounts
           .map(
             (a) => `
           <button type="button" class="accounts-visible-row" data-id="${a.id}">
-            <input type="checkbox" ${isAccountVisible(a.id) ? "checked" : ""} tabindex="-1" />
+            <input type="checkbox" ${isAccountVisible(a.id, storageKey) ? "checked" : ""} tabindex="-1" />
             ${escapeHtml(a.full_name)}${a.id === myProfileId ? " (you)" : ""}
           </button>`
           )
@@ -137,8 +167,8 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
       // If everything is currently selected, clicking again clears the
       // selection entirely instead of being a no-op; otherwise (partial or
       // empty selection) it selects everyone, same as before.
-      visibleAccountIds = visibleAccountIds === null ? new Set() : null;
-      persist();
+      s.visibleAccountIds = s.visibleAccountIds === null ? new Set() : null;
+      persist(storageKey, initKey);
       render();
       onChange();
     });
@@ -148,10 +178,10 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
         // Narrowing down from "all" for the first time starts from the full
         // set of accounts (everything stays visible except the one just
         // unchecked), rather than jumping straight to "only this one".
-        if (visibleAccountIds === null) visibleAccountIds = new Set(allAccounts.map((a) => a.id));
-        if (visibleAccountIds.has(id)) visibleAccountIds.delete(id);
-        else visibleAccountIds.add(id);
-        persist();
+        if (s.visibleAccountIds === null) s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
+        if (s.visibleAccountIds.has(id)) s.visibleAccountIds.delete(id);
+        else s.visibleAccountIds.add(id);
+        persist(storageKey, initKey);
         render();
         onChange();
       });

@@ -87,6 +87,19 @@ const els = {
   teamsWrap: document.getElementById("teamsWrap"),
   teamsErrorBox: document.getElementById("teamsErrorBox"),
   profileSignOutBtn: document.getElementById("profileSignOutBtn"),
+  surveyBtn: document.getElementById("surveyBtn"),
+  reportsBtn: document.getElementById("reportsBtn"),
+  weeklySurveyModal: document.getElementById("weeklySurveyModal"),
+  surveyWeekRange: document.getElementById("surveyWeekRange"),
+  surveyError: document.getElementById("surveyError"),
+  surveyCallsInput: document.getElementById("surveyCallsInput"),
+  surveyOwnersTalkedInput: document.getElementById("surveyOwnersTalkedInput"),
+  surveyOwnersAgreedInput: document.getElementById("surveyOwnersAgreedInput"),
+  surveyAccurateToggle: document.getElementById("surveyAccurateToggle"),
+  surveyModelingToggle: document.getElementById("surveyModelingToggle"),
+  surveyQuestionsInput: document.getElementById("surveyQuestionsInput"),
+  surveySubmitBtn: document.getElementById("surveySubmitBtn"),
+  surveyCancelBtn: document.getElementById("surveyCancelBtn"),
   addAccountModal: document.getElementById("addAccountModal"),
   newAccountFirstName: document.getElementById("newAccountFirstName"),
   newAccountLastName: document.getElementById("newAccountLastName"),
@@ -1740,6 +1753,202 @@ els.teamsCloseBtn.addEventListener("click", () => {
 els.profileSignOutBtn.addEventListener("click", signOut);
 
 // ---------------------------------------------------------------------------
+// Weekly survey (intern-only) — replaces the old external Google Form link.
+// Q1-3 auto-fill from the same data sources as the Outreach/Intro calls
+// counters above (Q1/Q3) or a live Dials query (Q2); picking "No" on the
+// accuracy question unlocks them for a suggested correction that's recorded
+// alongside the original numbers but never touches any real dial/call data.
+// One submission per Mon-Fri period (enforced by a unique constraint on
+// survey_responses) — the button turns green and locks immediately after
+// submitting, and stays that way until the period rolls over.
+//
+// The open/locked period is entirely derived from today's date, not a cron
+// job: the "current" period is whichever Mon-Fri work week most recently
+// concluded (or is concluding today, if today is Friday) — so the button
+// opens on a Friday and stays open through the following Thursday, then
+// rolls to the next period regardless of whether the prior one was ever
+// submitted (no backlog/catch-up).
+// ---------------------------------------------------------------------------
+
+function mostRecentFriday(d) {
+  const day = d.getDay(); // 0=Sun..6=Sat
+  const diff = (day - 5 + 7) % 7; // 0 if today IS Friday
+  const f = new Date(d);
+  f.setDate(f.getDate() - diff);
+  f.setHours(0, 0, 0, 0);
+  return f;
+}
+
+function currentSurveyPeriod(now = new Date()) {
+  const periodEnd = mostRecentFriday(now); // Friday
+  const periodStart = new Date(periodEnd);
+  periodStart.setDate(periodStart.getDate() - 4); // Monday
+  return { periodStart, periodEnd };
+}
+
+function fmtSurveyDate(d) {
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// End-exclusive: the Saturday right after periodEnd, so a plain `< bound`
+// comparison naturally includes all of Friday.
+function periodEndExclusive(periodEnd) {
+  const b = new Date(periodEnd);
+  b.setDate(b.getDate() + 1);
+  return b;
+}
+
+let surveySelectedAccurate = null; // "yes" | "no" | null
+let surveySelectedModeling = null; // "yes" | "no" | null
+let surveyAutoValues = null; // { calls, ownersTalked, ownersAgreed }
+
+function updateSurveySubmitEnabled() {
+  els.surveySubmitBtn.disabled = !(surveySelectedAccurate && surveySelectedModeling);
+}
+
+// Checked once on page load (intern only) and again right after a
+// successful submit — no polling/cron needed since the only thing that can
+// change this between checks is the person's own submit action.
+async function checkSurveyButtonState() {
+  const { periodStart } = currentSurveyPeriod();
+  const periodStartStr = periodStart.toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from("survey_responses")
+    .select("id")
+    .eq("user_id", profile.id)
+    .eq("period_start", periodStartStr)
+    .maybeSingle();
+  const submitted = !error && !!data;
+  els.surveyBtn.classList.toggle("yellow", !submitted);
+  els.surveyBtn.classList.toggle("green", submitted);
+  els.surveyBtn.disabled = submitted;
+}
+
+async function openWeeklySurveyModal() {
+  const { periodStart, periodEnd } = currentSurveyPeriod();
+  els.surveyWeekRange.textContent = `Week of ${fmtSurveyDate(periodStart)} – ${fmtSurveyDate(periodEnd)}`;
+  els.surveyError.classList.add("hidden");
+  surveySelectedAccurate = null;
+  surveySelectedModeling = null;
+  els.surveyAccurateToggle.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+  els.surveyModelingToggle.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+  els.surveyQuestionsInput.value = "";
+  [els.surveyCallsInput, els.surveyOwnersTalkedInput, els.surveyOwnersAgreedInput].forEach((el) => (el.disabled = true));
+  updateSurveySubmitEnabled();
+
+  const boundStart = periodStart.toISOString();
+  const boundEnd = periodEndExclusive(periodEnd).toISOString();
+  const dateStart = periodStart.toISOString().slice(0, 10);
+  const dateEnd = periodEnd.toISOString().slice(0, 10);
+
+  const [callsRes, introRes, dialsRes] = await Promise.all([
+    supabase
+      .from("call_status_changes")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", profile.id)
+      .eq("dial_type", getDealSide())
+      .gte("changed_at", boundStart)
+      .lt("changed_at", boundEnd),
+    supabase
+      .from("intro_call_log")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", profile.id)
+      .eq("client_type", getDealSide())
+      .gte("scheduled_at", boundStart)
+      .lt("scheduled_at", boundEnd),
+    // "Owners talked to" — dials this intern owns that were marked called
+    // today at some point in this period AND landed in one of the 3
+    // categories that mean an actual conversation happened (not a plain
+    // voicemail/no-answer). Live query against current dials state, which
+    // is safe here specifically because the survey is always for the
+    // current, still-open period — see js/reports.js for why the Reports
+    // popup can't use this same live-query approach for past periods.
+    supabase
+      .from("dials")
+      .select("id", { count: "exact", head: true })
+      .eq("created_by", profile.id)
+      .in("contact_status", ["not_interested", "callback_interested", "intro_call_scheduled"])
+      .gte("called_today_date", dateStart)
+      .lte("called_today_date", dateEnd),
+  ]);
+
+  surveyAutoValues = {
+    calls: callsRes.count || 0,
+    ownersTalked: dialsRes.count || 0,
+    ownersAgreed: introRes.count || 0,
+  };
+  els.surveyCallsInput.value = surveyAutoValues.calls;
+  els.surveyOwnersTalkedInput.value = surveyAutoValues.ownersTalked;
+  els.surveyOwnersAgreedInput.value = surveyAutoValues.ownersAgreed;
+
+  els.weeklySurveyModal.classList.remove("hidden");
+}
+
+function closeWeeklySurveyModal() {
+  els.weeklySurveyModal.classList.add("hidden");
+}
+
+async function submitWeeklySurvey() {
+  if (!surveySelectedAccurate || !surveySelectedModeling || !surveyAutoValues) return;
+  els.surveySubmitBtn.disabled = true;
+  const { periodStart, periodEnd } = currentSurveyPeriod();
+  const accurate = surveySelectedAccurate === "yes";
+  const payload = {
+    user_id: profile.id,
+    period_start: periodStart.toISOString().slice(0, 10),
+    period_end: periodEnd.toISOString().slice(0, 10),
+    calls_made_auto: surveyAutoValues.calls,
+    calls_made_final: accurate ? surveyAutoValues.calls : Number(els.surveyCallsInput.value) || 0,
+    owners_talked_auto: surveyAutoValues.ownersTalked,
+    owners_talked_final: accurate ? surveyAutoValues.ownersTalked : Number(els.surveyOwnersTalkedInput.value) || 0,
+    owners_agreed_auto: surveyAutoValues.ownersAgreed,
+    owners_agreed_final: accurate ? surveyAutoValues.ownersAgreed : Number(els.surveyOwnersAgreedInput.value) || 0,
+    info_accurate: accurate,
+    financial_modeling: surveySelectedModeling === "yes",
+    questions_concerns: els.surveyQuestionsInput.value.trim() || null,
+  };
+  const { error } = await supabase.from("survey_responses").insert(payload);
+  if (error) {
+    els.surveySubmitBtn.disabled = false;
+    // 23505 = unique_violation — the (user_id, period_start) constraint,
+    // the only realistic way this fails given the button's own disabled
+    // state already prevents a normal double-submit (e.g. two tabs open).
+    els.surveyError.textContent = error.code === "23505" ? "You've already submitted this week's survey." : error.message || String(error);
+    els.surveyError.classList.remove("hidden");
+    return;
+  }
+  closeWeeklySurveyModal();
+  await checkSurveyButtonState();
+}
+
+function wireWeeklySurvey() {
+  els.surveyBtn.addEventListener("click", openWeeklySurveyModal);
+  els.surveyCancelBtn.addEventListener("click", closeWeeklySurveyModal);
+  els.surveySubmitBtn.addEventListener("click", submitWeeklySurvey);
+  els.surveyAccurateToggle.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      surveySelectedAccurate = btn.dataset.value;
+      els.surveyAccurateToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      const editable = surveySelectedAccurate === "no";
+      [els.surveyCallsInput, els.surveyOwnersTalkedInput, els.surveyOwnersAgreedInput].forEach((el) => (el.disabled = !editable));
+      if (!editable && surveyAutoValues) {
+        els.surveyCallsInput.value = surveyAutoValues.calls;
+        els.surveyOwnersTalkedInput.value = surveyAutoValues.ownersTalked;
+        els.surveyOwnersAgreedInput.value = surveyAutoValues.ownersAgreed;
+      }
+      updateSurveySubmitEnabled();
+    });
+  });
+  els.surveyModelingToggle.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      surveySelectedModeling = btn.dataset.value;
+      els.surveyModelingToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      updateSurveySubmitEnabled();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // "Links" popup — one row per link below, each with Open/Send/Copy icon
 // buttons (see renderLinksList). Leadership training is team-lead/admin-only
 // (isAdminSync/isTeamLeadSync, set at module load from the signed-in
@@ -1929,6 +2138,17 @@ if (isAdminSync || isTeamLeadSync) {
 // them across devices/browsers); the bell/inbox UI itself is mounted in the
 // top nav by auth.js's requireSession(), on every page, not just Profile.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+
+// Submit weekly survey (intern) vs. View Reports (team lead/admin) — only
+// one of the two ever shows, based on role. Reports popup wiring lives in
+// js/reports.js.
+if (isAdminSync || isTeamLeadSync) {
+  els.reportsBtn.classList.remove("hidden");
+} else {
+  els.surveyBtn.classList.remove("hidden");
+  wireWeeklySurvey();
+  checkSurveyButtonState();
+}
 
 showCallsView("outreach");
 loadUpcomingEvents();
