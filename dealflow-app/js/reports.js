@@ -9,18 +9,19 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 // Outreach report: every seller-side dial tab is assigned to a specific
 // buyer client (dial_lists.buyer_id — see the required "Buyer" picker on
 // tab creation in js/dials.js), so "Select buyer" is really a buyer-scoped
-// view of the same tab-level data. Calls made, Owners talked to, and Intro
-// calls completed all come from report_dial_rollups (keyed by list_id, with
-// buyer_id captured alongside it) and respond to the buyer filter. Owners
-// agreed to intro call is NOT buyer-filterable — it has no relationship to
-// any dial tab in the data model at all (backed by report_user_rollups,
-// sourced from intro_call_log). Both rollup tables are pre-computed every
-// 15 min by a scheduled Postgres function (compute_report_rollups()) and
-// pruned to the last 12 weeks/months by another (prune_report_data()) —
-// this module only ever reads them, never computes numbers live, since
-// dial_lists rows are hard-deleted and dials.contact_status/
-// called_today_date are mutable, so a live query couldn't reconstruct a
-// past period's numbers reliably.
+// view of the same tab-level data. Calls made, Owners talked to, Owners
+// agreed to intro call, and Intro calls completed all come from
+// report_dial_rollups (keyed by list_id, with buyer_id captured alongside
+// it) and respond to the buyer filter — Owners agreed is derived from the
+// same call_status_changes rows as Owners talked (a call whose category
+// landed on "Intro call scheduled"), not from intro_call_log like it used
+// to be, specifically so it has a real tab/buyer relationship. This table
+// is pre-computed every 15 min by a scheduled Postgres function
+// (compute_report_rollups()) and pruned to the last 12 weeks/months by
+// another (prune_report_data()) — this module only ever reads it, never
+// computes numbers live, since dial_lists rows are hard-deleted and
+// dials.contact_status/called_today_date are mutable, so a live query
+// couldn't reconstruct a past period's numbers reliably.
 //
 // Team report: reads straight from survey_responses (no rollup needed — it
 // already has exactly the right grain, one row per intern per week), pruned
@@ -148,59 +149,40 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     return picked.length ? picked : allAccountsCache;
   }
 
-  // Only buyers with a CONFIRMED "Contract signed" Timeline event, owned by
-  // whichever accounts are currently selected — mirrors the exact same
-  // picker used when creating a dial tab (js/dials.js
-  // loadContractSignedBuyers()), just scoped to the report's own selected
-  // accounts instead of the viewer's full allowed pool.
-  async function loadAvailableBuyers(accountIds) {
-    const { data: buyers, error } = await supabase
-      .from("clients")
-      .select("id, full_name")
-      .eq("client_type", "buyer")
-      .in("created_by", accountIds)
-      .order("full_name", { ascending: true });
-    if (error || !buyers?.length) return [];
-    const { data: events } = await supabase
-      .from("client_events")
-      .select("client_id")
-      .eq("event_type", "contract_signed")
-      .eq("confirmed", true)
-      .in("client_id", buyers.map((b) => b.id));
-    const signedIds = new Set((events || []).map((e) => e.client_id));
-    return buyers.filter((b) => signedIds.has(b.id));
+  // get_reports_available_buyers() is a SECURITY DEFINER RPC (see
+  // supabase/schema.sql) rather than a plain query — it returns the union
+  // of buyers owned by the caller's admin/team pool with a confirmed
+  // "Contract signed" event (mirrors js/dials.js's
+  // loadContractSignedBuyers()) AND any buyer that pool has actually made
+  // calls for, even one owned by someone outside the pool entirely (most
+  // commonly an admin) — a plain query against `clients` can't see a
+  // buyer it doesn't own/lead in the first place, so that second case
+  // needs its own server-side scoping. Computed from the caller's own
+  // admin/team pool, not the report's currently selected accounts — the
+  // options list reflects the whole team's history regardless of how
+  // Accounts visible happens to be narrowed right now.
+  async function loadAvailableBuyers() {
+    const { data, error } = await supabase.rpc("get_reports_available_buyers");
+    return error ? [] : data || [];
   }
 
   async function fetchOutreachRows(accounts) {
     const accountIds = accounts.map((a) => a.id);
     const periodStartStr = isoDate(selectedPeriodStart);
-    const [dialRes, userRes] = await Promise.all([
-      supabase
-        .from("report_dial_rollups")
-        .select("user_id, buyer_id, calls_made, owners_talked, intro_calls_completed")
-        .in("user_id", accountIds)
-        .eq("period_type", periodType)
-        .eq("period_start", periodStartStr),
-      // owners_agreed_to_intro_call is the one column that never responds
-      // to the buyer filter — it has no relationship to any dial tab/buyer
-      // in the data model (see the top-of-file comment).
-      supabase
-        .from("report_user_rollups")
-        .select("user_id, owners_agreed_to_intro_call")
-        .in("user_id", accountIds)
-        .eq("period_type", periodType)
-        .eq("period_start", periodStartStr),
-    ]);
-    const dialRows = dialRes.data || [];
-    const userRows = userRes.data || [];
+    const { data } = await supabase
+      .from("report_dial_rollups")
+      .select("user_id, buyer_id, calls_made, owners_talked, owners_agreed_to_intro_call, intro_calls_completed")
+      .in("user_id", accountIds)
+      .eq("period_type", periodType)
+      .eq("period_start", periodStartStr);
+    const dialRows = data || [];
     return accounts.map((a) => {
       const myDialRows = dialRows.filter((r) => r.user_id === a.id && (!selectedBuyerIds || selectedBuyerIds.has(r.buyer_id)));
-      const userRow = userRows.find((r) => r.user_id === a.id);
       return {
         name: a.full_name,
         callsMade: myDialRows.reduce((s, r) => s + r.calls_made, 0),
         ownersTalked: myDialRows.reduce((s, r) => s + r.owners_talked, 0),
-        ownersAgreed: userRow?.owners_agreed_to_intro_call || 0,
+        ownersAgreed: myDialRows.reduce((s, r) => s + r.owners_agreed_to_intro_call, 0),
         introCompleted: myDialRows.reduce((s, r) => s + r.intro_calls_completed, 0),
       };
     });
@@ -391,7 +373,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     els.reportsError.classList.add("hidden");
     const accounts = await resolveAccounts();
     if (reportType === "outreach") {
-      availableBuyers = await loadAvailableBuyers(accounts.map((a) => a.id));
+      availableBuyers = await loadAvailableBuyers();
       const rows = await fetchOutreachRows(accounts);
       renderOutreachTable(rows);
     } else {
