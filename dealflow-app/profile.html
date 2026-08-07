@@ -128,6 +128,21 @@
         <p class="help-text" id="calendlyLinkText">No Calendly link listed</p>
       </div>
 
+      <!-- Team-lead-only "For my intro calls" preference — whether their OWN
+           intro-call scheduling routes to the main admin's Calendly link
+           (the default) or their own. Only ever shown in edit mode, for your
+           own account, and only once you already have a Calendly link on
+           file (see enterProfileEditMode in js/profile.js) — never part of
+           the regular read-only display above, and never shown for admins
+           (the main admin has no "partner" to route to). -->
+      <div class="profile-calls-section hidden" id="calendlyPreferenceSection">
+        <p class="profile-calls-text">For my intro calls</p>
+        <select id="calendlyPreferenceSelect">
+          <option value="partner">Use partner's link</option>
+          <option value="own">Use my link</option>
+        </select>
+      </div>
+
       <!-- Outreach calls (default) — the existing weekly "people called" text
            + chart with the 50/week quota line. -->
       <div class="profile-calls-section" id="outreachCallsSection">

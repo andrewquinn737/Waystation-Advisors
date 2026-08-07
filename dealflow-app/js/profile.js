@@ -64,6 +64,8 @@ const els = {
   profileMultiNote: document.getElementById("profileMultiNote"),
   calendlyLinkSection: document.getElementById("calendlyLinkSection"),
   calendlyLinkText: document.getElementById("calendlyLinkText"),
+  calendlyPreferenceSection: document.getElementById("calendlyPreferenceSection"),
+  calendlyPreferenceSelect: document.getElementById("calendlyPreferenceSelect"),
   outreachCallsSection: document.getElementById("outreachCallsSection"),
   introCallsSection: document.getElementById("introCallsSection"),
   callsThisWeekText: document.getElementById("callsThisWeekText"),
@@ -387,7 +389,17 @@ function enterProfileEditMode() {
     els.calendlyLinkText.replaceWith(calendlyInput);
   }
 
-  profileEditInputs = { nameInput, phoneInput, emailInput, calendlyInput };
+  // "For my intro calls: Use partner's link / Use my link" — team leads
+  // only, and only once they already have a Calendly link on file (nothing
+  // to route to their "own" link otherwise). Never shown for the main admin
+  // themselves, who has no partner to route to in the first place.
+  const showCalendlyPreference = profile.role === "team_lead" && !!profile.calendly_link;
+  if (showCalendlyPreference) {
+    els.calendlyPreferenceSelect.value = profile.use_own_calendly_link ? "own" : "partner";
+    els.calendlyPreferenceSection.classList.remove("hidden");
+  }
+
+  profileEditInputs = { nameInput, phoneInput, emailInput, calendlyInput, showCalendlyPreference };
   nameInput.focus();
   nameInput.select();
 }
@@ -396,26 +408,30 @@ async function exitProfileEditMode() {
   if (!profileEditMode) return;
   profileEditMode = false;
   els.avatarInitials.classList.remove("editable");
-  const { nameInput, phoneInput, emailInput, calendlyInput } = profileEditInputs;
+  const { nameInput, phoneInput, emailInput, calendlyInput, showCalendlyPreference } = profileEditInputs;
   profileEditInputs = null;
 
   const newName = nameInput.value.trim() || profile.full_name;
   const newPhone = phoneInput.value.trim();
   const newEmail = emailInput.value.trim();
   const newCalendlyLink = calendlyInput ? calendlyInput.value.trim() : null;
+  const newUseOwnCalendlyLink = showCalendlyPreference ? els.calendlyPreferenceSelect.value === "own" : profile.use_own_calendly_link;
   nameInput.replaceWith(els.profileName);
   phoneInput.replaceWith(els.profilePhone);
   emailInput.replaceWith(els.profileEmail);
   if (calendlyInput) calendlyInput.replaceWith(els.calendlyLinkText);
+  els.calendlyPreferenceSection.classList.add("hidden");
 
   const changed =
     newName !== profile.full_name ||
     newPhone !== (profile.phone || "") ||
     newEmail !== (profile.email || "") ||
-    (calendlyInput && newCalendlyLink !== (profile.calendly_link || ""));
+    (calendlyInput && newCalendlyLink !== (profile.calendly_link || "")) ||
+    newUseOwnCalendlyLink !== profile.use_own_calendly_link;
   if (changed) {
     const updatePayload = { full_name: newName, phone: newPhone || null, email: newEmail || null };
     if (calendlyInput) updatePayload.calendly_link = newCalendlyLink || null;
+    if (showCalendlyPreference) updatePayload.use_own_calendly_link = newUseOwnCalendlyLink;
     const { error } = await supabase.from("profiles").update(updatePayload).eq("id", profile.id);
     if (error) {
       showError(els.errorBox, error);
@@ -424,6 +440,7 @@ async function exitProfileEditMode() {
       profile.phone = newPhone;
       profile.email = newEmail;
       if (calendlyInput) profile.calendly_link = newCalendlyLink;
+      if (showCalendlyPreference) profile.use_own_calendly_link = newUseOwnCalendlyLink;
     }
   }
   await renderProfileHeader();

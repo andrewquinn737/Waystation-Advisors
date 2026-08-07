@@ -26,13 +26,17 @@ export async function getMainAdmin() {
 }
 
 // Which Calendly link a given profile's intro-call scheduling should open.
-// Admins and team leads (including the main admin themselves) always use
-// the main admin's own link. Interns use their own team lead's link,
-// falling back to the main admin's if their team lead hasn't set one (or
-// they have no team lead at all).
+// Admins and team leads default to the main admin's own link, same as
+// before — except a team lead who has explicitly opted into "Use my link"
+// (profiles.use_own_calendly_link, set via the Profile edit-mode dropdown
+// only shown once they already have a Calendly link on file — see
+// enterProfileEditMode in js/profile.js) gets their own link instead.
+// Interns use their own team lead's link, falling back to the main admin's
+// if their team lead hasn't set one (or they have no team lead at all).
 export async function resolveCalendlyLink(profile) {
   const mainAdmin = await getMainAdmin();
   if (profile.role !== "intern") {
+    if (profile.use_own_calendly_link && profile.calendly_link) return profile.calendly_link;
     return mainAdmin?.calendly_link || null;
   }
   if (profile.team_id) {
