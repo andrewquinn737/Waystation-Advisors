@@ -630,29 +630,32 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     doc.autoTable({ startY: 22, head: [lastTableData.columns], body: lastTableData.rows });
 
     // "Total confirmed leads since contract was signed" — sits between the
-    // main KPI table and Contacted business owners, but only when there's
-    // actually at least one lead to show (no empty table/heading otherwise).
-    // Only possible at all because Intro calls completed is tracked via
-    // clients.source_list_id (which buyer a seller client's originating
-    // tab was attached to) — see fetchConfirmedLeadsSinceSigned above.
+    // main KPI table and Contacted business owners. Always rendered (unlike
+    // Contacted business owners below, which disappears entirely with no
+    // data) — an empty result shows a single "—" placeholder row instead of
+    // omitting the table, so its presence/position in the PDF is always
+    // predictable. Only possible at all because Intro calls completed is
+    // tracked via clients.source_list_id (which buyer a seller client's
+    // originating tab was attached to) — see fetchConfirmedLeadsSinceSigned
+    // above.
     const accounts = await resolveAccounts();
     const confirmedLeads = await fetchConfirmedLeadsSinceSigned(accounts);
-    if (confirmedLeads.length) {
-      const leadsY = doc.lastAutoTable.finalY + 10;
-      doc.text("Total confirmed leads since contract was signed", 14, leadsY);
-      doc.autoTable({
-        startY: leadsY + 4,
-        head: [["Name", "Company name", "Buyer", "Date"]],
-        body: confirmedLeads.map((r) => [
-          sanitizeForPdf(r.contact_name) || "—",
-          sanitizeForPdf(r.company_name) || "—",
-          sanitizeForPdf(r.buyer_name) || "—",
-          new Date(r.event_date).toLocaleDateString(),
-        ]),
-        styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
-        headStyles: { fontStyle: "bold" },
-      });
-    }
+    const leadsY = doc.lastAutoTable.finalY + 10;
+    doc.text("Total confirmed leads since contract was signed", 14, leadsY);
+    doc.autoTable({
+      startY: leadsY + 4,
+      head: [["Name", "Company name", "Buyer", "Date"]],
+      body: confirmedLeads.length
+        ? confirmedLeads.map((r) => [
+            sanitizeForPdf(r.contact_name) || "—",
+            sanitizeForPdf(r.company_name) || "—",
+            sanitizeForPdf(r.buyer_name) || "—",
+            new Date(r.event_date).toLocaleDateString(),
+          ])
+        : [["—", "—", "—", "—"]],
+      styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
+      headStyles: { fontStyle: "bold" },
+    });
 
     // Contacted business owners on-screen is boxed with its own internal
     // scroll (see .reports-contacted-dials-scroll) so a long list doesn't
