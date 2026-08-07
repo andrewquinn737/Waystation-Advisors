@@ -2098,16 +2098,19 @@ async function toggleDidCallToday() {
     // holds the active tab's rows), so this needs no extra lookup. Lets the
     // Profile page's Outreach calls counter/graph filter to just the
     // currently-active side (see loadCallsChart in js/profile.js).
-    // list_id/contact_status_at_call/buyer_id are a permanent snapshot for
-    // the Reports feature (see js/reports.js) — dial_lists rows are
-    // hard-deleted (cascading to their dials) when a tab is removed, so
+    // list_id/contact_status_at_call/buyer_id/company_name are a permanent
+    // snapshot for the Reports feature (see js/reports.js) — dial_lists rows
+    // are hard-deleted (cascading to their dials) when a tab is removed, so
     // this is the only place these facts survive that deletion. Not foreign
     // keys on purpose; they just need to keep their original value forever,
     // even once the tab/dial/buyer-assignment they came from no longer
     // resolves to anything. buyer_id comes from the dial's own list (looked
     // up in the already-in-memory allLists — dial_lists.buyer_id, see the
     // "Buyer" picker required on tab creation) since a dial row itself has
-    // no buyer_id column of its own.
+    // no buyer_id column of its own. company_name feeds the "contacted
+    // dials" static list on the buyer-scoped Outreach report — like
+    // contact_status_at_call, it's captured once here and never updated
+    // afterward even if the dial's info changes later that same day.
     const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
     await supabase.from("call_status_changes").insert({
       user_id: profile.id,
@@ -2116,6 +2119,7 @@ async function toggleDidCallToday() {
       list_id: currentDial.list_id,
       contact_status_at_call: currentDial.contact_status,
       buyer_id: currentListForBuyer?.buyer_id || null,
+      company_name: currentDial.company_name || null,
     });
   }
 

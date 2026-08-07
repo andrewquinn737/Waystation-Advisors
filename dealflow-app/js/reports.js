@@ -43,6 +43,19 @@ const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible";
 // same "Not attached to buyer" bucket; there's no need to distinguish them.
 const UNATTACHED_BUYER_LABEL = "Not attached to buyer";
 
+// Mirrors dials.js's CONTACT_STATUSES labels (kept as a separate plain map
+// here since this module has no need for the color/dot info that lives
+// alongside them there — call_status_changes.contact_status_at_call is just
+// a frozen snapshot of whichever of these values was current at call time).
+const CONTACT_STATUS_LABELS = {
+  uncontacted: "Uncontacted",
+  unable_to_contact: "Unable to contact",
+  not_interested: "Not interested",
+  no_response: "No response, try again",
+  callback_interested: "Callback, interested",
+  intro_call_scheduled: "Intro call scheduled",
+};
+
 function mondayOf(d) {
   const dd = new Date(d);
   const day = dd.getDay(); // 0=Sun..6=Sat
@@ -67,6 +80,18 @@ function fmtPeriodLabel(periodStart, type) {
   const end = new Date(periodStart);
   end.setDate(end.getDate() + 4); // Friday
   return `Week of ${periodStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+// Inclusive start / exclusive end ISO bounds for a period — used only by
+// the raw call_status_changes query behind the "Contacted dials" list
+// (everything else in this module reads pre-aggregated rollup tables keyed
+// by period_type/period_start and never needs actual date bounds).
+function periodBoundsISO(periodStart, type) {
+  const start = new Date(periodStart);
+  const end = new Date(periodStart);
+  if (type === "month") end.setMonth(end.getMonth() + 1);
+  else end.setDate(end.getDate() + 7);
+  return { startISO: start.toISOString(), endISO: end.toISOString() };
 }
 
 // Last 12 periods for Outreach (matches the 12-week/12-month retention
@@ -178,6 +203,63 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         introCompleted: myDialRows.reduce((s, r) => s + r.intro_calls_completed, 0),
       };
     });
+  }
+
+  // Raw call_status_changes rows for the "Contacted dials" static list —
+  // the one place this module queries something other than a pre-computed
+  // rollup table, since there's no aggregate to read here: every logged
+  // call in range, as-is. Caller guarantees selectedBuyerIds is a Set of
+  // exactly one id (possibly null, for "Not attached to buyer") before
+  // calling this.
+  async function fetchContactedDials(accounts) {
+    const singleBuyerId = [...selectedBuyerIds][0];
+    const accountIds = accounts.map((a) => a.id);
+    const { startISO, endISO } = periodBoundsISO(selectedPeriodStart, periodType);
+    let query = supabase
+      .from("call_status_changes")
+      .select("company_name, contact_status_at_call, changed_at")
+      .eq("dial_type", "seller")
+      .in("user_id", accountIds)
+      .gte("changed_at", startISO)
+      .lt("changed_at", endISO)
+      .order("changed_at", { ascending: true });
+    query = singleBuyerId === null ? query.is("buyer_id", null) : query.eq("buyer_id", singleBuyerId);
+    const { data, error } = await query;
+    return error ? [] : data || [];
+  }
+
+  // Outreach report only, and only once exactly one buyer is selected (a
+  // multi-select or the "Select all" default has no single buyer to scope
+  // this list to) — see the top-of-file comment and profile.html's
+  // reportsContactedDialsWrap for the full rationale. Never affected by
+  // showIndividuals.
+  async function renderContactedDialsSection(accounts) {
+    const showsLog = reportType === "outreach" && selectedBuyerIds !== null && selectedBuyerIds.size === 1;
+    els.reportsContactedDialsWrap.classList.toggle("hidden", !showsLog);
+    if (!showsLog) {
+      els.reportsContactedDialsWrap.innerHTML = "";
+      return;
+    }
+    const rows = await fetchContactedDials(accounts);
+    const bodyHTML = rows.length
+      ? `
+        <table>
+          <thead><tr><th>Company name</th><th>Date contacted</th><th>Category</th></tr></thead>
+          <tbody>
+            ${rows
+              .map(
+                (r) => `
+              <tr>
+                <td>${escapeHtml(r.company_name || "—")}</td>
+                <td>${escapeHtml(new Date(r.changed_at).toLocaleDateString())}</td>
+                <td>${escapeHtml(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—")}</td>
+              </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>`
+      : `<p class="help-text">No contacted dials in this range.</p>`;
+    els.reportsContactedDialsWrap.innerHTML = `<h3>Contacted dials</h3>${bodyHTML}`;
   }
 
   async function fetchTeamRows(accounts) {
@@ -302,6 +384,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       const rows = await fetchTeamRows(accounts);
       renderTeamTable(rows);
     }
+    await renderContactedDialsSection(accounts);
   }
 
   // DOM data-attributes can't hold a real `null`, so the "Not attached to

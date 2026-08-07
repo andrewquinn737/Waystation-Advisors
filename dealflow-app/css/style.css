@@ -394,6 +394,12 @@ tr:last-child td { border-bottom: none; }
 /* Outreach report's summary row (see js/reports.js) — the sum of every
    account row below it in that column. */
 .reports-totals-row td { font-weight: 700; background: var(--bg); }
+/* "Contacted dials" static list under the Outreach report (see
+   renderContactedDialsSection in js/reports.js) — reuses the plain table/
+   th/td styling above, just with its own heading + spacing since it sits
+   below the report's own numbers table. */
+#reportsContactedDialsWrap { margin-top: 20px; }
+#reportsContactedDialsWrap h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
 td.muted { color: var(--text-muted); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -556,6 +562,11 @@ tr.clickable-row { cursor: pointer; }
 /* Shown only at mobile widths (opposite of .hidden's always-off) — see the
    max-width:720px media query further down which flips this to visible. */
 .mobile-only { display: none; }
+/* Opposite of .mobile-only above — shown by default, hidden once
+   html.is-mobile-device is set (see the device-detection script at the top
+   of each page and the html.is-mobile-device rules further down). */
+.desktop-only { display: block; }
+html.is-mobile-device .desktop-only { display: none; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
 .error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
 
