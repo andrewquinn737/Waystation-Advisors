@@ -391,6 +391,9 @@ table { width: 100%; border-collapse: collapse; background: var(--surface); bord
 th, td { text-align: left; padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--border); }
 th { background: var(--bg); color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
 tr:last-child td { border-bottom: none; }
+/* Outreach report's summary row (see js/reports.js) — the sum of every
+   account row below it in that column. */
+.reports-totals-row td { font-weight: 700; background: var(--bg); }
 td.muted { color: var(--text-muted); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -591,7 +594,12 @@ tr.clickable-row { cursor: pointer; }
    z-index of 100, so they rendered invisibly underneath it. counterpartModal
    has the same "opens while the client modal is already open" shape, so
    it's included too even though it wasn't reported broken. */
-#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal { z-index: 200; }
+#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal,
+/* reportsAccountsVisiblePopup and reportsSelectTabsPopup (see js/reports.js)
+   are modal-backdrop popups opened from inside reportsModal, itself a
+   fullscreen-modal — same "opens on top of a fullscreen-modal" shape as the
+   client-modal popups above, so they need the same override. */
+#reportsAccountsVisiblePopup, #reportsSelectTabsPopup { z-index: 200; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }

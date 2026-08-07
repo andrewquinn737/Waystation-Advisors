@@ -168,6 +168,85 @@
     </div>
   </main>
 
+  <!-- Reports (team lead/admin-only) — see js/reports.js. Full-screen popup:
+       dropdown-arrow options menu (left) + Outreach/Team report toggle
+       (right), a data table in the middle, and a PDF export at the bottom. -->
+  <div class="fullscreen-modal hidden" id="reportsModal">
+    <div class="fs-header">
+      <div class="fs-header-main">
+        <button type="button" class="page-header-toggle" id="reportsMenuToggle" title="Options">
+          <svg viewBox="0 0 16 16" width="10" height="10"><path d="M2 10 L8 4 L14 10 Z" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div class="fs-header-actions">
+        <div class="segmented" id="reportsTypeToggle">
+          <button type="button" data-value="outreach">Outreach report</button>
+          <button type="button" data-value="team">Team report</button>
+        </div>
+        <button class="fs-close" id="reportsCloseBtn">✕</button>
+      </div>
+    </div>
+    <!-- Week/Month, select-period, select-tabs, and show-individuals are
+         hidden entirely for Team report (see js/reports.js) — Team report is
+         always weekly, has no tab concept, and always shows every account. -->
+    <div class="page-header-menu hidden" id="reportsOptionsMenu">
+      <button type="button" class="page-header-menu-item" id="reportsAccountsVisibleBtn">
+        <span class="menu-item-label">Accounts visible</span>
+      </button>
+      <div class="page-header-menu-item" id="reportsPeriodTypeRow">
+        <div class="segmented small" id="reportsPeriodTypeToggle">
+          <button type="button" data-value="week">Week</button>
+          <button type="button" data-value="month">Month</button>
+        </div>
+      </div>
+      <div class="page-header-menu-item" id="reportsSelectPeriodRow">
+        <select id="reportsPeriodSelect"></select>
+      </div>
+      <button type="button" class="page-header-menu-item" id="reportsSelectTabsBtn">
+        <span class="menu-item-label">Select tabs</span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="reportsShowIndividualsBtn">
+        <span class="menu-item-label" id="reportsShowIndividualsLabel">Show individuals: On</span>
+      </button>
+    </div>
+    <div class="fs-body">
+      <div id="reportsError" class="error-msg hidden"></div>
+      <div id="reportsTableWrap"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="reportsCreatePdfBtn">Create PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reports-scoped "Accounts visible" — same shared component as
+       Clients/Dials/Profile (js/accountsVisible.js) but with its own
+       independent storageKey (see js/reports.js), so selecting accounts
+       here doesn't change what the rest of the app shows. -->
+  <div class="modal-backdrop hidden" id="reportsAccountsVisiblePopup">
+    <div class="modal">
+      <h2>Accounts visible</h2>
+      <p class="help-text">Choose which account(s) to include in this report.</p>
+      <div id="reportsAccountsVisibleBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="reportsAccountsVisibleClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Select tabs (Outreach report only) — checkbox list of dial tabs
+       belonging to whichever accounts are currently selected, plus a
+       synthetic "Removed tab(s)" entry compounding any tabs that have since
+       been deleted. See js/reports.js. -->
+  <div class="modal-backdrop hidden" id="reportsSelectTabsPopup">
+    <div class="modal">
+      <h2>Select tabs</h2>
+      <div id="reportsSelectTabsBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="reportsSelectTabsClose">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Weekly survey (intern-only) — see wireWeeklySurvey() in js/profile.js.
        Q1-3 are auto-filled and start disabled; picking "No" on the accuracy
        question unlocks them for a suggested correction (never touches real

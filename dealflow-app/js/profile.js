@@ -8,6 +8,7 @@ import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } fro
 import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
 import { getMainAdmin } from "./mainAdmin.js";
+import { wireReportsPopup } from "./reports.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -100,6 +101,28 @@ const els = {
   surveyQuestionsInput: document.getElementById("surveyQuestionsInput"),
   surveySubmitBtn: document.getElementById("surveySubmitBtn"),
   surveyCancelBtn: document.getElementById("surveyCancelBtn"),
+  reportsModal: document.getElementById("reportsModal"),
+  reportsMenuToggle: document.getElementById("reportsMenuToggle"),
+  reportsOptionsMenu: document.getElementById("reportsOptionsMenu"),
+  reportsTypeToggle: document.getElementById("reportsTypeToggle"),
+  reportsCloseBtn: document.getElementById("reportsCloseBtn"),
+  reportsAccountsVisibleBtn: document.getElementById("reportsAccountsVisibleBtn"),
+  reportsAccountsVisiblePopup: document.getElementById("reportsAccountsVisiblePopup"),
+  reportsAccountsVisibleBody: document.getElementById("reportsAccountsVisibleBody"),
+  reportsAccountsVisibleClose: document.getElementById("reportsAccountsVisibleClose"),
+  reportsPeriodTypeRow: document.getElementById("reportsPeriodTypeRow"),
+  reportsPeriodTypeToggle: document.getElementById("reportsPeriodTypeToggle"),
+  reportsSelectPeriodRow: document.getElementById("reportsSelectPeriodRow"),
+  reportsPeriodSelect: document.getElementById("reportsPeriodSelect"),
+  reportsSelectTabsBtn: document.getElementById("reportsSelectTabsBtn"),
+  reportsSelectTabsPopup: document.getElementById("reportsSelectTabsPopup"),
+  reportsSelectTabsBody: document.getElementById("reportsSelectTabsBody"),
+  reportsSelectTabsClose: document.getElementById("reportsSelectTabsClose"),
+  reportsShowIndividualsBtn: document.getElementById("reportsShowIndividualsBtn"),
+  reportsShowIndividualsLabel: document.getElementById("reportsShowIndividualsLabel"),
+  reportsError: document.getElementById("reportsError"),
+  reportsTableWrap: document.getElementById("reportsTableWrap"),
+  reportsCreatePdfBtn: document.getElementById("reportsCreatePdfBtn"),
   addAccountModal: document.getElementById("addAccountModal"),
   newAccountFirstName: document.getElementById("newAccountFirstName"),
   newAccountLastName: document.getElementById("newAccountLastName"),
@@ -2144,6 +2167,7 @@ wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profil
 // js/reports.js.
 if (isAdminSync || isTeamLeadSync) {
   els.reportsBtn.classList.remove("hidden");
+  wireReportsPopup({ profile, isAdminSync, els, escapeHtml });
 } else {
   els.surveyBtn.classList.remove("hidden");
   wireWeeklySurvey();
