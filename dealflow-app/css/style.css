@@ -394,12 +394,21 @@ tr:last-child td { border-bottom: none; }
 /* Outreach report's summary row (see js/reports.js) — the sum of every
    account row below it in that column. */
 .reports-totals-row td { font-weight: 700; background: var(--bg); }
-/* "Contacted dials" static list under the Outreach report (see
+/* "Contacted business owners" static list under the Outreach report (see
    renderContactedDialsSection in js/reports.js) — reuses the plain table/
    th/td styling above, just with its own heading + spacing since it sits
-   below the report's own numbers table. */
+   below the report's own numbers table. The list itself scrolls inside a
+   fixed-height box (.reports-contacted-dials-scroll) rather than growing
+   the whole page — a long list would otherwise push Create/Send PDF far
+   down the modal. The table's own sticky <thead> stays pinned to the top
+   of that box while scrolling. This box only applies on-screen; the PDF
+   export includes every row as a full, unboxed table (see buildReportPdf
+   in js/reports.js). */
 #reportsContactedDialsWrap { margin-top: 20px; }
 #reportsContactedDialsWrap h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+.reports-contacted-dials-scroll { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.reports-contacted-dials-scroll table { border: none; border-radius: 0; }
+.reports-contacted-dials-scroll thead th { position: sticky; top: 0; z-index: 1; }
 td.muted { color: var(--text-muted); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 

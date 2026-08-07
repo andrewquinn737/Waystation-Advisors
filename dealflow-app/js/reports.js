@@ -138,6 +138,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   let availableBuyers = []; // [{id, name}] — real buyer clients only; "Not attached to buyer" is handled separately, not part of this list
   let allAccountsCache = null;
   let lastTableData = null; // { columns, rows } — plain arrays, for PDF export
+  let lastContactedDialsRows = null; // raw rows from fetchContactedDials, or null when the section isn't currently shown — also feeds PDF export
 
   async function resolveAccounts() {
     if (!allAccountsCache) allAccountsCache = await getAllAccounts();
@@ -241,27 +242,36 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     els.reportsContactedDialsWrap.classList.toggle("hidden", !showsLog);
     if (!showsLog) {
       els.reportsContactedDialsWrap.innerHTML = "";
+      lastContactedDialsRows = null;
       return;
     }
     const rows = await fetchContactedDials(accounts);
+    lastContactedDialsRows = rows;
+    // The table itself scrolls inside a fixed-height box (see
+    // .reports-contacted-dials-scroll in css/style.css) so a long list
+    // doesn't push the rest of the report (and the PDF buttons below it)
+    // off-screen — the PDF export instead includes every row as a plain
+    // (unboxed) table of its own, see buildReportPdf().
     const bodyHTML = rows.length
       ? `
-        <table>
-          <thead><tr><th>Name</th><th>Company name</th><th>Date contacted</th><th>Category</th></tr></thead>
-          <tbody>
-            ${rows
-              .map(
-                (r) => `
-              <tr>
-                <td>${escapeHtml(r.contact_name || "—")}</td>
-                <td>${escapeHtml(r.company_name || "—")}</td>
-                <td>${escapeHtml(new Date(r.changed_at).toLocaleDateString())}</td>
-                <td>${escapeHtml(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—")}</td>
-              </tr>`
-              )
-              .join("")}
-          </tbody>
-        </table>`
+        <div class="reports-contacted-dials-scroll">
+          <table>
+            <thead><tr><th>Name</th><th>Company name</th><th>Date contacted</th><th>Category</th></tr></thead>
+            <tbody>
+              ${rows
+                .map(
+                  (r) => `
+                <tr>
+                  <td>${escapeHtml(r.contact_name || "—")}</td>
+                  <td>${escapeHtml(r.company_name || "—")}</td>
+                  <td>${escapeHtml(new Date(r.changed_at).toLocaleDateString())}</td>
+                  <td>${escapeHtml(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—")}</td>
+                </tr>`
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>`
       : `<p class="help-text">No contacted business owners in this range.</p>`;
     els.reportsContactedDialsWrap.innerHTML = `<h3>Contacted business owners</h3>${bodyHTML}`;
   }
@@ -566,6 +576,25 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const doc = new jsPDF();
     doc.text(`${title} — ${periodLabel}`, 14, 16);
     doc.autoTable({ startY: 22, head: [lastTableData.columns], body: lastTableData.rows });
+    // Contacted business owners on-screen is boxed with its own internal
+    // scroll (see .reports-contacted-dials-scroll) so a long list doesn't
+    // push the rest of the page down — that constraint doesn't apply to a
+    // PDF, so here it's just a second full table underneath the first,
+    // relying on jspdf-autotable's own pagination if it runs long.
+    if (lastContactedDialsRows && lastContactedDialsRows.length) {
+      const contactedY = doc.lastAutoTable.finalY + 10;
+      doc.text("Contacted business owners", 14, contactedY);
+      doc.autoTable({
+        startY: contactedY + 4,
+        head: [["Name", "Company name", "Date contacted", "Category"]],
+        body: lastContactedDialsRows.map((r) => [
+          r.contact_name || "—",
+          r.company_name || "—",
+          new Date(r.changed_at).toLocaleDateString(),
+          CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—",
+        ]),
+      });
+    }
     const filename = `${title.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
     return { doc, filename };
   }
