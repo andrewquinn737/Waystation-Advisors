@@ -604,12 +604,19 @@ tr.clickable-row { cursor: pointer; }
    has the same "opens while the client modal is already open" shape, so
    it's included too even though it wasn't reported broken. */
 #eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal,
-/* reportsAccountsVisiblePopup, reportsSelectTabsPopup, and
+/* reportsAccountsVisiblePopup, reportsSelectBuyerPopup, and
    reportsSelectPeriodPopup (see js/reports.js) are modal-backdrop popups
    opened from inside reportsModal, itself a fullscreen-modal — same "opens
    on top of a fullscreen-modal" shape as the client-modal popups above, so
    they need the same override. */
-#reportsAccountsVisiblePopup, #reportsSelectTabsPopup, #reportsSelectPeriodPopup { z-index: 200; }
+#reportsAccountsVisiblePopup, #reportsSelectBuyerPopup, #reportsSelectPeriodPopup { z-index: 200; }
+
+/* #reportsOptionsMenu (the dropdown-menu button row at the top of Reports)
+   sits directly under reportsModal's fullscreen header with no gap, and
+   directly above the data table with a larger gap (16px menu margin + the
+   24px .fs-body padding) — tightened/evened out to match .fs-body's
+   existing 24px top padding on both sides. */
+#reportsModal #reportsOptionsMenu { margin-top: 24px; margin-bottom: 0; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }

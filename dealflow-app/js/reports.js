@@ -6,32 +6,42 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 // ---------------------------------------------------------------------------
 // Reports popup (team lead/admin-only) — "View Reports" on Profile.
 //
-// Outreach report: Calls made + Owners talked to are tab-filterable (backed
-// by report_dial_rollups, keyed by list_id — see js/dials.js's
-// toggleDidCallToday(), which is what actually captures list_id/
-// contact_status onto call_status_changes going forward). Owners agreed to
-// intro call + Intro calls completed are NOT tab-filterable — neither has
-// any relationship to a specific dial tab in the data model (backed by
-// report_user_rollups). Both rollup tables are pre-computed every 15 min by
-// a scheduled Postgres function (compute_report_rollups()) and pruned to the
-// last 12 weeks/months by another (prune_report_data()) — this module only
-// ever reads them, never computes numbers live, since dial_lists rows are
-// hard-deleted and dials.contact_status/called_today_date are mutable, so a
-// live query couldn't reconstruct a past period's numbers reliably.
+// Outreach report: every seller-side dial tab is assigned to a specific
+// buyer client (dial_lists.buyer_id — see the required "Buyer" picker on
+// tab creation in js/dials.js), so "Select buyer" is really a buyer-scoped
+// view of the same tab-level data. Calls made, Owners talked to, and Intro
+// calls completed all come from report_dial_rollups (keyed by list_id, with
+// buyer_id captured alongside it) and respond to the buyer filter. Owners
+// agreed to intro call is NOT buyer-filterable — it has no relationship to
+// any dial tab in the data model at all (backed by report_user_rollups,
+// sourced from intro_call_log). Both rollup tables are pre-computed every
+// 15 min by a scheduled Postgres function (compute_report_rollups()) and
+// pruned to the last 12 weeks/months by another (prune_report_data()) —
+// this module only ever reads them, never computes numbers live, since
+// dial_lists rows are hard-deleted and dials.contact_status/
+// called_today_date are mutable, so a live query couldn't reconstruct a
+// past period's numbers reliably.
 //
 // Team report: reads straight from survey_responses (no rollup needed — it
 // already has exactly the right grain, one row per intern per week), pruned
-// to the last 3 weeks by the same prune job. Always weekly, no tabs, no
-// Totals row, always shows every account.
+// to the last 3 weeks by the same prune job. Always weekly, no buyer
+// filter, no Totals row, always shows every account, no PDF export.
 //
-// Seller-side only for now (buyer support may come later) — this is
-// hardcoded, not a UI toggle, at every query in compute_report_rollups()
-// (dial_type/client_type = 'seller') and in loadAvailableTabs() below.
+// Seller-side only for now (buyer support for the DIALS side, i.e. cold-
+// calling actual buyers, may come later — not to be confused with the
+// buyer-CLIENT attribution above, which is unrelated) — hardcoded, not a UI
+// toggle, at every query in compute_report_rollups() (dial_type/
+// client_type = 'seller') and in loadAvailableBuyers() below.
 // ---------------------------------------------------------------------------
 
 const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible";
-const REMOVED_TAB_ID = "00000000-0000-0000-0000-000000000000";
-const REMOVED_TAB_LABEL = "Removed tab(s)";
+// null represents "no buyer_id" both for rows where a tab was explicitly
+// never assigned to a buyer, and for historical rows whose tab/buyer
+// attribution predates this tracking existing at all (dial_lists rows are
+// hard-deleted, so a deleted tab's rollup rows just keep whatever buyer_id
+// was captured at the time — see js/dials.js). Both cases render as the
+// same "Not attached to buyer" bucket; there's no need to distinguish them.
+const UNATTACHED_BUYER_LABEL = "Not attached to buyer";
 
 function mondayOf(d) {
   const dd = new Date(d);
@@ -98,9 +108,9 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   let reportType = "outreach"; // "outreach" | "team"
   let periodType = "week"; // "week" | "month"
   let selectedPeriodStart = mondayOf(new Date());
-  let selectedTabIds = null; // Set of tab ids (incl. REMOVED_TAB_ID), or null = all
+  let selectedBuyerIds = null; // Set of buyer client ids (null member = "Not attached to buyer"), or null = all
   let showIndividuals = true;
-  let availableTabs = []; // [{id, name}]
+  let availableBuyers = []; // [{id, name}] — real buyer clients only; "Not attached to buyer" is handled separately, not part of this list
   let allAccountsCache = null;
   let lastTableData = null; // { columns, rows } — plain arrays, for PDF export
 
@@ -112,13 +122,27 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     return picked.length ? picked : allAccountsCache;
   }
 
-  async function loadAvailableTabs(accountIds) {
-    // Seller-only for now, matching every other query in this module (see
-    // the top-of-file comment) — buyer-side tabs would otherwise show up
-    // here even though nothing in this report ever reflects their data.
-    const { data, error } = await supabase.from("dial_lists").select("id, name").in("created_by", accountIds).eq("dial_type", "seller");
-    const real = error ? [] : (data || []).map((t) => ({ id: t.id, name: t.name }));
-    return [...real, { id: REMOVED_TAB_ID, name: REMOVED_TAB_LABEL }];
+  // Only buyers with a CONFIRMED "Contract signed" Timeline event, owned by
+  // whichever accounts are currently selected — mirrors the exact same
+  // picker used when creating a dial tab (js/dials.js
+  // loadContractSignedBuyers()), just scoped to the report's own selected
+  // accounts instead of the viewer's full allowed pool.
+  async function loadAvailableBuyers(accountIds) {
+    const { data: buyers, error } = await supabase
+      .from("clients")
+      .select("id, full_name")
+      .eq("client_type", "buyer")
+      .in("created_by", accountIds)
+      .order("full_name", { ascending: true });
+    if (error || !buyers?.length) return [];
+    const { data: events } = await supabase
+      .from("client_events")
+      .select("client_id")
+      .eq("event_type", "contract_signed")
+      .eq("confirmed", true)
+      .in("client_id", buyers.map((b) => b.id));
+    const signedIds = new Set((events || []).map((e) => e.client_id));
+    return buyers.filter((b) => signedIds.has(b.id));
   }
 
   async function fetchOutreachRows(accounts) {
@@ -127,13 +151,16 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const [dialRes, userRes] = await Promise.all([
       supabase
         .from("report_dial_rollups")
-        .select("user_id, list_id, calls_made, owners_talked")
+        .select("user_id, buyer_id, calls_made, owners_talked, intro_calls_completed")
         .in("user_id", accountIds)
         .eq("period_type", periodType)
         .eq("period_start", periodStartStr),
+      // owners_agreed_to_intro_call is the one column that never responds
+      // to the buyer filter — it has no relationship to any dial tab/buyer
+      // in the data model (see the top-of-file comment).
       supabase
         .from("report_user_rollups")
-        .select("user_id, owners_agreed_to_intro_call, intro_calls_completed")
+        .select("user_id, owners_agreed_to_intro_call")
         .in("user_id", accountIds)
         .eq("period_type", periodType)
         .eq("period_start", periodStartStr),
@@ -141,14 +168,14 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const dialRows = dialRes.data || [];
     const userRows = userRes.data || [];
     return accounts.map((a) => {
-      const myDialRows = dialRows.filter((r) => r.user_id === a.id && (!selectedTabIds || selectedTabIds.has(r.list_id)));
+      const myDialRows = dialRows.filter((r) => r.user_id === a.id && (!selectedBuyerIds || selectedBuyerIds.has(r.buyer_id)));
       const userRow = userRows.find((r) => r.user_id === a.id);
       return {
         name: a.full_name,
         callsMade: myDialRows.reduce((s, r) => s + r.calls_made, 0),
         ownersTalked: myDialRows.reduce((s, r) => s + r.owners_talked, 0),
         ownersAgreed: userRow?.owners_agreed_to_intro_call || 0,
-        introCompleted: userRow?.intro_calls_completed || 0,
+        introCompleted: myDialRows.reduce((s, r) => s + r.intro_calls_completed, 0),
       };
     });
   }
@@ -225,8 +252,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
 
   function renderOptionsMenu() {
     els.reportsRangeBtn.classList.toggle("hidden", reportType !== "outreach");
-    els.reportsSelectTabsBtn.classList.toggle("hidden", reportType !== "outreach");
+    els.reportsSelectBuyerBtn.classList.toggle("hidden", reportType !== "outreach");
     els.reportsShowIndividualsBtn.classList.toggle("hidden", reportType !== "outreach");
+    // Team report has no PDF export at all — Outreach report gets both
+    // Create PDF (plain download) and Send PDF (share sheet, see the
+    // reportsSendPdfBtn handler below).
+    els.reportsCreatePdfBtn.classList.toggle("hidden", reportType !== "outreach");
+    els.reportsSendPdfBtn.classList.toggle("hidden", reportType !== "outreach");
 
     const rangeLabel = reportType === "team" ? "week" : periodType;
     els.reportsRangeBtn.querySelector(".menu-item-label").textContent = `Range: ${periodType === "month" ? "Month" : "Week"}`;
@@ -263,7 +295,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     els.reportsError.classList.add("hidden");
     const accounts = await resolveAccounts();
     if (reportType === "outreach") {
-      availableTabs = await loadAvailableTabs(accounts.map((a) => a.id));
+      availableBuyers = await loadAvailableBuyers(accounts.map((a) => a.id));
       const rows = await fetchOutreachRows(accounts);
       renderOutreachTable(rows);
     } else {
@@ -272,37 +304,49 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     }
   }
 
-  function renderSelectTabsPopup() {
-    const rowsHTML = availableTabs
+  // DOM data-attributes can't hold a real `null`, so the "Not attached to
+  // buyer" row uses the empty string as its sentinel id in the markup —
+  // domIdToBuyerId()/buyerIdToDomId() convert between that and the real
+  // `null` used everywhere else (selectedBuyerIds, report_dial_rollups.buyer_id).
+  function domIdToBuyerId(domId) {
+    return domId === "" ? null : domId;
+  }
+  function buyerIdToDomId(buyerId) {
+    return buyerId === null ? "" : buyerId;
+  }
+
+  function renderSelectBuyerPopup() {
+    const allOptions = [...availableBuyers, { id: null, full_name: UNATTACHED_BUYER_LABEL }];
+    const rowsHTML = allOptions
       .map(
-        (t) => `
-      <button type="button" class="accounts-visible-row" data-id="${t.id}">
-        <input type="checkbox" ${!selectedTabIds || selectedTabIds.has(t.id) ? "checked" : ""} tabindex="-1" />
-        ${escapeHtml(t.name)}
+        (b) => `
+      <button type="button" class="accounts-visible-row" data-id="${buyerIdToDomId(b.id)}">
+        <input type="checkbox" ${!selectedBuyerIds || selectedBuyerIds.has(b.id) ? "checked" : ""} tabindex="-1" />
+        ${escapeHtml(b.full_name)}
       </button>`
       )
       .join("");
-    els.reportsSelectTabsBody.innerHTML = `
+    els.reportsSelectBuyerBody.innerHTML = `
       <div class="accounts-visible-list">
-        <button type="button" class="accounts-visible-row select-all" id="reportsTabsSelectAllBtn">
-          <input type="checkbox" ${!selectedTabIds ? "checked" : ""} tabindex="-1" />
+        <button type="button" class="accounts-visible-row select-all" id="reportsBuyerSelectAllBtn">
+          <input type="checkbox" ${!selectedBuyerIds ? "checked" : ""} tabindex="-1" />
           Select all
         </button>
         ${rowsHTML}
       </div>
     `;
-    els.reportsSelectTabsBody.querySelector("#reportsTabsSelectAllBtn").addEventListener("click", () => {
-      selectedTabIds = selectedTabIds === null ? new Set() : null;
-      renderSelectTabsPopup();
+    els.reportsSelectBuyerBody.querySelector("#reportsBuyerSelectAllBtn").addEventListener("click", () => {
+      selectedBuyerIds = selectedBuyerIds === null ? new Set() : null;
+      renderSelectBuyerPopup();
       refresh();
     });
-    els.reportsSelectTabsBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
+    els.reportsSelectBuyerBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
       row.addEventListener("click", () => {
-        const id = row.dataset.id;
-        if (selectedTabIds === null) selectedTabIds = new Set(availableTabs.map((t) => t.id));
-        if (selectedTabIds.has(id)) selectedTabIds.delete(id);
-        else selectedTabIds.add(id);
-        renderSelectTabsPopup();
+        const id = domIdToBuyerId(row.dataset.id);
+        if (selectedBuyerIds === null) selectedBuyerIds = new Set(allOptions.map((b) => b.id));
+        if (selectedBuyerIds.has(id)) selectedBuyerIds.delete(id);
+        else selectedBuyerIds.add(id);
+        renderSelectBuyerPopup();
         refresh();
       });
     });
@@ -325,7 +369,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     unlockPageScroll();
   });
 
-  // The three sub-popups (Accounts visible, Select tabs, Select period) are
+  // The three sub-popups (Accounts visible, Select buyer, Select period) are
   // registered as extraCloseEl so pageHeaderMenu.js's outside-click
   // detection treats clicks inside them as "inside" the Reports dropdown,
   // not outside it — that's what keeps the dropdown open underneath while
@@ -334,7 +378,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   wirePageHeaderMenu({
     toggleBtn: els.reportsMenuToggle,
     menuEl: els.reportsOptionsMenu,
-    extraCloseEl: [els.reportsAccountsVisiblePopup, els.reportsSelectTabsPopup, els.reportsSelectPeriodPopup],
+    extraCloseEl: [els.reportsAccountsVisiblePopup, els.reportsSelectBuyerPopup, els.reportsSelectPeriodPopup],
   });
 
   els.reportsTypeBtn.addEventListener("click", () => {
@@ -360,19 +404,19 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     refresh();
   });
 
-  els.reportsSelectTabsBtn.addEventListener("click", () => {
-    els.reportsSelectTabsPopup.classList.remove("hidden");
-    renderSelectTabsPopup();
+  els.reportsSelectBuyerBtn.addEventListener("click", () => {
+    els.reportsSelectBuyerPopup.classList.remove("hidden");
+    renderSelectBuyerPopup();
   });
-  els.reportsSelectTabsClose.addEventListener("click", () => {
-    els.reportsSelectTabsPopup.classList.add("hidden");
+  els.reportsSelectBuyerClose.addEventListener("click", () => {
+    els.reportsSelectBuyerPopup.classList.add("hidden");
   });
   // Clicking the backdrop itself (not the .modal card, and not any child of
   // it) closes the popup exactly like the Done/Close button does — checking
   // e.target === the popup element rather than e.currentTarget is what
   // excludes clicks that bubble up from inside the card.
-  els.reportsSelectTabsPopup.addEventListener("click", (e) => {
-    if (e.target === els.reportsSelectTabsPopup) els.reportsSelectTabsClose.click();
+  els.reportsSelectBuyerPopup.addEventListener("click", (e) => {
+    if (e.target === els.reportsSelectBuyerPopup) els.reportsSelectBuyerClose.click();
   });
 
   els.reportsSelectPeriodBtn.addEventListener("click", () => {
@@ -395,7 +439,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     getAllAccounts,
     storageKey: REPORTS_ACCOUNTS_KEY,
     onChange: () => {
-      selectedTabIds = null; // available tabs depend on which accounts are selected
+      selectedBuyerIds = null; // available buyers depend on which accounts are selected
       refresh();
     },
     escapeHtml,
@@ -407,8 +451,10 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     if (e.target === els.reportsAccountsVisiblePopup) els.reportsAccountsVisibleClose.click();
   });
 
-  els.reportsCreatePdfBtn.addEventListener("click", async () => {
-    if (!lastTableData) return;
+  // Shared by both Create PDF and Send PDF (Outreach report only — Team
+  // report has neither button, see renderOptionsMenu()) so the exact same
+  // document gets either downloaded directly or handed to the share sheet.
+  async function buildReportPdf() {
     // jspdf-autotable's ESM build exports the older plugin-style API
     // (applyPlugin(jsPDF) attaches .autoTable() to the class, rather than a
     // standalone autoTable(doc, opts) function) — verified directly in a
@@ -417,11 +463,55 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const { jsPDF } = await import("https://cdn.jsdelivr.net/npm/jspdf@2/+esm");
     const { applyPlugin } = await import("https://cdn.jsdelivr.net/npm/jspdf-autotable@3/+esm");
     applyPlugin(jsPDF);
-    const title = reportType === "outreach" ? "Outreach report" : "Team report";
-    const periodLabel = fmtPeriodLabel(selectedPeriodStart, reportType === "team" ? "week" : periodType);
+    const title = "Outreach report";
+    const periodLabel = fmtPeriodLabel(selectedPeriodStart, periodType);
     const doc = new jsPDF();
     doc.text(`${title} — ${periodLabel}`, 14, 16);
     doc.autoTable({ startY: 22, head: [lastTableData.columns], body: lastTableData.rows });
-    doc.save(`${title.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`);
+    const filename = `${title.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
+    return { doc, filename };
+  }
+
+  els.reportsCreatePdfBtn.addEventListener("click", async () => {
+    if (!lastTableData) return;
+    const { doc, filename } = await buildReportPdf();
+    doc.save(filename);
+  });
+
+  // Reuses the exact navigator.share() mechanism the Links "Send" button
+  // uses on Profile (see js/profile.js) — but with a file instead of a URL.
+  // navigator.share can take { files: [File] } on mobile Safari 15+/Android
+  // Chrome, verified directly in a browser before shipping (see the same
+  // rigor used for the CDN import shape above). Desktop mostly has no
+  // navigator.share at all, and even where it exists, file support is
+  // spotty — mailto:/sms: (the existing Links "Send" desktop fallback)
+  // literally cannot attach a file at all (a hard platform limitation, not
+  // fixable client-side), so the fallback here is a plain download instead
+  // of trying to replicate the Text/Email popover.
+  els.reportsSendPdfBtn.addEventListener("click", async () => {
+    if (!lastTableData) return;
+    const { doc, filename } = await buildReportPdf();
+    const blob = doc.output("blob");
+    const file = new File([blob], filename, { type: "application/pdf" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: filename });
+      } catch {
+        // User backed out of the share sheet — not an error.
+      }
+      return;
+    }
+    // Desktop (or any browser without file-share support): just download
+    // it — there's no way to "automatically send" a file attachment
+    // through mailto:/sms: the way the Links "Send" button can with a
+    // plain URL, so the person has to attach it themselves afterward.
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   });
 }
