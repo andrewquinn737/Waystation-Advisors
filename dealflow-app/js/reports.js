@@ -418,13 +418,24 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         ${rowsHTML}
       </div>
     `;
-    els.reportsSelectBuyerBody.querySelector("#reportsBuyerSelectAllBtn").addEventListener("click", () => {
+    els.reportsSelectBuyerBody.querySelector("#reportsBuyerSelectAllBtn").addEventListener("click", (e) => {
+      // renderSelectBuyerPopup() below replaces reportsSelectBuyerBody's
+      // innerHTML synchronously, which detaches e.target from the DOM
+      // before this click finishes bubbling up to document —
+      // pageHeaderMenu.js's outside-click listener then sees a detached
+      // target, misreads it as "outside," and closes the whole Reports
+      // dropdown (and this popup along with it, since it's registered as an
+      // extraCloseEl). Stopping propagation here keeps the click from ever
+      // reaching that listener — same fix as accountsVisible.js's identical
+      // bug this session.
+      e.stopPropagation();
       selectedBuyerIds = selectedBuyerIds === null ? new Set() : null;
       renderSelectBuyerPopup();
       refresh();
     });
     els.reportsSelectBuyerBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
-      row.addEventListener("click", () => {
+      row.addEventListener("click", (e) => {
+        e.stopPropagation(); // see the comment on #reportsBuyerSelectAllBtn's handler above
         const id = domIdToBuyerId(row.dataset.id);
         if (selectedBuyerIds === null) selectedBuyerIds = new Set(allOptions.map((b) => b.id));
         if (selectedBuyerIds.has(id)) selectedBuyerIds.delete(id);

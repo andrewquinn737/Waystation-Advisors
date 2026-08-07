@@ -623,11 +623,11 @@ html.is-mobile-device .desktop-only { display: none; }
 #reportsAccountsVisiblePopup, #reportsSelectBuyerPopup, #reportsSelectPeriodPopup { z-index: 200; }
 
 /* #reportsOptionsMenu (the dropdown-menu button row at the top of Reports)
-   sits directly under reportsModal's fullscreen header with no gap, and
-   directly above the data table with a larger gap (16px menu margin + the
-   24px .fs-body padding) — tightened/evened out to match .fs-body's
-   existing 24px top padding on both sides. */
-#reportsModal #reportsOptionsMenu { margin-top: 24px; margin-bottom: 0; }
+   sits directly under reportsModal's fullscreen header — .fs-body's own
+   24px top padding already provides most of the gap above it, so this only
+   needs a small nudge on top of that (an earlier pass tried 24px here,
+   which stacked with the padding into a gap that read as too big). */
+#reportsModal #reportsOptionsMenu { margin-top: 8px; margin-bottom: 0; }
 
 /* ---- Collapsible accordion sections (client create/profile form) ---- */
 .accordion-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
