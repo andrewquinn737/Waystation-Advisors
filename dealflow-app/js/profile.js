@@ -101,6 +101,7 @@ const els = {
   surveyQuestionsInput: document.getElementById("surveyQuestionsInput"),
   surveySubmitBtn: document.getElementById("surveySubmitBtn"),
   surveyCancelBtn: document.getElementById("surveyCancelBtn"),
+  surveyCloseBtn: document.getElementById("surveyCloseBtn"),
   reportsModal: document.getElementById("reportsModal"),
   reportsMenuToggle: document.getElementById("reportsMenuToggle"),
   reportsOptionsMenu: document.getElementById("reportsOptionsMenu"),
@@ -1909,10 +1910,12 @@ async function openWeeklySurveyModal() {
   els.surveyOwnersAgreedInput.value = surveyAutoValues.ownersAgreed;
 
   els.weeklySurveyModal.classList.remove("hidden");
+  lockPageScroll();
 }
 
 function closeWeeklySurveyModal() {
   els.weeklySurveyModal.classList.add("hidden");
+  unlockPageScroll();
 }
 
 async function submitWeeklySurvey() {
@@ -1951,6 +1954,7 @@ async function submitWeeklySurvey() {
 function wireWeeklySurvey() {
   els.surveyBtn.addEventListener("click", openWeeklySurveyModal);
   els.surveyCancelBtn.addEventListener("click", closeWeeklySurveyModal);
+  els.surveyCloseBtn.addEventListener("click", closeWeeklySurveyModal);
   els.surveySubmitBtn.addEventListener("click", submitWeeklySurvey);
   els.surveyAccurateToggle.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -809,7 +809,7 @@ async function updateClientStatus(newStatus) {
 // subtitle too.
 // "$min - $max" (falling back to just whichever side is actually set, or ""
 // if neither is) — the read-only display counterpart to the buyer Notes
-// tab's Price range desired min/max inputs (see buildEditableSections in
+// tab's EBITDA range desired min/max inputs (see buildEditableSections in
 // js/clientForm.js).
 function priceRangeDisplay(client) {
   const hasMin = client.money_to_spend_min != null;
@@ -837,7 +837,7 @@ function buildClientViewHTML(client) {
     ${isBuyer ? "" : rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
     ${isBuyer ? "" : rf("Employees", client.employee_count)}
     ${isBuyer ? "" : rf("Founded", founded)}
-    ${isBuyer ? rf("Price range desired", priceRangeDisplay(client)) : ""}
+    ${isBuyer ? rf("EBITDA range desired", priceRangeDisplay(client)) : ""}
     ${rf(lookingForLabel(client.client_type), client.looking_for)}
     ${rf("Notes", client.other_notes)}
   `;

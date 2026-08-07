@@ -5,7 +5,7 @@
 // Buyer-specific fields are back (Round G): a buyer client gets NO "Company
 // details" section at all (that's a seller-only concept), and its
 // Preferences/Other notes sections collapse into a single "Notes" section
-// containing Price range desired (money_to_spend_min/max) + the looking_for
+// containing EBITDA range desired (money_to_spend_min/max) + the looking_for
 // textarea + Other notes. Every function below that behaves differently per
 // side takes/derives a clientType ("buyer" | "seller") rather than assuming
 // "seller" like before.
@@ -112,7 +112,7 @@ export function buildEditableSections(client) {
   if (client.client_type === "buyer") {
     // Buyer clients get no "Company details" section at all (that's a
     // seller-only concept) — Preferences and Other notes also collapse into
-    // one combined "Notes" section, with money_to_spend_min/max ("Price
+    // one combined "Notes" section, with money_to_spend_min/max ("EBITDA
     // range desired") added alongside looking_for/other_notes.
     return `
       ${personalAndContactSectionsHTML(client)}
@@ -121,11 +121,11 @@ export function buildEditableSections(client) {
         <div class="accordion-body">
           <div class="form-row">
             <div>
-              <label for="f_money_min">Price range desired (min $)</label>
+              <label for="f_money_min">EBITDA range desired (min $)</label>
               <input id="f_money_min" type="number" step="0.1" min="0" value="${client.money_to_spend_min ?? ""}" />
             </div>
             <div>
-              <label for="f_money_max">Price range desired (max $)</label>
+              <label for="f_money_max">EBITDA range desired (max $)</label>
               <input id="f_money_max" type="number" step="0.1" min="0" value="${client.money_to_spend_max ?? ""}" />
             </div>
           </div>

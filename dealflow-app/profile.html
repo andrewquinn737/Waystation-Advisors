@@ -270,9 +270,14 @@
        Q1-3 are auto-filled and start disabled; picking "No" on the accuracy
        question unlocks them for a suggested correction (never touches real
        dial/call data — just recorded alongside the original numbers). -->
-  <div class="modal-backdrop hidden" id="weeklySurveyModal">
-    <div class="modal">
+  <div class="fullscreen-modal hidden" id="weeklySurveyModal">
+    <div class="fs-header">
       <h2>Weekly survey</h2>
+      <div class="fs-header-actions">
+        <button class="fs-close" id="surveyCloseBtn">✕</button>
+      </div>
+    </div>
+    <div class="fs-body">
       <p class="help-text" id="surveyWeekRange">—</p>
       <div id="surveyError" class="error-msg hidden"></div>
       <label for="surveyCallsInput">How many calls did you make this week?</label>

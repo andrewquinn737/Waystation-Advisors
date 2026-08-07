@@ -163,7 +163,15 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     closeBtn.disabled = !anySelected;
     closeBtn.classList.toggle("disabled", !anySelected);
 
-    bodyEl.querySelector("#accountsSelectAllBtn").addEventListener("click", () => {
+    bodyEl.querySelector("#accountsSelectAllBtn").addEventListener("click", (e) => {
+      // render() below replaces bodyEl's innerHTML synchronously, which
+      // detaches e.target from the DOM before this click finishes bubbling
+      // up to document — pageHeaderMenu.js's outside-click listener then
+      // sees a detached target, misreads it as "outside," and closes the
+      // whole dropdown (and this popup along with it, since callers like
+      // Reports register it as an extraCloseEl). Stopping propagation here
+      // keeps the click from ever reaching that listener.
+      e.stopPropagation();
       // If everything is currently selected, clicking again clears the
       // selection entirely instead of being a no-op; otherwise (partial or
       // empty selection) it selects everyone, same as before.
@@ -173,7 +181,8 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
       onChange();
     });
     bodyEl.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
-      row.addEventListener("click", () => {
+      row.addEventListener("click", (e) => {
+        e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
         const id = row.dataset.id;
         // Narrowing down from "all" for the first time starts from the full
         // set of accounts (everything stays visible except the one just
