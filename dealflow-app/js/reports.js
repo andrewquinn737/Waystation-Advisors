@@ -681,7 +681,16 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
           new Date(r.changed_at).toLocaleDateString(),
           sanitizeForPdf(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call) || "—",
         ]),
-        styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
+        // jspdf-autotable's default "striped" theme auto-applies its own
+        // alternating gray/white background to body rows — that competed
+        // with the per-row fillColor set below, so same-category rows could
+        // end up showing two different shades depending on whether they
+        // landed on an odd or even row. theme: "plain" turns the built-in
+        // striping off entirely, leaving didParseCell's fillColor as the
+        // only background source, so every row of a given category is the
+        // exact same color regardless of position.
+        theme: "plain",
+        styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak", lineWidth: 0.1, lineColor: 200 },
         headStyles: { fontStyle: "bold" },
         didParseCell: (data) => {
           if (data.section !== "body") return;
