@@ -367,6 +367,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   els.reportsSelectTabsClose.addEventListener("click", () => {
     els.reportsSelectTabsPopup.classList.add("hidden");
   });
+  // Clicking the backdrop itself (not the .modal card, and not any child of
+  // it) closes the popup exactly like the Done/Close button does — checking
+  // e.target === the popup element rather than e.currentTarget is what
+  // excludes clicks that bubble up from inside the card.
+  els.reportsSelectTabsPopup.addEventListener("click", (e) => {
+    if (e.target === els.reportsSelectTabsPopup) els.reportsSelectTabsClose.click();
+  });
 
   els.reportsSelectPeriodBtn.addEventListener("click", () => {
     els.reportsSelectPeriodPopup.classList.remove("hidden");
@@ -374,6 +381,9 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   });
   els.reportsSelectPeriodClose.addEventListener("click", () => {
     els.reportsSelectPeriodPopup.classList.add("hidden");
+  });
+  els.reportsSelectPeriodPopup.addEventListener("click", (e) => {
+    if (e.target === els.reportsSelectPeriodPopup) els.reportsSelectPeriodClose.click();
   });
 
   wireAccountsVisiblePopup({
@@ -389,6 +399,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       refresh();
     },
     escapeHtml,
+  });
+  // Same backdrop-click-to-close as the other two popups — programmatically
+  // clicking the Done button reuses its own guard (won't close with zero
+  // accounts selected) instead of duplicating that logic here.
+  els.reportsAccountsVisiblePopup.addEventListener("click", (e) => {
+    if (e.target === els.reportsAccountsVisiblePopup) els.reportsAccountsVisibleClose.click();
   });
 
   els.reportsCreatePdfBtn.addEventListener("click", async () => {
