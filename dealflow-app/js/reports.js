@@ -705,10 +705,32 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     return { doc, filename };
   }
 
+  // doc.save() used to be called directly here, which downloads straight
+  // to disk on desktop with no preview — but on mobile, the exact same
+  // call already opens a preview first (mobile browsers intercept a
+  // downloaded PDF blob into their built-in viewer before offering to
+  // save it) and only THEN lets you save from there. Opening the blob in
+  // a new tab via a plain <a target="_blank"> (no download attribute) —
+  // rather than window.open(), which browsers are far more likely to
+  // block once a click handler has gone through a few awaits first —
+  // gets desktop the same "preview, then decide whether to save" flow
+  // mobile already had, using every desktop browser's own built-in PDF
+  // viewer (complete with its own download button).
   els.reportsCreatePdfBtn.addEventListener("click", async () => {
     if (!lastTableData) return;
     const { doc, filename } = await buildReportPdf();
-    doc.save(filename);
+    doc.setProperties({ title: filename });
+    const url = URL.createObjectURL(doc.output("blob"));
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoked well after the new tab has had time to load the blob URL,
+    // not immediately — revoking too early can blank out the preview.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
 
   // Reuses the exact navigator.share() mechanism the Links "Send" button
