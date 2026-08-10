@@ -142,12 +142,17 @@
     <div class="dial-tab-archive-menu hidden" id="dialTabArchiveMenu">
       <button type="button" class="dial-tab-archive-btn" id="dialTabRenameBtn">Rename</button>
       <button type="button" class="dial-tab-archive-btn" id="dialTabArchiveBtn"></button>
-      <!-- Admin-only — see js/dials.js's `if (isAdmin) els.dialTabTransferBtn...`. -->
+      <!-- Admin/team-lead only — see js/dials.js's `if (isAdmin || isTeamLead) els.dialTabTransferBtn...`. -->
       <button type="button" class="dial-tab-transfer-btn hidden" id="dialTabTransferBtn">Transfer</button>
+      <!-- Admin/team-lead only, same gate as Transfer above — reassigns
+           which buyer this tab (and every dial in it, via
+           dial_lists.buyer_id) is attached to. See openClientMenu() in
+           js/dials.js. -->
+      <button type="button" class="dial-tab-transfer-btn hidden" id="dialTabClientBtn">Client</button>
       <button type="button" class="dial-tab-delete-btn" id="dialTabDeleteBtn">Delete</button>
     </div>
 
-    <!-- Admin-only "Transfer" target list — lists every other account so the
+    <!-- Admin/team-lead "Transfer" target list — lists every other account so the
          tab (and every dial in it) can be reassigned to them. Positioned to
          the right of #dialTabArchiveMenu via JS (see openTransferMenu() in
          js/dials.js), same fixed-position escape-the-scroll-container pattern
@@ -155,6 +160,16 @@
     <div class="dial-tab-transfer-menu hidden" id="dialTabTransferMenu">
       <div class="dial-tab-transfer-title">Transfer to...</div>
       <div class="dial-tab-transfer-list" id="dialTabTransferList"></div>
+    </div>
+
+    <!-- "Client" buyer-reassignment target list — same shell/positioning
+         pattern as #dialTabTransferMenu above (see openClientMenu() in
+         js/dials.js), listing every contract-signed buyer this account can
+         assign tabs to (same pool as tab creation's picker, see
+         loadContractSignedBuyers()) plus "Not assigned to buyer". -->
+    <div class="dial-tab-transfer-menu hidden" id="dialTabClientMenu">
+      <div class="dial-tab-transfer-title">Attach to buyer...</div>
+      <div class="dial-tab-transfer-list" id="dialTabClientList"></div>
     </div>
 
     <div id="dialsTableWrap"></div>

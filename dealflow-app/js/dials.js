@@ -173,6 +173,9 @@ const els = {
   dialTabTransferBtn: document.getElementById("dialTabTransferBtn"),
   dialTabTransferMenu: document.getElementById("dialTabTransferMenu"),
   dialTabTransferList: document.getElementById("dialTabTransferList"),
+  dialTabClientBtn: document.getElementById("dialTabClientBtn"),
+  dialTabClientMenu: document.getElementById("dialTabClientMenu"),
+  dialTabClientList: document.getElementById("dialTabClientList"),
   dialTabDeleteBtn: document.getElementById("dialTabDeleteBtn"),
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
   addTabBtn: document.getElementById("addTabBtn"),
@@ -236,6 +239,7 @@ const els = {
 // scoping to the target-account list it shows).
 if (isAdmin || isTeamLead) els.menuImportBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.dialTabTransferBtn.classList.remove("hidden");
+if (isAdmin || isTeamLead) els.dialTabClientBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
 // Manual "+ new tab" creation — same admin/team-lead-only scope as CSV
 // import above (interns can't create tabs at all; enforced server-side too,
@@ -760,12 +764,14 @@ function updateArchiveMenuPosition() {
   if (!archiveMenuTabId || archiveMenuTabId !== currentListId) {
     els.dialTabArchiveMenu.classList.add("hidden");
     els.dialTabTransferMenu.classList.add("hidden");
+    els.dialTabClientMenu.classList.add("hidden");
     return;
   }
   const activeBtn = els.dialTabs.querySelector(".dial-tab.active");
   if (!activeBtn) {
     els.dialTabArchiveMenu.classList.add("hidden");
     els.dialTabTransferMenu.classList.add("hidden");
+    els.dialTabClientMenu.classList.add("hidden");
     return;
   }
   const rect = activeBtn.getBoundingClientRect();
@@ -790,6 +796,7 @@ function closeArchiveMenu() {
   if (!archiveMenuTabId) return;
   archiveMenuTabId = null;
   els.dialTabTransferMenu.classList.add("hidden");
+  els.dialTabClientMenu.classList.add("hidden");
   updateArchiveMenuPosition();
 }
 
@@ -804,6 +811,7 @@ els.dialTabs.parentElement.addEventListener(
     if (!archiveMenuTabId) return;
     updateArchiveMenuPosition();
     if (!els.dialTabTransferMenu.classList.contains("hidden")) positionTransferMenu();
+    if (!els.dialTabClientMenu.classList.contains("hidden")) positionClientMenu();
   },
   { passive: true }
 );
@@ -822,6 +830,7 @@ document.addEventListener("click", (e) => {
   if (!archiveMenuTabId) return;
   if (els.dialTabArchiveMenu.contains(e.target)) return;
   if (els.dialTabTransferMenu.contains(e.target)) return;
+  if (els.dialTabClientMenu.contains(e.target)) return;
   if (e.target.closest(".dial-tab")) return;
   closeArchiveMenu();
 });
@@ -851,6 +860,7 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
   // up, so they're never both visible at once.
   els.dialTabArchiveMenu.classList.add("hidden");
   els.dialTabTransferMenu.classList.add("hidden");
+  els.dialTabClientMenu.classList.add("hidden");
   openConfirmModal(
     els.confirmDeleteTabModal,
     "confirmDeleteTabYesBtn",
@@ -970,6 +980,75 @@ els.dialTabTransferBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   if (!archiveMenuTabId) return;
   openTransferMenu();
+});
+
+// ---------------------------------------------------------------------------
+// Admin/team-lead "Client" — reassigns which buyer an EXISTING tab (and every
+// dial in it, since attribution flows entirely through dial_lists.buyer_id)
+// is attached to. The tab-creation picker (see loadContractSignedBuyers()/
+// populateBuyerSelect() above) only ever gets one shot at this; this is the
+// "fix it later" path, reusing that exact same eligible-buyer pool. Same
+// escape-the-clip fixed-position pattern as Transfer, positioned identically
+// (to the right of the archive/delete popup, flipping left if it would run
+// off the right edge).
+// ---------------------------------------------------------------------------
+
+function positionClientMenu() {
+  const rect = els.dialTabArchiveMenu.getBoundingClientRect();
+  const menuWidth = els.dialTabClientMenu.offsetWidth || 190;
+  let left = rect.right + 8;
+  if (left + menuWidth > window.innerWidth) {
+    left = rect.left - menuWidth - 8;
+  }
+  els.dialTabClientMenu.style.left = `${Math.max(8, left)}px`;
+  els.dialTabClientMenu.style.top = `${rect.top}px`;
+}
+
+async function openClientMenu() {
+  els.dialTabClientList.innerHTML = `<div class="dial-tab-transfer-empty">Loading…</div>`;
+  els.dialTabClientMenu.classList.remove("hidden");
+  positionClientMenu();
+
+  const list = filteredLists().find((l) => l.id === archiveMenuTabId);
+  const buyers = await loadContractSignedBuyers();
+  const options = [{ id: "", full_name: "Not assigned to buyer" }, ...buyers];
+
+  els.dialTabClientList.innerHTML = options
+    .map(
+      (b) =>
+        `<button type="button" class="dial-tab-transfer-option" data-id="${b.id}">${escapeHtml(b.full_name)}${(list?.buyer_id || "") === b.id ? " (current)" : ""}</button>`
+    )
+    .join("");
+  els.dialTabClientList.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
+    btn.addEventListener("click", () => completeClientAssign(btn.dataset.id || null));
+  });
+  positionClientMenu(); // re-measure now that real content has replaced "Loading…"
+}
+
+async function completeClientAssign(buyerId) {
+  const tabId = archiveMenuTabId;
+  if (!tabId) return;
+  els.dialTabClientMenu.classList.add("hidden");
+  els.dialTabArchiveMenu.classList.add("hidden");
+
+  // security definer — dial_lists_update_own RLS would otherwise block a
+  // team lead reassigning a tab owned by one of their own interns (same
+  // reasoning as transfer_dial_list above); also re-validates server-side
+  // that a non-admin's chosen buyer is actually one their team owns with a
+  // confirmed Contract signed, mirroring loadContractSignedBuyers()'s own
+  // client-side filter so the check can't be bypassed by calling the RPC
+  // directly. See reassign_dial_list_buyer in supabase/schema.sql.
+  const { error } = await supabase.rpc("reassign_dial_list_buyer", { p_list_id: tabId, p_buyer_id: buyerId });
+  if (error) return showError(els.errorBox, error);
+
+  archiveMenuTabId = null;
+  await loadLists();
+}
+
+els.dialTabClientBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!archiveMenuTabId) return;
+  openClientMenu();
 });
 
 // ---------------------------------------------------------------------------
