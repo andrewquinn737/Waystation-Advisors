@@ -290,6 +290,28 @@
     </div>
   </div>
 
+  <!-- "Intended buyer" picker (seller clients, edit mode only) — same shell
+       as #transferOwnershipModal above, but a plain form-field picker, not
+       an immediate action: confirming just fills in the hidden
+       #f_intended_buyer_id/#f_intended_buyer_display pair (see
+       openIntendedBuyerPicker in js/clients.js), persisted through the
+       normal Save button alongside every other field. Lists contract-signed
+       buyer clients this account can attribute a seller to, same pool as
+       the dial-tab "Client" reassignment picker (js/dials.js
+       loadContractSignedBuyers()), plus "None". -->
+  <div class="modal-backdrop hidden" id="intendedBuyerModal">
+    <div class="modal">
+      <h2>Intended buyer</h2>
+      <p class="help-text">Which buyer is this seller client attributed to?</p>
+      <input type="search" id="intendedBuyerSearchInput" placeholder="Search..." />
+      <div id="intendedBuyerList" class="accounts-visible-list"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="intendedBuyerConfirmBtn">Done</button>
+        <button type="button" class="btn secondary" id="intendedBuyerCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Small centered popup summarizing missing required fields -->
   <div class="modal-backdrop hidden" id="requiredPopup">
     <div class="modal">

@@ -618,7 +618,7 @@ tr.clickable-row { cursor: pointer; }
    z-index of 100, so they rendered invisibly underneath it. counterpartModal
    has the same "opens while the client modal is already open" shape, so
    it's included too even though it wasn't reported broken. */
-#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal,
+#eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal, #intendedBuyerModal,
 /* reportsAccountsVisiblePopup, reportsSelectBuyerPopup, and
    reportsSelectPeriodPopup (see js/reports.js) are modal-backdrop popups
    opened from inside reportsModal, itself a fullscreen-modal — same "opens

@@ -306,6 +306,11 @@ const els = {
   transferOwnershipError: document.getElementById("transferOwnershipError"),
   transferOwnershipConfirmBtn: document.getElementById("transferOwnershipConfirmBtn"),
   transferOwnershipCancelBtn: document.getElementById("transferOwnershipCancelBtn"),
+  intendedBuyerModal: document.getElementById("intendedBuyerModal"),
+  intendedBuyerSearchInput: document.getElementById("intendedBuyerSearchInput"),
+  intendedBuyerList: document.getElementById("intendedBuyerList"),
+  intendedBuyerConfirmBtn: document.getElementById("intendedBuyerConfirmBtn"),
+  intendedBuyerCancelBtn: document.getElementById("intendedBuyerCancelBtn"),
   confirmDeleteTitle: document.getElementById("confirmDeleteTitle"),
   confirmConvertModal: document.getElementById("confirmConvertModal"),
   confirmConvertTitle: document.getElementById("confirmConvertTitle"),
@@ -1513,6 +1518,110 @@ async function openTransferOwnershipPicker() {
   cancelBtn.addEventListener("click", onCancelClick);
 }
 
+// ---------------------------------------------------------------------------
+// "Intended buyer" click-to-pick — only wired in edit mode, seller clients
+// only (see personalAndContactSectionsHTML in js/clientForm.js). Unlike
+// Person responsible above, this is a REGULAR form field, not an immediate
+// action: picking a buyer here only updates the hidden #f_intended_buyer_id
+// input and its readonly display sibling locally — the actual
+// clients.intended_buyer_id write happens through the normal Save button
+// alongside every other field (see collectFormData in js/clientForm.js),
+// so Cancel correctly discards a pick same as it would any other edit.
+// ---------------------------------------------------------------------------
+function wireIntendedBuyerClick() {
+  const input = document.getElementById("f_intended_buyer_display");
+  if (!input) return; // not rendered at all for buyer clients
+  input.addEventListener("click", () => openIntendedBuyerPicker());
+}
+
+// Same team-scoped-owned + confirmed-Contract-signed pool as
+// loadContractSignedBuyers() in js/dials.js (reimplemented here rather than
+// imported — this file and dials.js don't share helpers across modules,
+// same as CONTACT_STATUS_LABELS being kept separate in js/reports.js).
+async function loadIntendedBuyerOptions() {
+  let ownerIds = null;
+  if (!isAdmin) {
+    if (profile.team_id) {
+      const { data: teamProfiles } = await supabase.from("profiles").select("id").eq("team_id", profile.team_id).or(`role.eq.intern,id.eq.${profile.id}`);
+      ownerIds = (teamProfiles || []).map((p) => p.id);
+    } else {
+      ownerIds = [profile.id];
+    }
+  }
+  let query = supabase.from("clients").select("id, full_name").eq("client_type", "buyer").order("full_name", { ascending: true });
+  if (ownerIds) query = query.in("created_by", ownerIds);
+  const { data: buyers, error } = await query;
+  if (error || !buyers?.length) return [];
+  const { data: events } = await supabase
+    .from("client_events")
+    .select("client_id")
+    .eq("event_type", "contract_signed")
+    .eq("confirmed", true)
+    .in(
+      "client_id",
+      buyers.map((b) => b.id)
+    );
+  const signedIds = new Set((events || []).map((e) => e.client_id));
+  return buyers.filter((b) => signedIds.has(b.id));
+}
+
+async function openIntendedBuyerPicker() {
+  const options = [{ id: "", full_name: "None" }, ...(await loadIntendedBuyerOptions())];
+
+  const modal = els.intendedBuyerModal;
+  const searchInput = els.intendedBuyerSearchInput;
+  const listEl = els.intendedBuyerList;
+  const confirmBtn = els.intendedBuyerConfirmBtn;
+  const cancelBtn = els.intendedBuyerCancelBtn;
+
+  const displayInput = document.getElementById("f_intended_buyer_display");
+  const idInput = document.getElementById("f_intended_buyer_id");
+  let selectedId = idInput.value || "";
+
+  function render() {
+    const q = searchInput.value.trim().toLowerCase();
+    const filtered = options.filter((b) => b.full_name.toLowerCase().includes(q));
+    listEl.innerHTML = filtered.length
+      ? filtered
+          .map(
+            (b) => `
+        <button type="button" class="accounts-visible-row ${b.id === selectedId ? "selected" : ""}" data-id="${b.id}">
+          ${escapeHtml(b.full_name)}
+        </button>`
+          )
+          .join("")
+      : `<div class="accounts-visible-empty">No matches.</div>`;
+    listEl.querySelectorAll("[data-id]").forEach((row) => {
+      row.addEventListener("click", () => {
+        selectedId = row.dataset.id;
+        render();
+      });
+    });
+  }
+
+  searchInput.value = "";
+  render();
+  modal.classList.remove("hidden");
+
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    searchInput.removeEventListener("input", onSearchInput);
+    confirmBtn.removeEventListener("click", onConfirmClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onSearchInput = () => render();
+  const onConfirmClick = () => {
+    const chosen = options.find((b) => b.id === selectedId);
+    idInput.value = selectedId;
+    displayInput.value = chosen ? chosen.full_name : "None";
+    cleanup();
+  };
+  const onCancelClick = () => cleanup();
+  searchInput.addEventListener("input", onSearchInput);
+  confirmBtn.addEventListener("click", onConfirmClick);
+  cancelBtn.addEventListener("click", onCancelClick);
+}
+
 async function loadClientEvents() {
   if (!currentClient) {
     currentClientEvents = [];
@@ -1889,6 +1998,7 @@ function renderModalBody() {
   if (currentMode === "edit") {
     wireEditableFormEvents(els.clientModalBody);
     wireTransferOwnershipClick();
+    wireIntendedBuyerClick();
     document.getElementById("saveClientBtn").addEventListener("click", handleEditSave);
     document.getElementById("cancelClientBtn").addEventListener("click", () => {
       currentMode = "view";
@@ -2047,7 +2157,20 @@ if (isAdmin || isTeamLead) {
 // Notifications on/off — everyone gets this, unlike Sellers/Buyers/Accounts
 // visible above.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
-els.editProfileBtn.addEventListener("click", () => {
+els.editProfileBtn.addEventListener("click", async () => {
+  // Resolve the intended buyer's display name before entering edit mode —
+  // clients.intended_buyer_id is just a bare FK, and clientForm.js's HTML
+  // builder is a plain synchronous string template with nowhere to await a
+  // lookup itself, so it's fetched here and stashed on the client object
+  // (see personalAndContactSectionsHTML's use of client._intendedBuyerName).
+  // get_client_full_name() RPC rather than a plain query — an admin can set
+  // intended_buyer_id to any buyer, not just ones a given team owns, so a
+  // team lead viewing this same client later could otherwise be blocked by
+  // clients_select_own RLS from even seeing that buyer's name.
+  if (currentClient.client_type === "seller" && currentClient.intended_buyer_id) {
+    const { data } = await supabase.rpc("get_client_full_name", { p_client_id: currentClient.intended_buyer_id });
+    currentClient._intendedBuyerName = data || null;
+  }
   currentMode = "edit";
   renderModalBody();
 });

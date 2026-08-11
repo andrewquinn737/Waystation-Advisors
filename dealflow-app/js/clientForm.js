@@ -89,6 +89,25 @@ function personalAndContactSectionsHTML(client) {
              transfer behavior this field gained). -->
         <div class="field-label-row"><label for="f_intern_name">Person responsible</label><span class="field-required-msg hidden" data-field="intern_name">required</span></div>
         <input id="f_intern_name" value="${escapeHtml(client.intern_name)}" readonly title="Click to transfer ownership" style="background:var(--bg); color:var(--text-muted); cursor:pointer;" />
+        ${
+          client.client_type === "seller"
+            ? `
+        <!-- Seller-only — which buyer this client is currently attributed
+             to for reporting (clients.intended_buyer_id), independent of
+             which dial tab they happened to be created from. Same click-to-
+             open-picker interaction as Person responsible above, but a
+             regular form field (only persisted on Save, not an immediate
+             action) — see wireIntendedBuyerClick/openIntendedBuyerPicker in
+             js/clients.js. client._intendedBuyerName is resolved by the
+             caller before this form is built (a plain FK id on its own
+             has no name to show), defaulting to "None".
+        -->
+        <label for="f_intended_buyer_display">Intended buyer</label>
+        <input id="f_intended_buyer_display" value="${escapeHtml(client._intendedBuyerName || "None")}" readonly title="Click to change" style="background:var(--bg); color:var(--text-muted); cursor:pointer;" />
+        <input type="hidden" id="f_intended_buyer_id" value="${client.intended_buyer_id || ""}" />
+        `
+            : ""
+        }
       </div>
     </div>
 
@@ -226,6 +245,12 @@ export function collectFormData(container, clientType) {
     other_notes: container.querySelector("#f_other_notes").value.trim(),
     intern_name: container.querySelector("#f_intern_name").value.trim(),
   };
+  if (!isBuyer) {
+    // Only rendered for sellers (see personalAndContactSectionsHTML) —
+    // "" means "None" was chosen, same empty-string-means-null convention
+    // as the hidden input's own default value.
+    data.intended_buyer_id = container.querySelector("#f_intended_buyer_id")?.value || null;
+  }
   if (isBuyer) {
     const min = container.querySelector("#f_money_min").value;
     const max = container.querySelector("#f_money_max").value;
@@ -233,7 +258,9 @@ export function collectFormData(container, clientType) {
     data.money_to_spend_max = max === "" ? null : Number(max);
     // Seller-only columns — explicitly nulled rather than left untouched, so
     // switching company-details data never lingers on a client that no
-    // longer has anywhere in the UI to show or edit it.
+    // longer has anywhere in the UI to show or edit it. intended_buyer_id
+    // is seller-only too (see above) for the same reason.
+    data.intended_buyer_id = null;
     data.company_name = null;
     data.industry = null;
     data.annual_revenue = null;
