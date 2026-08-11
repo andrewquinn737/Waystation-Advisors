@@ -22,6 +22,13 @@
 const KEY = "waystation_visible_accounts";
 const INIT_KEY = "waystation_visible_accounts_initialized";
 
+// Virtual group keys for admin-only team grouping (see wireAccountsVisiblePopup's
+// getTeams option) — mirrors js/profile.js's Teams popup grouping (ADMINS_KEY/
+// UNASSIGNED_KEY there) without importing from it, matching this app's existing
+// pattern of small duplication over cross-module imports.
+const ADMIN_GROUP_KEY = "__admins__";
+const UNASSIGNED_GROUP_KEY = "__unassigned__";
+
 // Per-storageKey state, so more than one independent instance can be wired
 // up at once within the same page (e.g. Profile's own global picker AND the
 // Reports popup's separately-scoped one).
@@ -119,10 +126,32 @@ export function isAccountVisible(id, storageKey = KEY) {
 //   storageKey - optional, defaults to the shared app-wide key. Pass a
 //     distinct value to give this instance its own independent selection,
 //     persisted and read separately from every other instance.
-export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, closePageHeaderMenu, myProfileId, getAllAccounts, onChange, escapeHtml, storageKey = KEY }) {
+//   getTeams - optional async () => [{id, name}], sorted in display order.
+//     When provided, the account list is grouped under section labels the
+//     same way the Teams popup groups members — Admins first (accounts with
+//     role "admin"), then each real team in order, then "Unassigned interns"
+//     last for anyone whose team_id is null or points at a deleted team.
+//     Requires each account object from getAllAccounts to also carry `role`/
+//     `team_id` (harmless to include for callers that don't pass getTeams —
+//     they're simply ignored). Omit entirely to keep today's flat list (e.g.
+//     for a team lead, whose own pool is already small enough not to need
+//     grouping).
+export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, closePageHeaderMenu, myProfileId, getAllAccounts, getTeams, onChange, escapeHtml, storageKey = KEY }) {
   const initKey = storageKey === KEY ? INIT_KEY : `${storageKey}_initialized`;
   let allAccounts = [];
   let accountsLoaded = false;
+  let teams = [];
+  let teamsLoaded = false;
+
+  function groupKeyFor(a) {
+    if (a.role === "admin") return ADMIN_GROUP_KEY;
+    if (a.team_id && teams.some((t) => t.id === a.team_id)) return a.team_id;
+    return UNASSIGNED_GROUP_KEY;
+  }
+
+  function buildGroupDefs() {
+    return [{ key: ADMIN_GROUP_KEY, label: "Admins" }, ...teams.map((t) => ({ key: t.id, label: t.name })), { key: UNASSIGNED_GROUP_KEY, label: "Unassigned interns" }];
+  }
 
   // Zero accounts selected would leave every page showing nothing, so the
   // popup can't be closed in that state (see closeBtn handler below) — the
@@ -132,21 +161,35 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     return !s.visibleAccountIds || s.visibleAccountIds.size > 0;
   }
 
+  function accountRowHTML(a) {
+    return `
+          <button type="button" class="accounts-visible-row" data-id="${a.id}">
+            <input type="checkbox" ${isAccountVisible(a.id, storageKey) ? "checked" : ""} tabindex="-1" />
+            ${escapeHtml(a.full_name)}${a.id === myProfileId ? " (you)" : ""}
+          </button>`;
+  }
+
   function render() {
     load(storageKey);
     const s = stateFor(storageKey);
     const allSelected = !s.visibleAccountIds;
-    const rowsHTML = allAccounts.length
-      ? allAccounts
-          .map(
-            (a) => `
-          <button type="button" class="accounts-visible-row" data-id="${a.id}">
-            <input type="checkbox" ${isAccountVisible(a.id, storageKey) ? "checked" : ""} tabindex="-1" />
-            ${escapeHtml(a.full_name)}${a.id === myProfileId ? " (you)" : ""}
-          </button>`
-          )
-          .join("")
-      : `<div class="accounts-visible-empty">No accounts found.</div>`;
+    let rowsHTML;
+    if (!allAccounts.length) {
+      rowsHTML = `<div class="accounts-visible-empty">No accounts found.</div>`;
+    } else if (getTeams && teams.length) {
+      const byGroup = new Map();
+      buildGroupDefs().forEach((g) => byGroup.set(g.key, []));
+      allAccounts.forEach((a) => byGroup.get(groupKeyFor(a)).push(a));
+      rowsHTML = buildGroupDefs()
+        .map((g) => {
+          const members = byGroup.get(g.key) || [];
+          if (!members.length) return "";
+          return `<div class="accounts-visible-group-label">${escapeHtml(g.label)}</div>${members.map(accountRowHTML).join("")}`;
+        })
+        .join("");
+    } else {
+      rowsHTML = allAccounts.map(accountRowHTML).join("");
+    }
 
     const anySelected = hasAnySelected();
     bodyEl.innerHTML = `
@@ -204,6 +247,10 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     if (!accountsLoaded) {
       allAccounts = await getAllAccounts();
       accountsLoaded = true;
+    }
+    if (getTeams && !teamsLoaded) {
+      teams = await getTeams();
+      teamsLoaded = true;
     }
     render();
   });

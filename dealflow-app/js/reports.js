@@ -186,7 +186,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // account and never a peer admin/team-lead sharing their team_id.
   async function getAllAccounts() {
     if (isAdminSync) {
-      const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+      const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
       return error ? [] : data || [];
     }
     if (!profile.team_id) return [profile];
@@ -196,6 +196,14 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       .eq("team_id", profile.team_id)
       .or(`role.eq.intern,id.eq.${profile.id}`)
       .order("full_name", { ascending: true });
+    return error ? [] : data || [];
+  }
+
+  // Admin-only — groups the popup's account list under team section labels
+  // (same real teams shown in the Teams popup) so an admin with many
+  // accounts can tell them apart at a glance. See accountsVisible.js.
+  async function getTeamsForGrouping() {
+    const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
     return error ? [] : data || [];
   }
 
@@ -740,6 +748,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     closeBtn: els.reportsAccountsVisibleClose,
     myProfileId: profile.id,
     getAllAccounts,
+    getTeams: isAdminSync ? getTeamsForGrouping : undefined,
     storageKey: REPORTS_ACCOUNTS_KEY,
     onChange: () => {
       selectedBuyerIds = null; // available buyers depend on which accounts are selected

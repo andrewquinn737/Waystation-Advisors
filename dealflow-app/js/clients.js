@@ -695,7 +695,7 @@ if (isAdmin || isTeamLead) {
       // otherwise a team lead's session could never fetch a teammate's
       // clients in the first place, filter or no filter.
       if (isAdmin) {
-        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+        const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
       if (!profile.team_id) return [profile];
@@ -707,6 +707,17 @@ if (isAdmin || isTeamLead) {
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
+    // Admin-only — groups the popup's account list under team section
+    // labels (same real teams shown in the Teams popup) so an admin with
+    // many accounts can tell them apart at a glance, rather than one long
+    // alphabetical list. Team leads' own pool is already just themselves +
+    // their interns, so grouping isn't offered there.
+    getTeams: isAdmin
+      ? async () => {
+          const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
+          return error ? [] : data || [];
+        }
+      : undefined,
     onChange: renderTable,
     escapeHtml,
   });

@@ -172,9 +172,11 @@ const els = {
   dialTabArchiveBtn: document.getElementById("dialTabArchiveBtn"),
   dialTabTransferBtn: document.getElementById("dialTabTransferBtn"),
   dialTabTransferMenu: document.getElementById("dialTabTransferMenu"),
+  dialTabTransferBackBtn: document.getElementById("dialTabTransferBackBtn"),
   dialTabTransferList: document.getElementById("dialTabTransferList"),
   dialTabClientBtn: document.getElementById("dialTabClientBtn"),
   dialTabClientMenu: document.getElementById("dialTabClientMenu"),
+  dialTabClientBackBtn: document.getElementById("dialTabClientBackBtn"),
   dialTabClientList: document.getElementById("dialTabClientList"),
   dialTabDeleteBtn: document.getElementById("dialTabDeleteBtn"),
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
@@ -262,7 +264,7 @@ function openConfirmDelete(onConfirm) {
 // used by the tab-delete flow to restore the archive/delete menu's visibility
 // after a Cancel. It deliberately does NOT run on "Yes": that callback used to
 // fire unconditionally in cleanup(), which re-displayed the archive/delete
-// menu (via updateArchiveMenuPosition()) the instant Delete was confirmed —
+// menu (via updateArchiveMenuVisibility()) the instant Delete was confirmed —
 // synchronously, before the async delete request even resolved — making it
 // look like clicking Delete did nothing (the tab really was being deleted,
 // just behind a popup that had incorrectly reappeared).
@@ -748,47 +750,26 @@ function renderTabs() {
       .join("");
     wireTabInteractions();
   }
-  updateArchiveMenuPosition();
+  updateArchiveMenuVisibility();
   loadDials();
 }
 
-// The Archive/Unarchive popup lives outside .dials-tabbar (see dials.html)
-// and is positioned via JS as position:fixed, right under whichever tab is
-// currently active — see the big comment above wireTabInteractions() for why
-// it can't just be absolutely-positioned inside the tab itself. Available on
-// both mobile (tap the already-active tab) and desktop (click it) — see the
-// tab click handler in wireTabInteractions(), which no longer gates this
-// behind isMobileViewport() now that admin-only Transfer needs it on desktop
-// too.
-function updateArchiveMenuPosition() {
-  if (!archiveMenuTabId || archiveMenuTabId !== currentListId) {
+// The tab options menu (#dialTabArchiveMenu, plus its Transfer/Client
+// drill-downs) reuses .page-header-menu's own in-flow styling and DOM slot
+// (between .dials-tabbar and #dialsTableWrap in dials.html) rather than
+// floating as a popup anchored to the tapped tab — so showing/hiding it is
+// just a class toggle, no position math needed. Available on both mobile
+// (tap the already-active tab) and desktop (click it) — see the tab click
+// handler in wireTabInteractions().
+function updateArchiveMenuVisibility() {
+  const shows = archiveMenuTabId && archiveMenuTabId === currentListId && els.dialTabs.querySelector(".dial-tab.active");
+  if (!shows) {
     els.dialTabArchiveMenu.classList.add("hidden");
     els.dialTabTransferMenu.classList.add("hidden");
     els.dialTabClientMenu.classList.add("hidden");
     return;
   }
-  const activeBtn = els.dialTabs.querySelector(".dial-tab.active");
-  if (!activeBtn) {
-    els.dialTabArchiveMenu.classList.add("hidden");
-    els.dialTabTransferMenu.classList.add("hidden");
-    els.dialTabClientMenu.classList.add("hidden");
-    return;
-  }
-  const rect = activeBtn.getBoundingClientRect();
   els.dialTabArchiveBtn.textContent = currentStatus === "current" ? "Archive" : "Unarchive";
-  // Recomputed fresh from the tab's CURRENT on-screen position every time
-  // this runs (getBoundingClientRect(), not a cached value) — so it's
-  // always directly below whichever tab is active right now, including
-  // after the horizontally-scrollable tab bar has been scrolled (see the
-  // scroll listener below, which re-runs this while the menu is open).
-  // Clamped horizontally so the popup always stays fully on screen even
-  // when its tab is scrolled partway out of view at either edge of
-  // .dials-tabbar — once the tab scrolls fully back into view, the clamp
-  // is a no-op and it lands exactly below the tab as usual.
-  const menuWidth = els.dialTabArchiveMenu.offsetWidth || 160;
-  const left = Math.min(Math.max(8, rect.left), window.innerWidth - menuWidth - 8);
-  els.dialTabArchiveMenu.style.left = `${left}px`;
-  els.dialTabArchiveMenu.style.top = `${rect.bottom + 6}px`;
   els.dialTabArchiveMenu.classList.remove("hidden");
 }
 
@@ -797,24 +778,8 @@ function closeArchiveMenu() {
   archiveMenuTabId = null;
   els.dialTabTransferMenu.classList.add("hidden");
   els.dialTabClientMenu.classList.add("hidden");
-  updateArchiveMenuPosition();
+  updateArchiveMenuVisibility();
 }
-
-// The mobile tab bar (.dials-tabbar) scrolls horizontally on its own — if
-// the Archive/Rename/Delete popup is open and the bar gets scrolled (its
-// active tab sliding to a new on-screen position), re-run the same
-// position logic so the popup keeps tracking the tab's real position
-// instead of staying wherever it was when it first opened.
-els.dialTabs.parentElement.addEventListener(
-  "scroll",
-  () => {
-    if (!archiveMenuTabId) return;
-    updateArchiveMenuPosition();
-    if (!els.dialTabTransferMenu.classList.contains("hidden")) positionTransferMenu();
-    if (!els.dialTabClientMenu.classList.contains("hidden")) positionClientMenu();
-  },
-  { passive: true }
-);
 
 // Closes the Archive/Delete popup as soon as anything ELSE is interacted
 // with — a dial row, the settings icon, the page-header triangle, the
@@ -874,7 +839,7 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
       currentListId = null;
       await loadLists();
     },
-    () => updateArchiveMenuPosition()
+    () => updateArchiveMenuVisibility()
   );
 });
 
@@ -887,24 +852,13 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
 // both tables' select policies scope visibility to created_by = auth.uid().
 // ---------------------------------------------------------------------------
 
-// Positioned to the right of the archive/delete popup (same escape-the-clip
-// fixed-position pattern as everything else here), flipping to the left side
-// if it would run off the right edge of the screen.
-function positionTransferMenu() {
-  const rect = els.dialTabArchiveMenu.getBoundingClientRect();
-  const menuWidth = els.dialTabTransferMenu.offsetWidth || 190;
-  let left = rect.right + 8;
-  if (left + menuWidth > window.innerWidth) {
-    left = rect.left - menuWidth - 8;
-  }
-  els.dialTabTransferMenu.style.left = `${Math.max(8, left)}px`;
-  els.dialTabTransferMenu.style.top = `${rect.top}px`;
-}
-
+// Drills down from #dialTabArchiveMenu into the same in-flow slot (see
+// dials.html) rather than opening a separate floating popup beside it —
+// #dialTabTransferBackBtn (wired below) returns to it.
 async function openTransferMenu() {
   els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">Loading…</div>`;
+  els.dialTabArchiveMenu.classList.add("hidden");
   els.dialTabTransferMenu.classList.remove("hidden");
-  positionTransferMenu();
 
   // Normally every OTHER account in the company (or, for a team lead, every
   // admin plus every intern on their own team — see transfer_dial_list() in
@@ -942,7 +896,6 @@ async function openTransferMenu() {
       btn.addEventListener("click", () => completeTransfer(btn.dataset.id));
     });
   }
-  positionTransferMenu(); // re-measure now that real content has replaced "Loading…"
 }
 
 async function completeTransfer(targetId) {
@@ -982,32 +935,27 @@ els.dialTabTransferBtn.addEventListener("click", (e) => {
   openTransferMenu();
 });
 
+// Returns to #dialTabArchiveMenu without closing the whole options menu or
+// forgetting which tab it's for (archiveMenuTabId is untouched).
+els.dialTabTransferBackBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  els.dialTabTransferMenu.classList.add("hidden");
+  updateArchiveMenuVisibility();
+});
+
 // ---------------------------------------------------------------------------
 // Admin/team-lead "Client" — reassigns which buyer an EXISTING tab (and every
 // dial in it, since attribution flows entirely through dial_lists.buyer_id)
 // is attached to. The tab-creation picker (see loadContractSignedBuyers()/
 // populateBuyerSelect() above) only ever gets one shot at this; this is the
-// "fix it later" path, reusing that exact same eligible-buyer pool. Same
-// escape-the-clip fixed-position pattern as Transfer, positioned identically
-// (to the right of the archive/delete popup, flipping left if it would run
-// off the right edge).
+// "fix it later" path, reusing that exact same eligible-buyer pool.
 // ---------------------------------------------------------------------------
 
-function positionClientMenu() {
-  const rect = els.dialTabArchiveMenu.getBoundingClientRect();
-  const menuWidth = els.dialTabClientMenu.offsetWidth || 190;
-  let left = rect.right + 8;
-  if (left + menuWidth > window.innerWidth) {
-    left = rect.left - menuWidth - 8;
-  }
-  els.dialTabClientMenu.style.left = `${Math.max(8, left)}px`;
-  els.dialTabClientMenu.style.top = `${rect.top}px`;
-}
-
+// Same drill-down pattern as openTransferMenu() above.
 async function openClientMenu() {
   els.dialTabClientList.innerHTML = `<div class="dial-tab-transfer-empty">Loading…</div>`;
+  els.dialTabArchiveMenu.classList.add("hidden");
   els.dialTabClientMenu.classList.remove("hidden");
-  positionClientMenu();
 
   const list = filteredLists().find((l) => l.id === archiveMenuTabId);
   const buyers = await loadContractSignedBuyers();
@@ -1022,7 +970,6 @@ async function openClientMenu() {
   els.dialTabClientList.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
     btn.addEventListener("click", () => completeClientAssign(btn.dataset.id || null));
   });
-  positionClientMenu(); // re-measure now that real content has replaced "Loading…"
 }
 
 async function completeClientAssign(buyerId) {
@@ -1049,6 +996,12 @@ els.dialTabClientBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   if (!archiveMenuTabId) return;
   openClientMenu();
+});
+
+els.dialTabClientBackBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  els.dialTabClientMenu.classList.add("hidden");
+  updateArchiveMenuVisibility();
 });
 
 // ---------------------------------------------------------------------------
@@ -1141,22 +1094,15 @@ function wireTabInteractions() {
         completeMoveToList(id);
         return;
       }
-      // Tap/click the already-active tab -> reveal the Archive/Unarchive
-      // (+ admin-only Transfer) / Delete popup below it. Used to be
-      // mobile-only (isMobileViewport()) since desktop had no use for it, but
-      // admin-only Transfer needs to be reachable on desktop too now.
+      // Tap/click the already-active tab -> reveal the Rename/Archive-
+      // Unarchive (+ admin-only Transfer/Client) / Delete options menu,
+      // in-flow between the tab bar and the dials list (see
+      // updateArchiveMenuVisibility()). Used to be mobile-only
+      // (isMobileViewport()) since desktop had no use for it, but
+      // admin-only Transfer/Client need to be reachable on desktop too now.
       if (id === currentListId) {
         archiveMenuTabId = archiveMenuTabId === id ? null : id;
         renderTabs();
-        // If the page-header triangle/settings dropdown was open, this same
-        // click also closes it (see pageHeaderMenu.js's outside-click
-        // handler) — but that dropdown lives in normal document flow (see
-        // .page-header-menu in style.css, no position:absolute/fixed), so
-        // closing it shifts the tab bar upward. renderTabs() just positioned
-        // this popup based on the tab's pre-shift location, so re-run once
-        // more on the next frame, after that reflow has actually happened,
-        // to avoid it landing well below the tab instead of right under it.
-        requestAnimationFrame(updateArchiveMenuPosition);
         return;
       }
       currentListId = id;
@@ -2637,7 +2583,7 @@ if (isAdmin || isTeamLead) {
       // supabase/schema.sql), otherwise a team lead's session could never
       // fetch a teammate's tabs/dials in the first place, filter or no filter.
       if (isAdmin) {
-        const { data, error } = await supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+        const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
       if (!profile.team_id) return [profile];
@@ -2649,6 +2595,17 @@ if (isAdmin || isTeamLead) {
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
+    // Admin-only — groups the popup's account list under team section
+    // labels (same real teams shown in the Teams popup) so an admin with
+    // many accounts can tell them apart at a glance, rather than one long
+    // alphabetical list. Team leads' own pool is already just themselves +
+    // their interns, so grouping isn't offered there.
+    getTeams: isAdmin
+      ? async () => {
+          const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
+          return error ? [] : data || [];
+        }
+      : undefined,
     onChange: renderTabs,
     escapeHtml,
   });

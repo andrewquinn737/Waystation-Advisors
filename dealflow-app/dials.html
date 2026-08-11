@@ -133,42 +133,41 @@
       <button type="button" class="dial-tab-add hidden" id="addTabBtn" title="New list">+</button>
     </div>
 
-    <!-- Mobile-only: the "tap the already-selected tab" Archive/Unarchive
-         popup. Rendered as position:fixed and positioned via JS (see
-         js/dials.js) rather than nested inside .dials-tabbar, since that bar
-         scrolls horizontally (overflow-x:auto), which — per the CSS spec —
-         forces its overflow-y to auto too and would clip a popup nested
-         inside it. -->
-    <div class="dial-tab-archive-menu hidden" id="dialTabArchiveMenu">
-      <button type="button" class="dial-tab-archive-btn" id="dialTabRenameBtn">Rename</button>
-      <button type="button" class="dial-tab-archive-btn" id="dialTabArchiveBtn"></button>
+    <!-- Options revealed by tapping/clicking the already-active tab — same
+         shell/style as the page-header triangle's dropdown above
+         (.page-header-menu), appearing in-flow between the tab bar and the
+         dials list rather than as a small popup anchored to the tapped tab.
+         See updateArchiveMenuVisibility() in js/dials.js. -->
+    <div class="page-header-menu hidden" id="dialTabArchiveMenu">
+      <button type="button" class="page-header-menu-item" id="dialTabRenameBtn">Rename</button>
+      <button type="button" class="page-header-menu-item" id="dialTabArchiveBtn"></button>
       <!-- Admin/team-lead only — see js/dials.js's `if (isAdmin || isTeamLead) els.dialTabTransferBtn...`. -->
-      <button type="button" class="dial-tab-transfer-btn hidden" id="dialTabTransferBtn">Transfer</button>
+      <button type="button" class="page-header-menu-item hidden" id="dialTabTransferBtn">Transfer</button>
       <!-- Admin/team-lead only, same gate as Transfer above — reassigns
            which buyer this tab (and every dial in it, via
            dial_lists.buyer_id) is attached to. See openClientMenu() in
            js/dials.js. -->
-      <button type="button" class="dial-tab-transfer-btn hidden" id="dialTabClientBtn">Client</button>
-      <button type="button" class="dial-tab-delete-btn" id="dialTabDeleteBtn">Delete</button>
+      <button type="button" class="page-header-menu-item hidden" id="dialTabClientBtn">Client</button>
+      <button type="button" class="page-header-menu-item danger" id="dialTabDeleteBtn">Delete</button>
     </div>
 
-    <!-- Admin/team-lead "Transfer" target list — lists every other account so the
-         tab (and every dial in it) can be reassigned to them. Positioned to
-         the right of #dialTabArchiveMenu via JS (see openTransferMenu() in
-         js/dials.js), same fixed-position escape-the-scroll-container pattern
-         used for that menu. -->
-    <div class="dial-tab-transfer-menu hidden" id="dialTabTransferMenu">
-      <div class="dial-tab-transfer-title">Transfer to...</div>
+    <!-- Admin/team-lead "Transfer" target list — drills down from
+         #dialTabArchiveMenu above into the same in-flow slot (only one of
+         the three menus here is ever unhidden at once — see
+         openTransferMenu() in js/dials.js) rather than opening a separate
+         floating popup beside it. The Back row returns to the options above. -->
+    <div class="page-header-menu hidden" id="dialTabTransferMenu">
+      <button type="button" class="page-header-menu-item dial-tab-options-back" id="dialTabTransferBackBtn">&larr; Transfer to...</button>
       <div class="dial-tab-transfer-list" id="dialTabTransferList"></div>
     </div>
 
-    <!-- "Client" buyer-reassignment target list — same shell/positioning
-         pattern as #dialTabTransferMenu above (see openClientMenu() in
-         js/dials.js), listing every contract-signed buyer this account can
-         assign tabs to (same pool as tab creation's picker, see
-         loadContractSignedBuyers()) plus "Not assigned to buyer". -->
-    <div class="dial-tab-transfer-menu hidden" id="dialTabClientMenu">
-      <div class="dial-tab-transfer-title">Attach to buyer...</div>
+    <!-- "Client" buyer-reassignment target list — same drill-down pattern as
+         #dialTabTransferMenu above (see openClientMenu() in js/dials.js),
+         listing every contract-signed buyer this account can assign tabs to
+         (same pool as tab creation's picker, see loadContractSignedBuyers())
+         plus "Not assigned to buyer". -->
+    <div class="page-header-menu hidden" id="dialTabClientMenu">
+      <button type="button" class="page-header-menu-item dial-tab-options-back" id="dialTabClientBackBtn">&larr; Attach to buyer...</button>
       <div class="dial-tab-transfer-list" id="dialTabClientList"></div>
     </div>
 
