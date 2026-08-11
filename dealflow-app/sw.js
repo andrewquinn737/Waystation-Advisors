@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v9";
+const CACHE = "waystation-shell-v10";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/finance.html", "/css/style.css",

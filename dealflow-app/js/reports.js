@@ -80,13 +80,13 @@ const CHART_METRIC_LABELS = [
 // The "Outreach for week/month of ___" bar chart's own bars — a distinct,
 // shorter list from CHART_METRIC_LABELS above: no "Approved targets" (it's
 // already in the Total progress summary right next to this chart, so
-// repeating it here was redundant), and "Attempted contacts" moves to the
-// leftmost bar (renamed "Total number of contacts") since it's the
-// broadest, most natural starting point for the eye now that Approved
-// targets is gone. Key matches get_buyer_outreach_chart()'s columns.
+// repeating it here was redundant). Targets contacted leads (leftmost),
+// followed by Total number of contacts (renamed from Attempted contacts),
+// then the 5 category breakdown bars. Key matches
+// get_buyer_outreach_chart()'s columns.
 const GRAPH_METRIC_LABELS = [
-  ["attempted_contacts", "Total number of contacts"],
   ["targets_contacted", "Targets contacted"],
+  ["attempted_contacts", "Total number of contacts"],
   ["intro_call_scheduled", "Intro call scheduled"],
   ["callback_interested", "Callback, interested"],
   ["no_response", "No response, try again"],
