@@ -124,8 +124,6 @@ const els = {
   reportsSelectBuyerPopup: document.getElementById("reportsSelectBuyerPopup"),
   reportsSelectBuyerBody: document.getElementById("reportsSelectBuyerBody"),
   reportsSelectBuyerClose: document.getElementById("reportsSelectBuyerClose"),
-  reportsShowIndividualsBtn: document.getElementById("reportsShowIndividualsBtn"),
-  reportsShowIndividualsLabel: document.getElementById("reportsShowIndividualsLabel"),
   reportsError: document.getElementById("reportsError"),
   reportsTableWrap: document.getElementById("reportsTableWrap"),
   reportsBuyerCentricWrap: document.getElementById("reportsBuyerCentricWrap"),

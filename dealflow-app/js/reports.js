@@ -229,7 +229,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   let periodType = "week"; // "week" | "month"
   let selectedPeriodStart = mondayOf(new Date());
   let selectedBuyerIds = null; // Set of buyer client ids (null member = "Not attached to buyer"), or null = all
-  let showIndividuals = true;
   let availableBuyers = []; // [{id, name}] — real buyer clients only; "Not attached to buyer" is handled separately, not part of this list
   let allAccountsCache = null;
   let lastTableData = null; // { columns, rows } — plain arrays, for PDF export (call-by-account table only — never in the PDF, see renderOptionsMenu)
@@ -478,7 +477,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   ];
 
   // Outreach report only, and only once exactly one buyer is selected — see
-  // fetchBuyerCentricData above. Never affected by showIndividuals.
+  // fetchBuyerCentricData above.
   function renderBuyerCentricSection() {
     els.reportsBuyerCentricWrap.classList.toggle("hidden", !buyerCentric);
     if (!buyerCentric) {
@@ -549,11 +548,9 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const columns = ["Account", callsLabel, "Owners talked to", "Owners agreed to intro call", "Intro calls completed (confirmed leads)"];
     const dataRows = rows.map((r) => [r.name, r.callsMade, r.ownersTalked, r.ownersAgreed, r.introCompleted]);
     const totalsRow = ["Totals", totals.callsMade, totals.ownersTalked, totals.ownersAgreed, totals.introCompleted];
-    lastTableData = { columns, rows: showIndividuals ? [totalsRow, ...dataRows] : [totalsRow] };
+    lastTableData = { columns, rows: [totalsRow, ...dataRows] };
 
-    const bodyHTML = showIndividuals
-      ? dataRows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`).join("")
-      : "";
+    const bodyHTML = dataRows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`).join("");
     els.reportsTableWrap.innerHTML = `
       <table>
         <thead><tr>${columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>
@@ -585,7 +582,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   function renderOptionsMenu() {
     els.reportsRangeBtn.classList.toggle("hidden", reportType !== "outreach");
     els.reportsSelectBuyerBtn.classList.toggle("hidden", reportType !== "outreach");
-    els.reportsShowIndividualsBtn.classList.toggle("hidden", reportType !== "outreach");
     // Team report has no PDF export at all, and even on the Outreach report
     // the PDF is entirely buyer-centric now (see buildReportPdf) — it needs
     // exactly one buyer selected to have anything to build, so both buttons
@@ -598,7 +594,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const rangeLabel = reportType === "team" ? "week" : periodType;
     els.reportsRangeBtn.querySelector(".menu-item-label").textContent = `Range: ${periodType === "month" ? "Month" : "Week"}`;
     els.reportsSelectPeriodLabel.textContent = `Select ${rangeLabel}`;
-    els.reportsShowIndividualsLabel.textContent = `Show individuals: ${showIndividuals ? "On" : "Off"}`;
   }
 
   function renderSelectPeriodPopup() {
@@ -753,12 +748,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     refresh();
   });
 
-  els.reportsShowIndividualsBtn.addEventListener("click", () => {
-    showIndividuals = !showIndividuals;
-    els.reportsShowIndividualsLabel.textContent = `Show individuals: ${showIndividuals ? "On" : "Off"}`;
-    refresh();
-  });
-
   els.reportsSelectBuyerBtn.addEventListener("click", () => {
     els.reportsSelectBuyerPopup.classList.remove("hidden");
     renderSelectBuyerPopup();
@@ -816,12 +805,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   const PDF_GOLD = [200, 164, 90];
   const PDF_BORDER = [234, 227, 211];
   const PDF_TEXT_GRAY = [75, 85, 99];
-
-  // Reserved on every doc.autoTable() call below so a table can never be
-  // drawn into the footer mark's own space (see drawFooterMark) — jspdf-
-  // autotable's own default bottom margin (20) leaves too little clearance
-  // once the mark's actual footprint is accounted for.
-  const AUTOTABLE_BOTTOM_MARGIN = 24;
 
   // Columns whose PDF text should only have emoji/control characters
   // stripped, not title-cased — a URL, free-text call note, or two-letter
@@ -891,29 +874,31 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // user sent as a reference image — a post with an arm extending to one
   // side, the gold sign hanging just below the arm's far end on two short
   // chain lines (not fused directly to the arm, per the reference), navy
-  // serif caps centered on the sign. Drawn on every page after all content
-  // is added (doc.setPage() loop so it lands on pages created via addPage()
-  // too, not just the first). Every doc.autoTable() call below reserves a
-  // matching bottom margin (see AUTOTABLE_BOTTOM_MARGIN) so no table can
-  // ever be drawn into the space this occupies.
-  function drawFooterMark(doc) {
+  // serif caps centered on the sign. Anchored in the top-right corner (was
+  // bottom-right) — every heading on every page is drawn at x=14 (the left
+  // margin), and this whole mark sits out past x=176, so there's no x-range
+  // where the two could ever collide regardless of what page it's on; its
+  // own vertical footprint (roughly y=6 to y=21) sits well above where any
+  // autoTable body content starts (the earliest is startY=36 on page 1).
+  // Drawn on every page after all content is added (doc.setPage() loop so
+  // it lands on pages created via addPage() too, not just the first).
+  function drawLogoMark(doc) {
     const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
     const pageCount = doc.internal.getNumberOfPages();
 
-    const scale = 0.97; // ~3% smaller overall than the previous size
+    const scale = 0.97; // ~3% smaller overall than the original size
     const postHeight = 13 * scale;
     const postOverhang = 2.5 * scale; // post pokes up past where the arm meets it
     const armOverhang = 3 * scale; // arm pokes out to the left of the post too, not just toward the sign
-    const gapPostToSign = 5 * scale; // clearance between the post and the sign's left edge (was nearly touching)
+    const gapPostToSign = 5 * scale; // clearance between the post and the sign's left edge
     const signW = 15.5 * scale;
     const signH = 7 * scale;
     const chainGap = 2.5 * scale;
 
     const postX = pageWidth - 34;
-    const groundY = pageHeight - 6;
-    const armY = groundY - postHeight; // the y level the arm/crossbar sits at
-    const postTopY = armY - postOverhang;
+    const postTopY = 6; // top margin
+    const armY = postTopY + postOverhang; // the y level the arm/crossbar sits at
+    const postBottomY = armY + postHeight;
     const armStartX = postX - armOverhang;
     const signX = postX + gapPostToSign;
     const armEndX = signX + signW;
@@ -923,8 +908,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       doc.setPage(p);
       doc.setDrawColor(...PDF_NAVY);
       doc.setLineWidth(0.5);
-      doc.line(postX, groundY, postX, postTopY); // post, extending slightly above the arm
-      doc.line(postX - 1.5, groundY, postX + 1.5, groundY); // small foot, planted look
+      doc.line(postX, postBottomY, postX, postTopY); // post, extending slightly above the arm
+      doc.line(postX - 1.5, postBottomY, postX + 1.5, postBottomY); // small end cap
       doc.line(armStartX, armY, armEndX, armY); // arm, extending slightly past the post on the left
       doc.setLineWidth(0.3);
       doc.line(signX + 2, armY, signX + 2, signY); // chain, left
@@ -986,7 +971,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       styles: { font: "helvetica", fontSize: 9, cellPadding: 3, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY },
       headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold" },
       columnStyles: { 1: { halign: "right" } },
-      margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
     });
 
     const chartY = doc.lastAutoTable.finalY + 14;
@@ -1019,7 +1003,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       didParseCell: (data) => {
         if (data.section === "body" && data.row.index === 0) data.cell.styles.fontStyle = "bold";
       },
-      margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
     });
     // Every business-owner table (starting with "Closed"/"Leads approved by
     // client"/etc.) starts fresh on its own page, never sharing page 2 with
@@ -1069,7 +1052,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
         headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
         columnStyles,
-        margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
       });
       y = doc.lastAutoTable.finalY + 12;
     };
@@ -1081,7 +1063,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       addOwnerPdfTable(`${title} for ${periodLabel}`, contactedOwners.filter((r) => r.category === category), SET2_COLUMNS);
     });
 
-    drawFooterMark(doc);
+    drawLogoMark(doc);
 
     const filename = `Outreach_report_${buyerName.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
     return { doc, filename };
