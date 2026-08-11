@@ -394,18 +394,29 @@ tr:last-child td { border-bottom: none; }
 /* Outreach report's summary row (see js/reports.js) — the sum of every
    account row below it in that column. */
 .reports-totals-row td { font-weight: 700; background: var(--bg); }
-/* "Contacted business owners" static list under the Outreach report (see
-   renderContactedDialsSection in js/reports.js) — reuses the plain table/
-   th/td styling above, just with its own heading + spacing since it sits
-   below the report's own numbers table. The list itself scrolls inside a
-   fixed-height box (.reports-contacted-dials-scroll) rather than growing
-   the whole page — a long list would otherwise push Create/Send PDF far
-   down the modal. The table's own sticky <thead> stays pinned to the top
-   of that box while scrolling. This box only applies on-screen; the PDF
-   export includes every row as a full, unboxed table (see buildReportPdf
-   in js/reports.js). */
-#reportsContactedDialsWrap { margin-top: 20px; }
-#reportsContactedDialsWrap h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+/* Buyer-centric section under the Outreach report (see
+   renderBuyerCentricSection in js/reports.js) — reuses the plain table/th/td
+   styling above, just with its own headings + spacing since it sits below
+   the report's own "call by account" table. Each business-owner table
+   scrolls inside a fixed-height box (.reports-contacted-dials-scroll) rather
+   than growing the whole page — a long list would otherwise push Create/
+   Send PDF far down the modal. The table's own sticky <thead> stays pinned
+   to the top of that box while scrolling. This box only applies on-screen;
+   the PDF export includes every row as a full, unboxed table (see
+   buildReportPdf in js/reports.js). */
+#reportsBuyerCentricWrap { margin-top: 20px; }
+#reportsBuyerCentricWrap h3 { font-size: 14px; font-weight: 600; margin: 20px 0 8px; }
+#reportsBuyerCentricWrap > h3:first-child,
+#reportsBuyerCentricWrap > .reports-buyer-centric-grid { margin-top: 0; }
+/* Summary table + bar chart side by side on wide screens, stacked on
+   mobile — the two are unrelated widths (a fixed 2-column table vs. an SVG
+   that wants to stay wide), so a plain grid with a min column width reads
+   better than trying to force them into equal halves. */
+.reports-buyer-centric-grid { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 20px; align-items: start; }
+.reports-buyer-centric-grid h3 { margin-top: 0; }
+@media (max-width: 640px) {
+  .reports-buyer-centric-grid { grid-template-columns: 1fr; }
+}
 .reports-contacted-dials-scroll { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .reports-contacted-dials-scroll table { border: none; border-radius: 0; }
 .reports-contacted-dials-scroll thead th { position: sticky; top: 0; z-index: 1; }

@@ -128,7 +128,7 @@ const els = {
   reportsShowIndividualsLabel: document.getElementById("reportsShowIndividualsLabel"),
   reportsError: document.getElementById("reportsError"),
   reportsTableWrap: document.getElementById("reportsTableWrap"),
-  reportsContactedDialsWrap: document.getElementById("reportsContactedDialsWrap"),
+  reportsBuyerCentricWrap: document.getElementById("reportsBuyerCentricWrap"),
   reportsCreatePdfBtn: document.getElementById("reportsCreatePdfBtn"),
   reportsSendPdfBtn: document.getElementById("reportsSendPdfBtn"),
   addAccountModal: document.getElementById("addAccountModal"),

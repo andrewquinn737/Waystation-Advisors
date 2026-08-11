@@ -6,22 +6,27 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 // ---------------------------------------------------------------------------
 // Reports popup (team lead/admin-only) — "View Reports" on Profile.
 //
-// Outreach report: every seller-side dial tab is assigned to a specific
-// buyer client (dial_lists.buyer_id — see the required "Buyer" picker on
-// tab creation in js/dials.js), so "Select buyer" is really a buyer-scoped
-// view of the same tab-level data. Calls made, Owners talked to, Owners
-// agreed to intro call, and Intro calls completed all come from
-// report_dial_rollups (keyed by list_id, with buyer_id captured alongside
-// it) and respond to the buyer filter — Owners agreed is derived from the
-// same call_status_changes rows as Owners talked (a call whose category
-// landed on "Intro call scheduled"), not from intro_call_log like it used
-// to be, specifically so it has a real tab/buyer relationship. This table
-// is pre-computed every 15 min by a scheduled Postgres function
-// (compute_report_rollups()) and pruned to the last 12 weeks/months by
-// another (prune_report_data()) — this module only ever reads it, never
-// computes numbers live, since dial_lists rows are hard-deleted and
-// dials.contact_status/called_today_date are mutable, so a live query
-// couldn't reconstruct a past period's numbers reliably.
+// Outreach report has two independent sections stacked vertically:
+//
+// 1. "Call by account" — the original per-account KPI table (Calls made,
+//    Owners talked to, Owners agreed, Intro calls completed), read from
+//    report_dial_rollups (keyed by list_id, with buyer_id alongside it —
+//    see the required "Buyer" picker on tab creation in js/dials.js) and
+//    pre-computed every 15 min by compute_report_rollups(), pruned to the
+//    last 12 weeks/months by prune_report_data(). On-screen only — this
+//    section is deliberately excluded from the PDF (see renderOptionsMenu).
+//
+// 2. The buyer-centric section — a lifetime summary table, a period bar
+//    chart, a lifetime per-tab breakdown, and deduped business-owner
+//    tables, all scoped to whichever ONE buyer is currently selected (it's
+//    hidden entirely, and the PDF buttons disappear, unless exactly one
+//    buyer is picked). Backed by a handful of buyer-scoped RPCs
+//    (get_buyer_progress_summary/get_buyer_outreach_chart/
+//    get_buyer_outreach_since_signed/get_buyer_milestone_clients/
+//    get_buyer_contacted_owners — see supabase/schema.sql) that read raw
+//    tables directly rather than report_dial_rollups, since that table is
+//    pruned and can't answer anything "lifetime"/"since signed". This is
+//    the section (and the ONLY thing) the PDF export contains.
 //
 // Team report: reads straight from survey_responses (no rollup needed — it
 // already has exactly the right grain, one row per intern per week), pruned
@@ -44,32 +49,59 @@ const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible";
 // same "Not attached to buyer" bucket; there's no need to distinguish them.
 const UNATTACHED_BUYER_LABEL = "Not attached to buyer";
 
-// Mirrors dials.js's CONTACT_STATUSES labels (kept as a separate plain map
-// here since this module has no need for the color/dot info that lives
-// alongside them there — call_status_changes.contact_status_at_call is just
-// a frozen snapshot of whichever of these values was current at call time).
-const CONTACT_STATUS_LABELS = {
-  uncontacted: "Uncontacted",
-  unable_to_contact: "Unable to contact",
-  not_interested: "Not interested",
-  no_response: "No response, try again",
-  callback_interested: "Callback, interested",
-  intro_call_scheduled: "Intro call scheduled",
-};
+// Total progress summary's rows, in display order — key matches
+// get_buyer_progress_summary()'s `metric` column exactly.
+const SUMMARY_METRIC_LABELS = [
+  ["approved_targets", "Approved targets"],
+  ["owners_talked", "Owners talked to"],
+  ["owners_agreed", "Owners agreed to intro call"],
+  ["intro_calls_completed", "Intro calls completed (confirmed leads)"],
+  ["leads_approved_by_client", "Leads approved by client"],
+  ["client_calls_completed", "Client calls completed"],
+  ["nda_signed", "NDA signed"],
+  ["loi_sent", "LOI sent"],
+  ["loi_executed", "LOI executed"],
+  ["closed", "Closed"],
+];
 
-// Same light-mode background shades as CONTACT_STATUSES' `bg` in
-// js/dials.js (css/style.css's --status-*-bg custom properties) — PDFs have
-// no concept of a CSS variable or a dark-mode toggle, so these are the
-// literal light-mode hex values, used to tint each "Contacted business
-// owners" PDF row by its category.
-const CONTACT_STATUS_PDF_COLORS = {
-  uncontacted: "#ffffff",
-  unable_to_contact: "#eef0f2",
-  not_interested: "#fdecec",
-  no_response: "#ffeede",
-  callback_interested: "#fff6e0",
-  intro_call_scheduled: "#e7f8ee",
-};
+// Outreach bar chart / "Total outreach since contract signed" columns, in
+// display order — key matches get_buyer_outreach_chart()/
+// get_buyer_outreach_since_signed()'s columns exactly.
+const CHART_METRIC_LABELS = [
+  ["approved_targets", "Approved targets"],
+  ["targets_contacted", "Targets contacted"],
+  ["attempted_contacts", "Attempted contacts"],
+  ["intro_call_scheduled", "Intro call scheduled"],
+  ["callback_interested", "Callback, interested"],
+  ["no_response", "No response, try again"],
+  ["unable_to_contact", "Unable to contact"],
+  ["not_interested", "Not interested"],
+];
+
+// Set 1 of the deduped business-owner tables (lifetime, from
+// get_buyer_milestone_clients()) — key matches that RPC's `milestone_type`
+// (a client_events.event_type value) exactly. Display order per spec.
+const MILESTONE_TABLE_TITLES = [
+  ["close", "Closed"],
+  ["due_diligence", "LOI executed"],
+  ["loi", "LOI sent"],
+  ["nda_financials", "NDA signed"],
+  ["client_meeting", "Client calls completed"],
+  ["client_approval", "Leads approved by client"],
+  ["intro_call", "Intro calls completed (confirmed leads)"],
+];
+
+// Set 2 of the deduped business-owner tables (period-scoped, from
+// get_buyer_contacted_owners()) — key matches that RPC's `category`
+// (a contact_status_at_call value) exactly. " for week/month of ___" is
+// appended at render time (see renderBuyerCentricSection).
+const CONTACTED_TABLE_TITLES = [
+  ["intro_call_scheduled", "Intro call scheduled"],
+  ["callback_interested", "Callback, interested"],
+  ["no_response", "No response, try again"],
+  ["unable_to_contact", "Unable to contact"],
+  ["not_interested", "Not interested"],
+];
 
 // PDF-only text cleanup (the on-screen table shows the raw values as-is) —
 // strips emoji (\p{Extended_Pictographic} is the proper Unicode property for
@@ -79,14 +111,18 @@ const CONTACT_STATUS_PDF_COLORS = {
 // fine, just not emoji (those show up as blank boxes). Then title-cases the
 // result so every name/company/category reads consistently regardless of
 // how it was originally typed in.
-function sanitizeForPdf(text) {
+function stripForPdf(text) {
   if (!text) return "";
-  const stripped = String(text)
+  return String(text)
     .replace(/\p{Extended_Pictographic}/gu, "")
     .replace(/[\u{FE0F}\u{200D}]/gu, "")
     .replace(/[\x00-\x1f\x7f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function sanitizeForPdf(text) {
+  const stripped = stripForPdf(text);
   return stripped.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 }
 
@@ -116,10 +152,11 @@ function fmtPeriodLabel(periodStart, type) {
   return `Week of ${periodStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
-// Inclusive start / exclusive end ISO bounds for a period — used only by
-// the raw call_status_changes query behind the "Contacted business owners"
-// list (everything else in this module reads pre-aggregated rollup tables
-// keyed by period_type/period_start and never needs actual date bounds).
+// Inclusive start / exclusive end ISO bounds for a period — used by the
+// buyer-centric section's period-scoped RPCs (get_buyer_outreach_chart/
+// get_buyer_contacted_owners). The call-by-account table doesn't need this
+// at all — it reads pre-aggregated rollup rows keyed by period_type/
+// period_start directly.
 function periodBoundsISO(periodStart, type) {
   const start = new Date(periodStart);
   const end = new Date(periodStart);
@@ -171,8 +208,15 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   let showIndividuals = true;
   let availableBuyers = []; // [{id, name}] — real buyer clients only; "Not attached to buyer" is handled separately, not part of this list
   let allAccountsCache = null;
-  let lastTableData = null; // { columns, rows } — plain arrays, for PDF export
-  let lastContactedDialsRows = null; // raw rows from fetchContactedDials, or null when the section isn't currently shown — also feeds PDF export
+  let lastTableData = null; // { columns, rows } — plain arrays, for PDF export (call-by-account table only — never in the PDF, see renderOptionsMenu)
+  // Buyer-centric section's own cache — populated once per refresh() by
+  // fetchBuyerCentricData() and reused as-is by both renderBuyerCentricSection()
+  // (on-screen) and buildReportPdf() (which is the ONLY thing the PDF
+  // contains), so the two are always guaranteed to show identical numbers
+  // rather than risking two separate fetches drifting apart. null whenever
+  // the section isn't currently showing (reportType !== "outreach", or
+  // anything other than exactly one buyer selected).
+  let buyerCentric = null; // { summary, chart, sinceSigned, milestoneClients, contactedOwners, periodLabel }
 
   async function resolveAccounts() {
     if (!allAccountsCache) allAccountsCache = await getAllAccounts();
@@ -221,111 +265,206 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     });
   }
 
-  // Raw call_status_changes rows for the "Contacted business owners" static
-  // list — the one place this module queries something other than a
-  // pre-computed rollup table, since there's no aggregate to read here:
-  // every logged call in range, as-is. Caller guarantees selectedBuyerIds is
-  // a Set of exactly one id (possibly null, for "Not attached to buyer")
-  // before calling this. contact_name/company_name are only ever populated
-  // for calls logged after those columns existed (or the small slice of
-  // older rows whose dial hadn't been deleted at backfill time) — older
-  // rows show "—" for name/company but keep their real date/category.
-  async function fetchContactedDials(accounts) {
-    const singleBuyerId = [...selectedBuyerIds][0];
-    const accountIds = accounts.map((a) => a.id);
-    const { startISO, endISO } = periodBoundsISO(selectedPeriodStart, periodType);
-    let query = supabase
-      .from("call_status_changes")
-      .select("contact_name, company_name, contact_status_at_call, changed_at")
-      .eq("dial_type", "seller")
-      .in("user_id", accountIds)
-      .gte("changed_at", startISO)
-      .lt("changed_at", endISO)
-      .order("changed_at", { ascending: true });
-    query = singleBuyerId === null ? query.is("buyer_id", null) : query.eq("buyer_id", singleBuyerId);
-    const { data, error } = await query;
-    return error ? [] : data || [];
-  }
-
-  // PDF-only "Total confirmed leads since contract was signed" table (see
-  // buildReportPdf) — a seller client counts as a "lead" here once it has a
-  // confirmed intro_call event AND its clients.source_list_id resolves
-  // (via dial_lists) to one of the currently selected real buyers. This is
-  // only possible because of how Intro calls completed is tracked: a new
-  // seller client created from a dial captures which tab it came from
-  // (source_list_id), and that tab is always attached to a buyer — so
-  // "which buyer does this lead belong to" is answerable at all. Cumulative
-  // across ALL time, not the selected week/month period — "since contract
-  // was signed" has no period boundary of its own (a tab can only ever be
-  // attached to a buyer with an already-confirmed Contract signed, so every
-  // result here inherently postdates that signing without needing an
-  // explicit date filter). Excludes the null "Not attached to buyer"
-  // bucket entirely — there's no contract to be "since" for unattached
-  // data — and returns [] outright if that's the only thing selected.
-  //
-  // get_confirmed_leads_since_signed() is a SECURITY DEFINER RPC rather
-  // than a plain multi-table query — the join chain (client_events ->
-  // clients -> dial_lists -> clients again for the buyer) crosses ownership
-  // boundaries plain RLS wasn't built for: dial_lists_select_own only lets
-  // a team lead see tabs they own/lead, but a buyer their team has real
-  // call activity against could easily be attached to a tab owned by
-  // someone else (most commonly an admin) — same shape of gap
-  // get_reports_available_buyers exists to close for the buyer picker.
-  async function fetchConfirmedLeadsSinceSigned(accounts) {
-    let buyerIds = null;
-    if (selectedBuyerIds) {
-      buyerIds = [...selectedBuyerIds].filter((id) => id !== null);
-      if (!buyerIds.length) return [];
-    }
-    const { data, error } = await supabase.rpc("get_confirmed_leads_since_signed", {
-      p_account_ids: accounts.map((a) => a.id),
-      p_buyer_ids: buyerIds,
-    });
-    return error ? [] : data || [];
-  }
-
-  // Outreach report only, and only once exactly one buyer is selected (a
-  // multi-select or the "Select all" default has no single buyer to scope
-  // this list to) — see the top-of-file comment and profile.html's
-  // reportsContactedDialsWrap for the full rationale. Never affected by
-  // showIndividuals.
-  async function renderContactedDialsSection(accounts) {
-    const showsLog = reportType === "outreach" && selectedBuyerIds !== null && selectedBuyerIds.size === 1;
-    els.reportsContactedDialsWrap.classList.toggle("hidden", !showsLog);
-    if (!showsLog) {
-      els.reportsContactedDialsWrap.innerHTML = "";
-      lastContactedDialsRows = null;
+  // Fetches all 5 buyer-centric RPCs in parallel and caches the result on
+  // `buyerCentric` — both renderBuyerCentricSection() (on-screen) and
+  // buildReportPdf() read from this same cache rather than fetching
+  // independently, so the two are guaranteed to always show identical
+  // numbers. Only runs for Outreach report with exactly one buyer selected
+  // (a multi-select or the "Select all" default has no single buyer to
+  // scope any of this to) — sets buyerCentric to null otherwise.
+  async function fetchBuyerCentricData(accounts) {
+    const shows = reportType === "outreach" && selectedBuyerIds !== null && selectedBuyerIds.size === 1;
+    if (!shows) {
+      buyerCentric = null;
       return;
     }
-    const rows = await fetchContactedDials(accounts);
-    lastContactedDialsRows = rows;
-    // The table itself scrolls inside a fixed-height box (see
-    // .reports-contacted-dials-scroll in css/style.css) so a long list
-    // doesn't push the rest of the report (and the PDF buttons below it)
-    // off-screen — the PDF export instead includes every row as a plain
-    // (unboxed) table of its own, see buildReportPdf().
-    const bodyHTML = rows.length
-      ? `
-        <div class="reports-contacted-dials-scroll">
-          <table>
-            <thead><tr><th>Name</th><th>Company name</th><th>Date contacted</th><th>Category</th></tr></thead>
-            <tbody>
-              ${rows
-                .map(
-                  (r) => `
-                <tr>
-                  <td>${escapeHtml(r.contact_name || "—")}</td>
-                  <td>${escapeHtml(r.company_name || "—")}</td>
-                  <td>${escapeHtml(new Date(r.changed_at).toLocaleDateString())}</td>
-                  <td>${escapeHtml(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call || "—")}</td>
-                </tr>`
-                )
-                .join("")}
-            </tbody>
-          </table>
-        </div>`
-      : `<p class="help-text">No contacted business owners in this range.</p>`;
-    els.reportsContactedDialsWrap.innerHTML = `<h3>Contacted business owners</h3>${bodyHTML}`;
+    const buyerId = [...selectedBuyerIds][0];
+    const { startISO, endISO } = periodBoundsISO(selectedPeriodStart, periodType);
+    const [summaryRes, chartRes, sinceSignedRes, milestoneRes, contactedRes] = await Promise.all([
+      supabase.rpc("get_buyer_progress_summary", { p_buyer_id: buyerId }),
+      supabase.rpc("get_buyer_outreach_chart", { p_buyer_id: buyerId, p_period_start: startISO, p_period_end_excl: endISO }),
+      supabase.rpc("get_buyer_outreach_since_signed", { p_buyer_id: buyerId }),
+      supabase.rpc("get_buyer_milestone_clients", { p_buyer_id: buyerId }),
+      supabase.rpc("get_buyer_contacted_owners", { p_buyer_id: buyerId, p_period_start: startISO, p_period_end_excl: endISO }),
+    ]);
+    buyerCentric = {
+      summary: summaryRes.data || [],
+      chart: chartRes.data || [],
+      sinceSigned: sinceSignedRes.data || [],
+      milestoneClients: milestoneRes.data || [],
+      contactedOwners: contactedRes.data || [],
+      periodLabel: fmtPeriodLabel(selectedPeriodStart, periodType),
+    };
+  }
+
+  // Same light-mode hex values as CONTACT_STATUS_PDF_COLORS' `dot` shades
+  // in js/dials.js for the 5 category bars, plus the brand navy/gold/accent
+  // for the 3 non-category bars — used by both the on-screen SVG chart and
+  // the PDF's vector-drawn equivalent (see buildReportPdf).
+  const CHART_BAR_COLORS = {
+    approved_targets: "#15213a",
+    targets_contacted: "#c8a45a",
+    attempted_contacts: "#2f5fed",
+    intro_call_scheduled: "#6fcf8e",
+    callback_interested: "#f2d34b",
+    no_response: "#f2a65a",
+    unable_to_contact: "#9ca3af",
+    not_interested: "#e0776d",
+  };
+
+  // Plain inline SVG — no charting library is imported anywhere in this
+  // app, and pulling one in for 8 bars would be a heavier CDN/CSP footprint
+  // than just drawing rects directly. Labels are rotated to fit 8 category
+  // names (some long, e.g. "Callback, interested") in a reasonable width.
+  function buildBarChartSVG(chartRows) {
+    const w = 720,
+      h = 340,
+      axisY = 260,
+      chartTop = 20,
+      chartLeft = 50,
+      chartRight = 700;
+    const slotWidth = (chartRight - chartLeft) / CHART_METRIC_LABELS.length;
+    const barWidth = Math.min(46, slotWidth - 14);
+    const values = CHART_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
+    const maxValue = Math.max(1, ...values);
+    const bars = CHART_METRIC_LABELS.map(([key, label], i) => {
+      const value = values[i];
+      const barHeight = (value / maxValue) * (axisY - chartTop);
+      const slotCenter = chartLeft + slotWidth * i + slotWidth / 2;
+      const barX = slotCenter - barWidth / 2;
+      const barY = axisY - barHeight;
+      return `
+        <rect x="${barX.toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth}" height="${Math.max(0, barHeight).toFixed(1)}" fill="${CHART_BAR_COLORS[key]}" rx="2" />
+        <text x="${slotCenter.toFixed(1)}" y="${(barY - 6).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="600" fill="#15213a">${value}</text>
+        <text x="${slotCenter.toFixed(1)}" y="${axisY + 14}" text-anchor="end" font-size="10.5" fill="#4b5563" transform="rotate(-35 ${slotCenter.toFixed(1)} ${axisY + 14})">${escapeHtml(label)}</text>
+      `;
+    });
+    return `
+      <svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:auto; max-width:640px;">
+        <line x1="${chartLeft}" y1="${axisY}" x2="${chartRight}" y2="${axisY}" stroke="#eae3d3" stroke-width="1.5" />
+        ${bars.join("")}
+      </svg>
+    `;
+  }
+
+  // Total progress summary — a plain 2-column (label, value) table, totals
+  // for the selected buyer's whole lifetime (see get_buyer_progress_summary).
+  function buildSummaryTableHTML(summaryRows) {
+    const rows = SUMMARY_METRIC_LABELS.map(([key, label]) => {
+      const value = summaryRows.find((r) => r.metric === key)?.value ?? 0;
+      return `<tr><td>${escapeHtml(label)}</td><td class="num">${value}</td></tr>`;
+    }).join("");
+    return `<table><tbody>${rows}</tbody></table>`;
+  }
+
+  // "Total outreach since contract signed" — one row per tab attached to
+  // the buyer (plus a synthetic "Not attributed to a specific tab" row for
+  // historical calls with no identifiable tab — see
+  // get_buyer_outreach_since_signed), same 8 columns as the bar chart,
+  // lifetime instead of period-scoped, with a totals row computed here
+  // client-side (not server-side — simpler to just sum what's on screen).
+  function buildSinceSignedTableHTML(rows) {
+    const totals = CHART_METRIC_LABELS.map(([key]) => rows.reduce((s, r) => s + (r[key] || 0), 0));
+    const headCells = ["Tab", ...CHART_METRIC_LABELS.map(([, label]) => label)].map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const bodyRows = rows
+      .map((r) => {
+        const cells = CHART_METRIC_LABELS.map(([key]) => `<td class="num">${r[key] || 0}</td>`).join("");
+        return `<tr><td>${escapeHtml(r.list_name)}</td>${cells}</tr>`;
+      })
+      .join("");
+    const totalsRow = `<tr class="reports-totals-row"><td>Totals</td>${totals.map((v) => `<td class="num">${v}</td>`).join("")}</tr>`;
+    return `
+      <div class="reports-contacted-dials-scroll">
+        <table>
+          <thead><tr>${headCells}</tr></thead>
+          <tbody>${totalsRow}${bodyRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // Shared by both business-owner table sets (see renderBuyerCentricSection)
+  // — a plain table of the given rows/columns, only ever called for a
+  // non-empty row set (each individual table is omitted entirely, not shown
+  // empty, when it has none — see the caller).
+  function buildOwnerTableHTML(title, rows, columns) {
+    const headCells = columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("");
+    const bodyRows = rows
+      .map((r) => `<tr>${columns.map((c) => `<td>${escapeHtml(c.format ? c.format(r[c.key]) : r[c.key] ?? "—")}</td>`).join("")}</tr>`)
+      .join("");
+    return `
+      <h3>${escapeHtml(title)}</h3>
+      <div class="reports-contacted-dials-scroll">
+        <table>
+          <thead><tr>${headCells}</tr></thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  const MONEY_COLUMN = { key: "annual_revenue", label: "Revenue", format: (v) => (v == null ? "—" : `$${Number(v).toLocaleString()}`) };
+  const SET1_COLUMNS = [
+    { key: "full_name", label: "Name" },
+    { key: "company_name", label: "Company name" },
+    { key: "website", label: "Website" },
+    { key: "city", label: "City" },
+    { key: "state", label: "State" },
+    { key: "industry", label: "Industry sector" },
+    MONEY_COLUMN,
+    { key: "employee_count", label: "Employees" },
+  ];
+  const SET2_COLUMNS = [
+    { key: "contact_name", label: "Name" },
+    { key: "company_name", label: "Company name" },
+    { key: "website", label: "Website" },
+    { key: "city", label: "City" },
+    { key: "state", label: "State" },
+    { key: "industry", label: "Industry sector" },
+    { key: "call_notes", label: "Call notes" },
+    { key: "date_last_contacted", label: "Date last contacted", format: (v) => (v ? new Date(v).toLocaleDateString() : "—") },
+    { key: "outreach_count", label: "Outreach count" },
+  ];
+
+  // Outreach report only, and only once exactly one buyer is selected — see
+  // fetchBuyerCentricData above. Never affected by showIndividuals.
+  function renderBuyerCentricSection() {
+    els.reportsBuyerCentricWrap.classList.toggle("hidden", !buyerCentric);
+    if (!buyerCentric) {
+      els.reportsBuyerCentricWrap.innerHTML = "";
+      return;
+    }
+    const { summary, chart, sinceSigned, milestoneClients, contactedOwners, periodLabel } = buyerCentric;
+
+    const milestoneTablesHTML = MILESTONE_TABLE_TITLES.map(([type, title]) => {
+      const rows = milestoneClients.filter((r) => r.milestone_type === type);
+      return rows.length ? buildOwnerTableHTML(title, rows, SET1_COLUMNS) : "";
+    })
+      .filter(Boolean)
+      .join("");
+    const contactedTablesHTML = CONTACTED_TABLE_TITLES.map(([category, title]) => {
+      const rows = contactedOwners.filter((r) => r.category === category);
+      return rows.length ? buildOwnerTableHTML(`${title} for ${periodLabel}`, rows, SET2_COLUMNS) : "";
+    })
+      .filter(Boolean)
+      .join("");
+
+    els.reportsBuyerCentricWrap.innerHTML = `
+      <div class="reports-buyer-centric-grid">
+        <div>
+          <h3>Total progress summary</h3>
+          ${buildSummaryTableHTML(summary)}
+        </div>
+        <div>
+          <h3>Outreach for ${periodLabel}</h3>
+          ${buildBarChartSVG(chart)}
+        </div>
+      </div>
+      <h3>Total outreach since contract signed</h3>
+      ${buildSinceSignedTableHTML(sinceSigned)}
+      ${milestoneTablesHTML}
+      ${contactedTablesHTML}
+    `;
   }
 
   async function fetchTeamRows(accounts) {
@@ -402,11 +541,14 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     els.reportsRangeBtn.classList.toggle("hidden", reportType !== "outreach");
     els.reportsSelectBuyerBtn.classList.toggle("hidden", reportType !== "outreach");
     els.reportsShowIndividualsBtn.classList.toggle("hidden", reportType !== "outreach");
-    // Team report has no PDF export at all — Outreach report gets both
-    // Create PDF (plain download) and Send PDF (share sheet, see the
-    // reportsSendPdfBtn handler below).
-    els.reportsCreatePdfBtn.classList.toggle("hidden", reportType !== "outreach");
-    els.reportsSendPdfBtn.classList.toggle("hidden", reportType !== "outreach");
+    // Team report has no PDF export at all, and even on the Outreach report
+    // the PDF is entirely buyer-centric now (see buildReportPdf) — it needs
+    // exactly one buyer selected to have anything to build, so both buttons
+    // stay hidden for "Select all" or a multi-select just like they already
+    // do for Team report.
+    const showsPdfButtons = reportType === "outreach" && selectedBuyerIds !== null && selectedBuyerIds.size === 1;
+    els.reportsCreatePdfBtn.classList.toggle("hidden", !showsPdfButtons);
+    els.reportsSendPdfBtn.classList.toggle("hidden", !showsPdfButtons);
 
     const rangeLabel = reportType === "team" ? "week" : periodType;
     els.reportsRangeBtn.querySelector(".menu-item-label").textContent = `Range: ${periodType === "month" ? "Month" : "Week"}`;
@@ -450,7 +592,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       const rows = await fetchTeamRows(accounts);
       renderTeamTable(rows);
     }
-    await renderContactedDialsSection(accounts);
+    await fetchBuyerCentricData(accounts);
+    renderBuyerCentricSection();
   }
 
   // DOM data-attributes can't hold a real `null`, so the "Not attached to
@@ -611,9 +754,97 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     if (e.target === els.reportsAccountsVisiblePopup) els.reportsAccountsVisibleClose.click();
   });
 
-  // Shared by both Create PDF and Send PDF (Outreach report only — Team
-  // report has neither button, see renderOptionsMenu()) so the exact same
-  // document gets either downloaded directly or handed to the share sheet.
+  // Waystation brand palette (css/style.css's :root block / waystationadvisors.com)
+  // — the PDF page background stays plain white (confirmed explicitly, not
+  // the cream --gold-soft tint the reference logo/marketing site use), with
+  // navy for text/headings and gold for header-row fills/accents.
+  const PDF_NAVY = [21, 33, 58];
+  const PDF_GOLD = [200, 164, 90];
+  const PDF_BORDER = [234, 227, 211];
+  const PDF_TEXT_GRAY = [75, 85, 99];
+
+  // Columns whose PDF text should only have emoji/control characters
+  // stripped, not title-cased — a URL, free-text call note, or two-letter
+  // state code reads wrong in title case (see sanitizeForPdf vs stripForPdf).
+  const PDF_NO_TITLE_CASE_KEYS = new Set(["website", "call_notes", "state"]);
+
+  function ownerRowToPdfCells(row, columns) {
+    return columns.map((c) => {
+      if (c.format) return String(c.format(row[c.key]));
+      const raw = row[c.key];
+      if (raw == null || raw === "") return "—";
+      return (PDF_NO_TITLE_CASE_KEYS.has(c.key) ? stripForPdf(raw) : sanitizeForPdf(raw)) || "—";
+    });
+  }
+
+  // Vector-drawn (no canvas/image round-trip) equivalent of
+  // buildBarChartSVG's on-screen chart, using jsPDF's own rect/text
+  // primitives — same 8 categories/colors, same values.
+  function drawPdfBarChart(doc, chartRows, x, y, width, height) {
+    const axisY = y + height - 24;
+    const slotWidth = width / CHART_METRIC_LABELS.length;
+    const barWidth = Math.min(14, slotWidth - 6);
+    const values = CHART_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
+    const maxValue = Math.max(1, ...values);
+    doc.setDrawColor(...PDF_BORDER);
+    doc.setLineWidth(0.3);
+    doc.line(x, axisY, x + width, axisY);
+    CHART_METRIC_LABELS.forEach(([key, label], i) => {
+      const value = values[i];
+      const barHeight = (value / maxValue) * (height - 24);
+      const slotCenter = x + slotWidth * i + slotWidth / 2;
+      const barX = slotCenter - barWidth / 2;
+      const barY = axisY - barHeight;
+      doc.setFillColor(...hexToRgb(CHART_BAR_COLORS[key]));
+      doc.rect(barX, barY, barWidth, Math.max(0, barHeight), "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...PDF_NAVY);
+      doc.text(String(value), slotCenter, barY - 2, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6.5);
+      doc.setTextColor(...PDF_TEXT_GRAY);
+      doc.text(label, slotCenter, axisY + 8, { align: "center", angle: 35 });
+    });
+  }
+
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  // Small vector recreation of the hanging-sign "WAYSTATION" icon (navy
+  // post/crossbar, gold rounded sign) the user sent as a reference image —
+  // simplified for legibility at footer size, drawn on every page after all
+  // content is added (doc.setPage() loop so it lands on pages created via
+  // addPage() too, not just the first).
+  function drawFooterMark(doc) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const pageCount = doc.internal.getNumberOfPages();
+    const x = pageWidth - 22;
+    const yBase = pageHeight - 10;
+    for (let p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      doc.setDrawColor(...PDF_NAVY);
+      doc.setLineWidth(0.5);
+      doc.line(x, yBase - 12, x, yBase);
+      doc.line(x - 7, yBase - 12, x + 7, yBase - 12);
+      doc.setFillColor(...PDF_GOLD);
+      doc.roundedRect(x - 9, yBase - 11, 18, 7, 1, 1, "FD");
+      doc.setFont("times", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(...PDF_NAVY);
+      doc.text("WAYSTATION", x, yBase - 7, { align: "center" });
+    }
+  }
+
+  // Shared by both Create PDF and Send PDF (Outreach report only, and only
+  // once exactly one buyer is selected — see renderOptionsMenu) so the exact
+  // same document gets either downloaded directly or handed to the share
+  // sheet. Entirely the buyer-centric section, reading straight from the
+  // buyerCentric cache populated by fetchBuyerCentricData — the "call by
+  // account" table is deliberately never in the PDF (see top-of-file comment).
   async function buildReportPdf() {
     // jspdf-autotable's ESM build exports the older plugin-style API
     // (applyPlugin(jsPDF) attaches .autoTable() to the class, rather than a
@@ -623,85 +854,104 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const { jsPDF } = await import("https://cdn.jsdelivr.net/npm/jspdf@2/+esm");
     const { applyPlugin } = await import("https://cdn.jsdelivr.net/npm/jspdf-autotable@3/+esm");
     applyPlugin(jsPDF);
-    const title = "Outreach report";
-    const periodLabel = fmtPeriodLabel(selectedPeriodStart, periodType);
-    const doc = new jsPDF();
-    doc.text(`${title} — ${periodLabel}`, 14, 16);
-    doc.autoTable({ startY: 22, head: [lastTableData.columns], body: lastTableData.rows });
 
-    // "Total confirmed leads since contract was signed" — sits between the
-    // main KPI table and Contacted business owners. Always rendered (unlike
-    // Contacted business owners below, which disappears entirely with no
-    // data) — an empty result shows a single "—" placeholder row instead of
-    // omitting the table, so its presence/position in the PDF is always
-    // predictable. Only possible at all because Intro calls completed is
-    // tracked via clients.source_list_id (which buyer a seller client's
-    // originating tab was attached to) — see fetchConfirmedLeadsSinceSigned
-    // above.
-    const accounts = await resolveAccounts();
-    const confirmedLeads = await fetchConfirmedLeadsSinceSigned(accounts);
-    const leadsY = doc.lastAutoTable.finalY + 10;
-    doc.text("Total confirmed leads since contract was signed", 14, leadsY);
+    const buyerId = [...selectedBuyerIds][0];
+    const buyerName = availableBuyers.find((b) => b.id === buyerId)?.full_name || "Buyer";
+    const { summary, chart, sinceSigned, milestoneClients, contactedOwners, periodLabel } = buyerCentric;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(...PDF_NAVY);
+    doc.text(`Outreach report — ${buyerName}`, 14, 16);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(...PDF_TEXT_GRAY);
+    doc.text(periodLabel, 14, 22);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...PDF_NAVY);
+    doc.text("Total progress summary", 14, 32);
     doc.autoTable({
-      startY: leadsY + 4,
-      head: [["Name", "Company name", "Buyer", "Date"]],
-      body: confirmedLeads.length
-        ? confirmedLeads.map((r) => [
-            sanitizeForPdf(r.contact_name) || "—",
-            sanitizeForPdf(r.company_name) || "—",
-            sanitizeForPdf(r.buyer_name) || "—",
-            new Date(r.event_date).toLocaleDateString(),
-          ])
-        : [["—", "—", "—", "—"]],
-      styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
-      headStyles: { fontStyle: "bold" },
+      startY: 36,
+      head: [["Metric", "Total"]],
+      body: SUMMARY_METRIC_LABELS.map(([key, label]) => [label, String(summary.find((r) => r.metric === key)?.value ?? 0)]),
+      theme: "plain",
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 3, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY },
+      headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold" },
+      columnStyles: { 1: { halign: "right" } },
     });
 
-    // Contacted business owners on-screen is boxed with its own internal
-    // scroll (see .reports-contacted-dials-scroll) so a long list doesn't
-    // push the rest of the page down — that constraint doesn't apply to a
-    // PDF, so here it's just a full table of its own, relying on
-    // jspdf-autotable's own pagination if it runs long. Cell text is
-    // sanitized/title-cased for the PDF specifically (see sanitizeForPdf) —
-    // the on-screen table keeps the raw values as typed. Each row is tinted
-    // by its category using the same colors as the on-screen status dots
-    // (see CONTACT_STATUS_PDF_COLORS) via didParseCell, matched back to the
-    // row's real category through rowCategories (autoTable only gives the
-    // already-sanitized display text in each cell, not the original key).
-    if (lastContactedDialsRows && lastContactedDialsRows.length) {
-      const contactedY = doc.lastAutoTable.finalY + 10;
-      doc.text(`Contacted business owners — ${periodLabel}`, 14, contactedY);
-      const rowCategories = lastContactedDialsRows.map((r) => r.contact_status_at_call);
+    const chartY = doc.lastAutoTable.finalY + 14;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...PDF_NAVY);
+    doc.text(`Outreach for ${periodLabel}`, 14, chartY);
+    drawPdfBarChart(doc, chart, 14, chartY + 4, pageWidth - 28, 78);
+
+    // Page break before "Total outreach since contract signed" + every
+    // business-owner table — page 1 is the two summary items, everything
+    // else starts page 2 (per spec).
+    doc.addPage();
+    let y = 20;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...PDF_NAVY);
+    doc.text("Total outreach since contract signed", 14, y);
+    const totals = CHART_METRIC_LABELS.map(([key]) => sinceSigned.reduce((s, r) => s + (r[key] || 0), 0));
+    doc.autoTable({
+      startY: y + 4,
+      head: [["Tab", ...CHART_METRIC_LABELS.map(([, label]) => label)]],
+      body: [
+        ["Totals", ...totals.map(String)],
+        ...sinceSigned.map((r) => [r.list_name, ...CHART_METRIC_LABELS.map(([key]) => String(r[key] || 0))]),
+      ],
+      theme: "plain",
+      styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
+      headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.row.index === 0) data.cell.styles.fontStyle = "bold";
+      },
+    });
+    y = doc.lastAutoTable.finalY + 12;
+
+    // Each business-owner table is only added if it has ≥1 row (per spec —
+    // absent, not shown empty) and starts a fresh page if it wouldn't fit
+    // in the remaining space on the current one.
+    const addOwnerPdfTable = (title, rows, columns) => {
+      if (!rows.length) return;
+      if (y > 250) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10.5);
+      doc.setTextColor(...PDF_NAVY);
+      doc.text(title, 14, y);
       doc.autoTable({
-        startY: contactedY + 4,
-        head: [["Name", "Company name", "Date contacted", "Category"]],
-        body: lastContactedDialsRows.map((r) => [
-          sanitizeForPdf(r.contact_name) || "—",
-          sanitizeForPdf(r.company_name) || "—",
-          new Date(r.changed_at).toLocaleDateString(),
-          sanitizeForPdf(CONTACT_STATUS_LABELS[r.contact_status_at_call] || r.contact_status_at_call) || "—",
-        ]),
-        // jspdf-autotable's default "striped" theme auto-applies its own
-        // alternating gray/white background to body rows — that competed
-        // with the per-row fillColor set below, so same-category rows could
-        // end up showing two different shades depending on whether they
-        // landed on an odd or even row. theme: "plain" turns the built-in
-        // striping off entirely, leaving didParseCell's fillColor as the
-        // only background source, so every row of a given category is the
-        // exact same color regardless of position. "plain" also drops the
-        // default theme's blue header fill, so that's set back explicitly
-        // below (same blue/white jspdf-autotable used by default before).
+        startY: y + 4,
+        head: [columns.map((c) => c.label)],
+        body: rows.map((r) => ownerRowToPdfCells(r, columns)),
         theme: "plain",
-        styles: { font: "helvetica", fontStyle: "normal", fontSize: 9, cellPadding: 3, overflow: "linebreak", lineWidth: 0.1, lineColor: 200 },
-        headStyles: { fontStyle: "bold", fillColor: [41, 128, 185], textColor: 255 },
-        didParseCell: (data) => {
-          if (data.section !== "body") return;
-          const color = CONTACT_STATUS_PDF_COLORS[rowCategories[data.row.index]];
-          if (color) data.cell.styles.fillColor = color;
-        },
+        styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
+        headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
       });
-    }
-    const filename = `${title.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
+      y = doc.lastAutoTable.finalY + 12;
+    };
+
+    MILESTONE_TABLE_TITLES.forEach(([type, title]) => {
+      addOwnerPdfTable(title, milestoneClients.filter((r) => r.milestone_type === type), SET1_COLUMNS);
+    });
+    CONTACTED_TABLE_TITLES.forEach(([category, title]) => {
+      addOwnerPdfTable(`${title} for ${periodLabel}`, contactedOwners.filter((r) => r.category === category), SET2_COLUMNS);
+    });
+
+    drawFooterMark(doc);
+
+    const filename = `Outreach_report_${buyerName.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
     return { doc, filename };
   }
 
@@ -717,7 +967,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // mobile already had, using every desktop browser's own built-in PDF
   // viewer (complete with its own download button).
   els.reportsCreatePdfBtn.addEventListener("click", async () => {
-    if (!lastTableData) return;
+    if (!buyerCentric) return;
     const { doc, filename } = await buildReportPdf();
     doc.setProperties({ title: filename });
     const url = URL.createObjectURL(doc.output("blob"));
@@ -744,7 +994,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // fixable client-side), so the fallback here is a plain download instead
   // of trying to replicate the Text/Email popover.
   els.reportsSendPdfBtn.addEventListener("click", async () => {
-    if (!lastTableData) return;
+    if (!buyerCentric) return;
     const { doc, filename } = await buildReportPdf();
     const blob = doc.output("blob");
     const file = new File([blob], filename, { type: "application/pdf" });
