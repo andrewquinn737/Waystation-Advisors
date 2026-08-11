@@ -1033,6 +1033,20 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     // Each business-owner table is only added if it has ≥1 row (per spec —
     // absent, not shown empty) and starts a fresh page if it wouldn't fit
     // in the remaining space on the current one.
+    // Explicit widths (mm) for the two columns that can't just be left to
+    // autoTable's own content-based auto-sizing: website is one long
+    // unbroken token (a URL, no spaces to wrap on) — without a fixed width
+    // it keeps widening to fit the whole thing, squeezing every other
+    // column into a sliver and inflating row height along with it, so it
+    // gets a modest fixed width with ellipsize instead. Call notes is
+    // free-form text that's routinely the longest content in the row, so
+    // it's given the most room of any column here, wider than everything
+    // else on purpose rather than leaving it to fight for space.
+    const PDF_OWNER_COLUMN_WIDTHS = {
+      website: { cellWidth: 26, overflow: "ellipsize" },
+      call_notes: { cellWidth: 42 },
+    };
+
     const addOwnerPdfTable = (title, rows, columns) => {
       if (!rows.length) return;
       if (y > 250) {
@@ -1043,13 +1057,10 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       doc.setFontSize(10.5);
       doc.setTextColor(...PDF_NAVY);
       doc.text(title, 14, y);
-      // Website values are one long unbroken token (a URL, no spaces to
-      // wrap on) — left to autoTable's own auto-sizing, the only way it
-      // could fit the whole thing was to keep widening that column, which
-      // squeezed every other column down to a sliver and inflated row
-      // height in the process. A fixed width + ellipsize truncates instead
-      // of ever letting it balloon.
-      const websiteIdx = columns.findIndex((c) => c.key === "website");
+      const columnStyles = {};
+      columns.forEach((c, idx) => {
+        if (PDF_OWNER_COLUMN_WIDTHS[c.key]) columnStyles[idx] = PDF_OWNER_COLUMN_WIDTHS[c.key];
+      });
       doc.autoTable({
         startY: y + 4,
         head: [columns.map((c) => c.label)],
@@ -1057,7 +1068,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         theme: "plain",
         styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
         headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
-        columnStyles: websiteIdx >= 0 ? { [websiteIdx]: { cellWidth: 32, overflow: "ellipsize" } } : {},
+        columnStyles,
         margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
       });
       y = doc.lastAutoTable.finalY + 12;
