@@ -612,6 +612,30 @@ function tomorrowDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Keeps today's already-logged call_status_changes row (if any) in sync
+// with the dial's own info as it gets filled in during/after the same
+// call — toggleDidCallToday() only snapshots once, at the exact moment
+// "Called today" is clicked, which in practice is often BEFORE the outcome
+// is known (status is set and notes are typed once the call has actually
+// happened). Confirmed as a real bug in production: freshly-logged calls
+// were coming through with null website/city/state/industry/call_notes
+// even though the dial itself had all of it, because those fields hadn't
+// been filled in yet at the instant Called-today was toggled. Only ever
+// UPDATEs a row that already exists for today — never inserts one (that
+// stays toggleDidCallToday's job alone), and never touches a PAST day's
+// already-frozen snapshot.
+async function syncTodaysCallLogSnapshot(fields) {
+  if (!currentDial || currentDial.called_today_date !== todayDateStr()) return;
+  const today = todayDateStr();
+  await supabase
+    .from("call_status_changes")
+    .update(fields)
+    .eq("dial_id", currentDial.id)
+    .eq("user_id", profile.id)
+    .gte("changed_at", `${today}T00:00:00`)
+    .lt("changed_at", `${today}T23:59:59.999`);
+}
+
 // Whether the "Called today" button should currently show for this dial —
 // always true for the 3 "active prospect" statuses (SHOW_CALLED_TODAY_STATUSES),
 // and ALSO true for the other 3 ("Not interested", "Unable to contact",
@@ -670,6 +694,7 @@ async function flushCallNotes() {
   currentDial.call_notes = val;
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) dials[idx].call_notes = val;
+  await syncTodaysCallLogSnapshot({ call_notes: val });
 }
 
 function wireCallNotesAutosave() {
@@ -2033,6 +2058,17 @@ async function handleEditDialSave() {
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
+  // See syncTodaysCallLogSnapshot's comment — these are the same snapshot
+  // fields toggleDidCallToday() captures, kept in sync if they're corrected
+  // through the edit form later the same day a call was already logged.
+  await syncTodaysCallLogSnapshot({
+    company_name: data.company_name,
+    contact_name: data.full_name,
+    website: data.website,
+    city: data.city,
+    state: data.state,
+    industry: data.industry,
+  });
   dialMode = "view";
   renderDialModal();
   await loadDials();
@@ -2069,6 +2105,7 @@ async function updateDialStatus(newStatus) {
   Object.assign(currentDial, data);
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) Object.assign(dials[idx], data);
+  await syncTodaysCallLogSnapshot({ contact_status_at_call: newStatus });
 
   renderDialModal();
   renderDialsTable();
@@ -2390,6 +2427,15 @@ async function handleScheduleIntroCallFromDial(dial) {
       // assigned to (dial_lists.buyer_id), not just to whoever's account
       // owns the resulting client.
       data.source_list_id = dial.list_id || null;
+      // Explicit at creation time rather than relying solely on the
+      // source_list_id -> dial_lists.buyer_id fallback every reporting RPC
+      // uses (coalesce(c.intended_buyer_id, dl.buyer_id)) — that fallback
+      // silently breaks if the tab is later deleted or reassigned, and (real
+      // bug found in production) some clients never even got source_list_id
+      // populated in the first place (bulk-created outside this flow), so
+      // they never resolved to any buyer at all. Setting it here makes the
+      // attribution permanent and independent of the tab's own fate.
+      data.intended_buyer_id = (isBuyer ? null : allLists.find((l) => l.id === dial.list_id)?.buyer_id) || null;
       // Sellers have no website field of their own to fall back on
       // otherwise — captured here for the same "buyer-centric business-
       // owner tables" reason as source_list_id above (see js/reports.js).

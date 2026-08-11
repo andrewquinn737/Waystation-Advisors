@@ -192,6 +192,14 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     }
 
     const anySelected = hasAnySelected();
+    // Every toggle (Select all, or one row) replaces bodyEl's innerHTML
+    // synchronously to reflect the new checked states — which also
+    // recreates .accounts-visible-list from scratch, snapping its scroll
+    // position back to the top even though nothing about the list's length
+    // or order actually changed. Captured/restored around the replacement
+    // so picking an account further down the list doesn't keep bouncing you
+    // back to the top of it.
+    const prevScrollTop = bodyEl.querySelector(".accounts-visible-list")?.scrollTop || 0;
     bodyEl.innerHTML = `
       <div class="accounts-visible-list">
         <button type="button" class="accounts-visible-row select-all" id="accountsSelectAllBtn">
@@ -202,6 +210,8 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
       </div>
       ${anySelected ? "" : `<div class="accounts-visible-warning">Select at least one account to continue.</div>`}
     `;
+    const newList = bodyEl.querySelector(".accounts-visible-list");
+    if (newList) newList.scrollTop = prevScrollTop;
 
     closeBtn.disabled = !anySelected;
     closeBtn.classList.toggle("disabled", !anySelected);

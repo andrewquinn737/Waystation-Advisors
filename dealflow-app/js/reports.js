@@ -64,13 +64,29 @@ const SUMMARY_METRIC_LABELS = [
   ["closed", "Closed"],
 ];
 
-// Outreach bar chart / "Total outreach since contract signed" columns, in
-// display order — key matches get_buyer_outreach_chart()/
-// get_buyer_outreach_since_signed()'s columns exactly.
+// "Total outreach since contract signed" table columns, in display order —
+// key matches get_buyer_outreach_since_signed()'s columns exactly.
 const CHART_METRIC_LABELS = [
   ["approved_targets", "Approved targets"],
   ["targets_contacted", "Targets contacted"],
   ["attempted_contacts", "Attempted contacts"],
+  ["intro_call_scheduled", "Intro call scheduled"],
+  ["callback_interested", "Callback, interested"],
+  ["no_response", "No response, try again"],
+  ["unable_to_contact", "Unable to contact"],
+  ["not_interested", "Not interested"],
+];
+
+// The "Outreach for week/month of ___" bar chart's own bars — a distinct,
+// shorter list from CHART_METRIC_LABELS above: no "Approved targets" (it's
+// already in the Total progress summary right next to this chart, so
+// repeating it here was redundant), and "Attempted contacts" moves to the
+// leftmost bar (renamed "Total number of contacts") since it's the
+// broadest, most natural starting point for the eye now that Approved
+// targets is gone. Key matches get_buyer_outreach_chart()'s columns.
+const GRAPH_METRIC_LABELS = [
+  ["attempted_contacts", "Total number of contacts"],
+  ["targets_contacted", "Targets contacted"],
   ["intro_call_scheduled", "Intro call scheduled"],
   ["callback_interested", "Callback, interested"],
   ["no_response", "No response, try again"],
@@ -306,13 +322,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   // Same light-mode hex values as CONTACT_STATUS_PDF_COLORS' `dot` shades
-  // in js/dials.js for the 5 category bars, plus the brand navy/gold/accent
-  // for the 3 non-category bars — used by both the on-screen SVG chart and
-  // the PDF's vector-drawn equivalent (see buildReportPdf).
+  // in js/dials.js for the 5 category bars, plus the brand navy/gold for the
+  // 2 non-category bars — used by both the on-screen SVG chart and the
+  // PDF's vector-drawn equivalent (see buildReportPdf).
   const CHART_BAR_COLORS = {
-    approved_targets: "#15213a",
+    attempted_contacts: "#15213a",
     targets_contacted: "#c8a45a",
-    attempted_contacts: "#2f5fed",
     intro_call_scheduled: "#6fcf8e",
     callback_interested: "#f2d34b",
     no_response: "#f2a65a",
@@ -321,8 +336,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   };
 
   // Plain inline SVG — no charting library is imported anywhere in this
-  // app, and pulling one in for 8 bars would be a heavier CDN/CSP footprint
-  // than just drawing rects directly. Labels are rotated to fit 8 category
+  // app, and pulling one in for 7 bars would be a heavier CDN/CSP footprint
+  // than just drawing rects directly. Labels are rotated to fit 7 category
   // names (some long, e.g. "Callback, interested") in a reasonable width.
   function buildBarChartSVG(chartRows) {
     const w = 720,
@@ -331,11 +346,11 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       chartTop = 20,
       chartLeft = 50,
       chartRight = 700;
-    const slotWidth = (chartRight - chartLeft) / CHART_METRIC_LABELS.length;
+    const slotWidth = (chartRight - chartLeft) / GRAPH_METRIC_LABELS.length;
     const barWidth = Math.min(46, slotWidth - 14);
-    const values = CHART_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
+    const values = GRAPH_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
     const maxValue = Math.max(1, ...values);
-    const bars = CHART_METRIC_LABELS.map(([key, label], i) => {
+    const bars = GRAPH_METRIC_LABELS.map(([key, label], i) => {
       const value = values[i];
       const barHeight = (value / maxValue) * (axisY - chartTop);
       const slotCenter = chartLeft + slotWidth * i + slotWidth / 2;
@@ -458,16 +473,10 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       .join("");
 
     els.reportsBuyerCentricWrap.innerHTML = `
-      <div class="reports-buyer-centric-grid">
-        <div>
-          <h3>Total progress summary</h3>
-          ${buildSummaryTableHTML(summary)}
-        </div>
-        <div>
-          <h3>Outreach for ${periodLabel}</h3>
-          ${buildBarChartSVG(chart)}
-        </div>
-      </div>
+      <h3>Total progress summary</h3>
+      ${buildSummaryTableHTML(summary)}
+      <h3>Outreach for ${periodLabel}</h3>
+      ${buildBarChartSVG(chart)}
       <h3>Total outreach since contract signed</h3>
       ${buildSinceSignedTableHTML(sinceSigned)}
       ${milestoneTablesHTML}
@@ -648,6 +657,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       e.stopPropagation();
       selectedBuyerIds = selectedBuyerIds === null ? new Set() : null;
       renderSelectBuyerPopup();
+      // PDF buttons are gated on "exactly one buyer selected" (see
+      // renderOptionsMenu) — without this, picking a single buyer here
+      // never actually re-evaluated that, so the buttons stayed stuck at
+      // whatever they showed the last time something ELSE (report type,
+      // period range) happened to re-render the options menu.
+      renderOptionsMenu();
       refresh();
     });
     els.reportsSelectBuyerBody.querySelectorAll(".accounts-visible-row[data-id]").forEach((row) => {
@@ -658,6 +673,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         if (selectedBuyerIds.has(id)) selectedBuyerIds.delete(id);
         else selectedBuyerIds.add(id);
         renderSelectBuyerPopup();
+        renderOptionsMenu(); // see the comment on #reportsBuyerSelectAllBtn's handler above
         refresh();
       });
     });
@@ -752,6 +768,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     storageKey: REPORTS_ACCOUNTS_KEY,
     onChange: () => {
       selectedBuyerIds = null; // available buyers depend on which accounts are selected
+      renderOptionsMenu(); // re-evaluate PDF button visibility now that selectedBuyerIds changed
       refresh();
     },
     escapeHtml,
@@ -772,6 +789,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   const PDF_BORDER = [234, 227, 211];
   const PDF_TEXT_GRAY = [75, 85, 99];
 
+  // Reserved on every doc.autoTable() call below so a table can never be
+  // drawn into the footer mark's own space (see drawFooterMark) — jspdf-
+  // autotable's own default bottom margin (20) leaves too little clearance
+  // once the mark's actual footprint is accounted for.
+  const AUTOTABLE_BOTTOM_MARGIN = 24;
+
   // Columns whose PDF text should only have emoji/control characters
   // stripped, not title-cased — a URL, free-text call note, or two-letter
   // state code reads wrong in title case (see sanitizeForPdf vs stripForPdf).
@@ -788,19 +811,31 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
 
   // Vector-drawn (no canvas/image round-trip) equivalent of
   // buildBarChartSVG's on-screen chart, using jsPDF's own rect/text
-  // primitives — same 8 categories/colors, same values.
+  // primitives — same 7 categories/colors, same values. topPad reserves
+  // headroom above the tallest possible bar for its value label, so a bar
+  // that reaches (or nearly reaches) the top of the chart never collides
+  // with the "Outreach for..." heading drawn just above it — the bug this
+  // was fixed from had no such reserve, so a tall bar's number sat right on
+  // top of that heading. bottomPad reserves room for up to 2 wrapped lines
+  // of category label, drawn horizontally (splitTextToSize) rather than
+  // rotated diagonally — long labels ("Callback, interested") wrap onto a
+  // second line instead of running at an angle.
   function drawPdfBarChart(doc, chartRows, x, y, width, height) {
-    const axisY = y + height - 24;
-    const slotWidth = width / CHART_METRIC_LABELS.length;
-    const barWidth = Math.min(14, slotWidth - 6);
-    const values = CHART_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
+    const topPad = 10;
+    const bottomPad = 18;
+    const axisY = y + height - bottomPad;
+    const plotHeight = height - topPad - bottomPad;
+    const slotWidth = width / GRAPH_METRIC_LABELS.length;
+    const barWidth = Math.min(20, slotWidth - 10);
+    const labelMaxWidth = slotWidth - 4;
+    const values = GRAPH_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
     const maxValue = Math.max(1, ...values);
     doc.setDrawColor(...PDF_BORDER);
     doc.setLineWidth(0.3);
     doc.line(x, axisY, x + width, axisY);
-    CHART_METRIC_LABELS.forEach(([key, label], i) => {
+    GRAPH_METRIC_LABELS.forEach(([key, label], i) => {
       const value = values[i];
-      const barHeight = (value / maxValue) * (height - 24);
+      const barHeight = (value / maxValue) * plotHeight;
       const slotCenter = x + slotWidth * i + slotWidth / 2;
       const barX = slotCenter - barWidth / 2;
       const barY = axisY - barHeight;
@@ -809,11 +844,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(...PDF_NAVY);
-      doc.text(String(value), slotCenter, barY - 2, { align: "center" });
+      doc.text(String(value), slotCenter, barY - 3, { align: "center" });
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(6.5);
+      doc.setFontSize(6.3);
       doc.setTextColor(...PDF_TEXT_GRAY);
-      doc.text(label, slotCenter, axisY + 8, { align: "center", angle: 35 });
+      doc.splitTextToSize(label, labelMaxWidth).forEach((line, li) => {
+        doc.text(line, slotCenter, axisY + 7 + li * 3.2, { align: "center" });
+      });
     });
   }
 
@@ -822,29 +859,44 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
 
-  // Small vector recreation of the hanging-sign "WAYSTATION" icon (navy
-  // post/crossbar, gold rounded sign) the user sent as a reference image —
-  // simplified for legibility at footer size, drawn on every page after all
-  // content is added (doc.setPage() loop so it lands on pages created via
-  // addPage() too, not just the first).
+  // Vector recreation of the hanging real-estate-sign "WAYSTATION" icon the
+  // user sent as a reference image — a post with an arm extending to one
+  // side, the gold sign hanging just below the arm's far end on two short
+  // chain lines (not fused directly to the arm, per the reference), navy
+  // serif caps centered on the sign. Drawn on every page after all content
+  // is added (doc.setPage() loop so it lands on pages created via addPage()
+  // too, not just the first). Every doc.autoTable() call below reserves a
+  // matching bottom margin (see AUTOTABLE_BOTTOM_MARGIN) so no table can
+  // ever be drawn into the space this occupies.
   function drawFooterMark(doc) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const pageCount = doc.internal.getNumberOfPages();
-    const x = pageWidth - 22;
-    const yBase = pageHeight - 10;
+    const postX = pageWidth - 34;
+    const groundY = pageHeight - 6;
+    const topY = groundY - 13;
+    const armEndX = postX + 18;
+    const signW = 16,
+      signH = 7;
+    const signX = armEndX - signW - 1;
+    const signY = topY + 2.5;
     for (let p = 1; p <= pageCount; p++) {
       doc.setPage(p);
       doc.setDrawColor(...PDF_NAVY);
       doc.setLineWidth(0.5);
-      doc.line(x, yBase - 12, x, yBase);
-      doc.line(x - 7, yBase - 12, x + 7, yBase - 12);
+      doc.line(postX, groundY, postX, topY); // post
+      doc.line(postX - 1.5, groundY, postX + 1.5, groundY); // small foot, planted look
+      doc.line(postX, topY, armEndX, topY); // arm
+      doc.setLineWidth(0.3);
+      doc.line(signX + 2, topY, signX + 2, signY); // chain, left
+      doc.line(signX + signW - 2, topY, signX + signW - 2, signY); // chain, right
+      doc.setLineWidth(0.4);
       doc.setFillColor(...PDF_GOLD);
-      doc.roundedRect(x - 9, yBase - 11, 18, 7, 1, 1, "FD");
+      doc.roundedRect(signX, signY, signW, signH, 1, 1, "FD");
       doc.setFont("times", "bold");
-      doc.setFontSize(4.5);
+      doc.setFontSize(5.5);
       doc.setTextColor(...PDF_NAVY);
-      doc.text("WAYSTATION", x, yBase - 7, { align: "center" });
+      doc.text("WAYSTATION", signX + signW / 2, signY + signH / 2 + 1.3, { align: "center" });
     }
   }
 
@@ -892,6 +944,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       styles: { font: "helvetica", fontSize: 9, cellPadding: 3, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY },
       headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold" },
       columnStyles: { 1: { halign: "right" } },
+      margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
     });
 
     const chartY = doc.lastAutoTable.finalY + 14;
@@ -899,7 +952,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     doc.setFontSize(11);
     doc.setTextColor(...PDF_NAVY);
     doc.text(`Outreach for ${periodLabel}`, 14, chartY);
-    drawPdfBarChart(doc, chart, 14, chartY + 4, pageWidth - 28, 78);
+    drawPdfBarChart(doc, chart, 14, chartY + 6, pageWidth - 28, 78);
 
     // Page break before "Total outreach since contract signed" + every
     // business-owner table — page 1 is the two summary items, everything
@@ -924,8 +977,16 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       didParseCell: (data) => {
         if (data.section === "body" && data.row.index === 0) data.cell.styles.fontStyle = "bold";
       },
+      margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
     });
-    y = doc.lastAutoTable.finalY + 12;
+    // Every business-owner table (starting with "Closed"/"Leads approved by
+    // client"/etc.) starts fresh on its own page, never sharing page 2 with
+    // "Total outreach since contract signed" even when there'd technically
+    // be room left — a hard break here instead of just falling through to
+    // addOwnerPdfTable's own y > 250 check, which only ever caught a table
+    // that literally didn't fit, not "don't put anything else on this page".
+    doc.addPage();
+    y = 20;
 
     // Each business-owner table is only added if it has ≥1 row (per spec —
     // absent, not shown empty) and starts a fresh page if it wouldn't fit
@@ -947,6 +1008,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         theme: "plain",
         styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
         headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
+        margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
       });
       y = doc.lastAutoTable.finalY + 12;
     };

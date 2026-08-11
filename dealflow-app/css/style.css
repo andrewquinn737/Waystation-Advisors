@@ -406,17 +406,7 @@ tr:last-child td { border-bottom: none; }
    buildReportPdf in js/reports.js). */
 #reportsBuyerCentricWrap { margin-top: 20px; }
 #reportsBuyerCentricWrap h3 { font-size: 14px; font-weight: 600; margin: 20px 0 8px; }
-#reportsBuyerCentricWrap > h3:first-child,
-#reportsBuyerCentricWrap > .reports-buyer-centric-grid { margin-top: 0; }
-/* Summary table + bar chart side by side on wide screens, stacked on
-   mobile — the two are unrelated widths (a fixed 2-column table vs. an SVG
-   that wants to stay wide), so a plain grid with a min column width reads
-   better than trying to force them into equal halves. */
-.reports-buyer-centric-grid { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 20px; align-items: start; }
-.reports-buyer-centric-grid h3 { margin-top: 0; }
-@media (max-width: 640px) {
-  .reports-buyer-centric-grid { grid-template-columns: 1fr; }
-}
+#reportsBuyerCentricWrap > h3:first-child { margin-top: 0; }
 .reports-contacted-dials-scroll { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .reports-contacted-dials-scroll table { border: none; border-radius: 0; }
 .reports-contacted-dials-scroll thead th { position: sticky; top: 0; z-index: 1; }
