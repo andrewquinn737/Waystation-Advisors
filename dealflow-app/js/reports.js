@@ -335,10 +335,33 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     not_interested: "#e0776d",
   };
 
+  // Rough word-wrap for an SVG <text> label — no live font metrics
+  // available here (unlike jsPDF's splitTextToSize), so lines are packed
+  // greedily against an estimated average character width for the given
+  // font size, same idea as the PDF chart's wrapping (see drawPdfBarChart).
+  function wrapLabelLines(label, maxWidth, fontSize) {
+    const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.55)));
+    const words = label.split(" ");
+    const lines = [];
+    let current = "";
+    words.forEach((word) => {
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    });
+    if (current) lines.push(current);
+    return lines;
+  }
+
   // Plain inline SVG — no charting library is imported anywhere in this
   // app, and pulling one in for 7 bars would be a heavier CDN/CSP footprint
-  // than just drawing rects directly. Labels are rotated to fit 7 category
-  // names (some long, e.g. "Callback, interested") in a reasonable width.
+  // than just drawing rects directly. Labels are drawn horizontally rather
+  // than rotated, wrapping onto a second line when they don't fit a slot's
+  // width (some are long, e.g. "Callback, interested").
   function buildBarChartSVG(chartRows) {
     const w = 720,
       h = 340,
@@ -348,6 +371,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       chartRight = 700;
     const slotWidth = (chartRight - chartLeft) / GRAPH_METRIC_LABELS.length;
     const barWidth = Math.min(46, slotWidth - 14);
+    const labelFontSize = 10.5;
     const values = GRAPH_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
     const maxValue = Math.max(1, ...values);
     const bars = GRAPH_METRIC_LABELS.map(([key, label], i) => {
@@ -356,10 +380,14 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       const slotCenter = chartLeft + slotWidth * i + slotWidth / 2;
       const barX = slotCenter - barWidth / 2;
       const barY = axisY - barHeight;
+      const labelLines = wrapLabelLines(label, slotWidth - 6, labelFontSize);
+      const labelText = labelLines
+        .map((line, li) => `<tspan x="${slotCenter.toFixed(1)}" dy="${li === 0 ? 0 : labelFontSize + 1}">${escapeHtml(line)}</tspan>`)
+        .join("");
       return `
         <rect x="${barX.toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth}" height="${Math.max(0, barHeight).toFixed(1)}" fill="${CHART_BAR_COLORS[key]}" rx="2" />
         <text x="${slotCenter.toFixed(1)}" y="${(barY - 6).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="600" fill="#15213a">${value}</text>
-        <text x="${slotCenter.toFixed(1)}" y="${axisY + 14}" text-anchor="end" font-size="10.5" fill="#4b5563" transform="rotate(-35 ${slotCenter.toFixed(1)} ${axisY + 14})">${escapeHtml(label)}</text>
+        <text x="${slotCenter.toFixed(1)}" y="${axisY + 16}" text-anchor="middle" font-size="${labelFontSize}" fill="#4b5563">${labelText}</text>
       `;
     });
     return `
@@ -872,31 +900,45 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const pageCount = doc.internal.getNumberOfPages();
+
+    const scale = 0.97; // ~3% smaller overall than the previous size
+    const postHeight = 13 * scale;
+    const postOverhang = 2.5 * scale; // post pokes up past where the arm meets it
+    const armOverhang = 3 * scale; // arm pokes out to the left of the post too, not just toward the sign
+    const gapPostToSign = 5 * scale; // clearance between the post and the sign's left edge (was nearly touching)
+    const signW = 15.5 * scale;
+    const signH = 7 * scale;
+    const chainGap = 2.5 * scale;
+
     const postX = pageWidth - 34;
     const groundY = pageHeight - 6;
-    const topY = groundY - 13;
-    const armEndX = postX + 18;
-    const signW = 16,
-      signH = 7;
-    const signX = armEndX - signW - 1;
-    const signY = topY + 2.5;
+    const armY = groundY - postHeight; // the y level the arm/crossbar sits at
+    const postTopY = armY - postOverhang;
+    const armStartX = postX - armOverhang;
+    const signX = postX + gapPostToSign;
+    const armEndX = signX + signW;
+    const signY = armY + chainGap;
+
     for (let p = 1; p <= pageCount; p++) {
       doc.setPage(p);
       doc.setDrawColor(...PDF_NAVY);
       doc.setLineWidth(0.5);
-      doc.line(postX, groundY, postX, topY); // post
+      doc.line(postX, groundY, postX, postTopY); // post, extending slightly above the arm
       doc.line(postX - 1.5, groundY, postX + 1.5, groundY); // small foot, planted look
-      doc.line(postX, topY, armEndX, topY); // arm
+      doc.line(armStartX, armY, armEndX, armY); // arm, extending slightly past the post on the left
       doc.setLineWidth(0.3);
-      doc.line(signX + 2, topY, signX + 2, signY); // chain, left
-      doc.line(signX + signW - 2, topY, signX + signW - 2, signY); // chain, right
+      doc.line(signX + 2, armY, signX + 2, signY); // chain, left
+      doc.line(signX + signW - 2, armY, signX + signW - 2, signY); // chain, right
       doc.setLineWidth(0.4);
       doc.setFillColor(...PDF_GOLD);
       doc.roundedRect(signX, signY, signW, signH, 1, 1, "FD");
       doc.setFont("times", "bold");
-      doc.setFontSize(5.5);
+      doc.setFontSize(5.3 * scale);
       doc.setTextColor(...PDF_NAVY);
-      doc.text("WAYSTATION", signX + signW / 2, signY + signH / 2 + 1.3, { align: "center" });
+      // Baseline, not visual center, is what jsPDF actually positions text
+      // on — a small downward nudge (not the sign's full half-height) is
+      // what actually lands it centered rather than toward the bottom.
+      doc.text("WAYSTATION", signX + signW / 2, signY + signH / 2 + 0.9 * scale, { align: "center" });
     }
   }
 
