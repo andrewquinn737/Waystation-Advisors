@@ -388,17 +388,31 @@ function enterProfileEditMode() {
     els.calendlyLinkText.replaceWith(calendlyInput);
   }
 
-  // "For my intro calls: Use partner's link / Use my link" — team leads
-  // only, and only once they already have a Calendly link on file (nothing
-  // to route to their "own" link otherwise). Never shown for the main admin
-  // themselves, who has no partner to route to in the first place.
-  const showCalendlyPreference = profile.role === "team_lead" && !!profile.calendly_link;
-  if (showCalendlyPreference) {
-    els.calendlyPreferenceSelect.value = profile.use_own_calendly_link ? "own" : "partner";
-    els.calendlyPreferenceSection.classList.remove("hidden");
+  // "For my intro calls: Use partner's link / Use my link" — anyone who can
+  // edit a Calendly link at all (main admin or team lead — same pool as
+  // canEditCalendly above), and only once they actually have one on file
+  // (nothing to route to their "own" link otherwise). Reacts live to typing
+  // in the link field itself, rather than only being (re-)evaluated the
+  // next time edit mode is entered — pasting/typing a link in now reveals
+  // this immediately instead of requiring an exit-and-back-in round trip.
+  // Only resets the select's own value the moment it newly appears, so
+  // toggling it and then continuing to edit the link text doesn't stomp
+  // back over whatever was just picked.
+  let preferenceShown = false;
+  function syncCalendlyPreferenceVisibility() {
+    const shows = canEditCalendly && !!calendlyInput.value.trim();
+    if (shows && !preferenceShown) {
+      els.calendlyPreferenceSelect.value = profile.use_own_calendly_link ? "own" : "partner";
+    }
+    preferenceShown = shows;
+    els.calendlyPreferenceSection.classList.toggle("hidden", !shows);
+  }
+  if (canEditCalendly) {
+    syncCalendlyPreferenceVisibility();
+    calendlyInput.addEventListener("input", syncCalendlyPreferenceVisibility);
   }
 
-  profileEditInputs = { nameInput, phoneInput, emailInput, calendlyInput, showCalendlyPreference };
+  profileEditInputs = { nameInput, phoneInput, emailInput, calendlyInput, canEditCalendly };
   nameInput.focus();
   nameInput.select();
 }
@@ -407,13 +421,18 @@ async function exitProfileEditMode() {
   if (!profileEditMode) return;
   profileEditMode = false;
   els.avatarInitials.classList.remove("editable");
-  const { nameInput, phoneInput, emailInput, calendlyInput, showCalendlyPreference } = profileEditInputs;
+  const { nameInput, phoneInput, emailInput, calendlyInput, canEditCalendly } = profileEditInputs;
   profileEditInputs = null;
 
   const newName = nameInput.value.trim() || profile.full_name;
   const newPhone = phoneInput.value.trim();
   const newEmail = emailInput.value.trim();
   const newCalendlyLink = calendlyInput ? calendlyInput.value.trim() : null;
+  // Re-derived from the final link value rather than reusing a flag
+  // captured back when edit mode was entered — the preference section may
+  // have appeared or disappeared since then as the link was typed in/out
+  // (see syncCalendlyPreferenceVisibility above).
+  const showCalendlyPreference = canEditCalendly && !!newCalendlyLink;
   const newUseOwnCalendlyLink = showCalendlyPreference ? els.calendlyPreferenceSelect.value === "own" : profile.use_own_calendly_link;
   nameInput.replaceWith(els.profileName);
   phoneInput.replaceWith(els.profilePhone);
