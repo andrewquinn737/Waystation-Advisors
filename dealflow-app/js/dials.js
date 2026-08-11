@@ -2177,20 +2177,22 @@ async function toggleDidCallToday() {
     // holds the active tab's rows), so this needs no extra lookup. Lets the
     // Profile page's Outreach calls counter/graph filter to just the
     // currently-active side (see loadCallsChart in js/profile.js).
-    // list_id/contact_status_at_call/buyer_id/company_name/contact_name are
-    // a permanent snapshot for the Reports feature (see js/reports.js) —
-    // dial_lists rows are hard-deleted (cascading to their dials) when a tab
-    // is removed, so this is the only place these facts survive that
-    // deletion. Not foreign keys on purpose; they just need to keep their
-    // original value forever, even once the tab/dial/buyer-assignment they
-    // came from no longer resolves to anything. buyer_id comes from the
-    // dial's own list (looked up in the already-in-memory allLists —
-    // dial_lists.buyer_id, see the "Buyer" picker required on tab creation)
-    // since a dial row itself has no buyer_id column of its own.
-    // company_name/contact_name feed the "Contacted business owners" static
-    // list on the buyer-scoped Outreach report — like contact_status_at_call,
-    // they're captured once here and never updated afterward even if the
-    // dial's info changes later that same day.
+    // list_id/contact_status_at_call/buyer_id/company_name/contact_name/
+    // website/city/state/industry/call_notes are a permanent snapshot for
+    // the Reports feature (see js/reports.js) — dial_lists rows are
+    // hard-deleted (cascading to their dials) when a tab is removed, so
+    // this is the only place these facts survive that deletion. Not foreign
+    // keys on purpose; they just need to keep their original value forever,
+    // even once the tab/dial/buyer-assignment they came from no longer
+    // resolves to anything. buyer_id comes from the dial's own list (looked
+    // up in the already-in-memory allLists — dial_lists.buyer_id, see the
+    // "Buyer" picker required on tab creation) since a dial row itself has
+    // no buyer_id column of its own. company_name/contact_name/website/
+    // city/state/industry/call_notes feed the "Contacted business owners"
+    // static list and the buyer-centric business-owner tables on the
+    // Outreach report — like contact_status_at_call, they're captured once
+    // here and never updated afterward even if the dial's info changes
+    // later that same day.
     const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
     await supabase.from("call_status_changes").insert({
       user_id: profile.id,
@@ -2201,6 +2203,11 @@ async function toggleDidCallToday() {
       buyer_id: currentListForBuyer?.buyer_id || null,
       company_name: currentDial.company_name || null,
       contact_name: currentDial.full_name || null,
+      website: currentDial.website || null,
+      city: currentDial.city || null,
+      state: currentDial.state || null,
+      industry: currentDial.industry || null,
+      call_notes: currentDial.call_notes || null,
     });
   }
 
@@ -2437,6 +2444,10 @@ async function handleScheduleIntroCallFromDial(dial) {
       // assigned to (dial_lists.buyer_id), not just to whoever's account
       // owns the resulting client.
       data.source_list_id = dial.list_id || null;
+      // Sellers have no website field of their own to fall back on
+      // otherwise — captured here for the same "buyer-centric business-
+      // owner tables" reason as source_list_id above (see js/reports.js).
+      data.website = dial.website || null;
 
       const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
       if (error) throw error;
