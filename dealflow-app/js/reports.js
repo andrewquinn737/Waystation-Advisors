@@ -1043,6 +1043,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       doc.setFontSize(10.5);
       doc.setTextColor(...PDF_NAVY);
       doc.text(title, 14, y);
+      // Website values are one long unbroken token (a URL, no spaces to
+      // wrap on) — left to autoTable's own auto-sizing, the only way it
+      // could fit the whole thing was to keep widening that column, which
+      // squeezed every other column down to a sliver and inflated row
+      // height in the process. A fixed width + ellipsize truncates instead
+      // of ever letting it balloon.
+      const websiteIdx = columns.findIndex((c) => c.key === "website");
       doc.autoTable({
         startY: y + 4,
         head: [columns.map((c) => c.label)],
@@ -1050,6 +1057,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         theme: "plain",
         styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
         headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
+        columnStyles: websiteIdx >= 0 ? { [websiteIdx]: { cellWidth: 32, overflow: "ellipsize" } } : {},
         margin: { bottom: AUTOTABLE_BOTTOM_MARGIN },
       });
       y = doc.lastAutoTable.finalY + 12;
