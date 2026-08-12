@@ -142,6 +142,18 @@ function sanitizeForPdf(text) {
   return stripped.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
 }
 
+// A bare "YYYY-MM-DD" date (no time/zone, e.g. from a Postgres `date`
+// column) — passing that straight to `new Date(...)` parses it as UTC
+// midnight, which toLocaleDateString() then renders a day EARLIER for
+// every negative-UTC-offset viewer (all of the continental US) once it's
+// converted to local time for display. This was the actual cause of a real
+// bug: a call logged the afternoon of 8/12 (Mountain time) was showing up
+// as 8/11 on screen. Appending a local time component forces the browser
+// to parse it as local midnight instead, matching the real calendar day.
+function formatDateOnly(dateStr) {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString();
+}
+
 function mondayOf(d) {
   const dd = new Date(d);
   const day = dd.getDay(); // 0=Sun..6=Sat
@@ -472,7 +484,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     { key: "state", label: "State" },
     { key: "industry", label: "Industry sector" },
     { key: "call_notes", label: "Call notes" },
-    { key: "date_last_contacted", label: "Date last contacted", format: (v) => (v ? new Date(v).toLocaleDateString() : "—") },
+    // Every distinct day this dial was contacted in the period, not just
+    // the most recent one — a dial reached on more than one day used to
+    // silently get split into a separate row under each category it ever
+    // landed in (see get_buyer_contacted_owners), each showing only 1 date;
+    // now it's one row, every date it was actually contacted.
+    { key: "dates_contacted", label: "Date(s) contacted", format: (v) => (Array.isArray(v) && v.length ? v.map(formatDateOnly).join(", ") : "—") },
     { key: "outreach_count", label: "Outreach count" },
   ];
 
@@ -806,6 +823,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   const PDF_BORDER = [234, 227, 211];
   const PDF_TEXT_GRAY = [75, 85, 99];
 
+  // Where a fresh page's first heading/table starts — needs real clearance
+  // below the top-right logo mark (see drawLogoMark), whose own footprint
+  // reaches down to roughly y=21. y=20 (the previous value) left only ~3mm,
+  // which on some pages looked like the logo touching the table header.
+  const PDF_FRESH_PAGE_TOP_Y = 30;
+
   // Columns whose PDF text should only have emoji/control characters
   // stripped, not title-cased — a URL, free-text call note, or two-letter
   // state code reads wrong in title case (see sanitizeForPdf vs stripForPdf).
@@ -984,7 +1007,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     // business-owner table — page 1 is the two summary items, everything
     // else starts page 2 (per spec).
     doc.addPage();
-    let y = 20;
+    let y = PDF_FRESH_PAGE_TOP_Y;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.setTextColor(...PDF_NAVY);
@@ -1011,7 +1034,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     // addOwnerPdfTable's own y > 250 check, which only ever caught a table
     // that literally didn't fit, not "don't put anything else on this page".
     doc.addPage();
-    y = 20;
+    y = PDF_FRESH_PAGE_TOP_Y;
 
     // Each business-owner table is only added if it has ≥1 row (per spec —
     // absent, not shown empty) and starts a fresh page if it wouldn't fit
@@ -1034,7 +1057,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       if (!rows.length) return;
       if (y > 250) {
         doc.addPage();
-        y = 20;
+        y = PDF_FRESH_PAGE_TOP_Y;
       }
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10.5);
