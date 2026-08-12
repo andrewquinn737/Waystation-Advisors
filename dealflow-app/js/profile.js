@@ -1472,7 +1472,7 @@ els.newTeamNameInput.addEventListener("keydown", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// "X people called this week" + 6-week chart. A row is inserted into
+// "X people contacted this week" + 6-week chart. A row is inserted into
 // call_status_changes (see updateDialStatus() in js/dials.js) the first time
 // a dial moves off its default "Uncontacted" status — this counts how many
 // distinct dials this intern has contacted, bucketed into Monday-Sunday weeks.
@@ -1651,7 +1651,7 @@ async function loadCallsChart() {
           ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
           : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
       })();
-  els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} called this week, ${todayCount} today${quotaHTML}`;
+  els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "person" : "people"} contacted this week, ${todayCount} today${quotaHTML}`;
   renderCallsChart(els.callsChart, weekStarts, counts, quota);
 }
 
