@@ -169,6 +169,23 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
           </button>`;
   }
 
+  // A group's own checkbox next to its section label (Admins/a team/
+  // Unassigned interns) — checked only when every member of that group is
+  // currently visible, so clicking it either selects every member at once or
+  // clears all of them, same "select/deselect the whole set" shape as the
+  // master Select-all row above, just scoped to one group's accounts.
+  function isGroupFullyVisible(members) {
+    return members.every((a) => isAccountVisible(a.id, storageKey));
+  }
+
+  function groupLabelHTML(g, members) {
+    return `
+          <button type="button" class="accounts-visible-row accounts-visible-group-label" data-group="${g.key}">
+            <input type="checkbox" ${isGroupFullyVisible(members) ? "checked" : ""} tabindex="-1" />
+            ${escapeHtml(g.label)}
+          </button>`;
+  }
+
   function render() {
     load(storageKey);
     const s = stateFor(storageKey);
@@ -184,7 +201,7 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
         .map((g) => {
           const members = byGroup.get(g.key) || [];
           if (!members.length) return "";
-          return `<div class="accounts-visible-group-label">${escapeHtml(g.label)}</div>${members.map(accountRowHTML).join("")}`;
+          return `${groupLabelHTML(g, members)}${members.map(accountRowHTML).join("")}`;
         })
         .join("");
     } else {
@@ -243,6 +260,23 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
         if (s.visibleAccountIds === null) s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
         if (s.visibleAccountIds.has(id)) s.visibleAccountIds.delete(id);
         else s.visibleAccountIds.add(id);
+        persist(storageKey, initKey);
+        render();
+        onChange();
+      });
+    });
+    // Group section-label checkbox (Admins/a team/Unassigned interns, see
+    // groupLabelHTML above) — same "select/deselect this whole set" shape as
+    // #accountsSelectAllBtn above, just scoped to one group's members instead
+    // of every account.
+    bodyEl.querySelectorAll(".accounts-visible-group-label[data-group]").forEach((groupBtn) => {
+      groupBtn.addEventListener("click", (e) => {
+        e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
+        const groupKey = groupBtn.dataset.group;
+        const members = allAccounts.filter((a) => groupKeyFor(a) === groupKey);
+        if (s.visibleAccountIds === null) s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
+        const fullyVisible = members.every((a) => s.visibleAccountIds.has(a.id));
+        members.forEach((a) => (fullyVisible ? s.visibleAccountIds.delete(a.id) : s.visibleAccountIds.add(a.id)));
         persist(storageKey, initKey);
         render();
         onChange();

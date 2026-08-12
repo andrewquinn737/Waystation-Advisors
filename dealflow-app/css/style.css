@@ -970,9 +970,12 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 .accounts-visible-empty { padding: 8px 10px; font-size: 12.5px; color: var(--text-muted); }
 /* Admin-only team section labels within the list above (see
    wireAccountsVisiblePopup's getTeams option in js/accountsVisible.js) — a
-   small-caps muted section header. The first one needs no extra top gap (it
-   already sits right below "Select all"); every one after it gets a bit of
-   breathing room from the previous group's last row. */
+   small-caps muted section header, now also a clickable row (shares
+   .accounts-visible-row's shell/checkbox styling, see groupLabelHTML in
+   js/accountsVisible.js) that selects/deselects every account in that one
+   group at once. The first one needs no extra top gap (it already sits
+   right below "Select all"); every one after it gets a bit of breathing room
+   from the previous group's last row. */
 .accounts-visible-group-label {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
   color: var(--text-muted); padding: 8px 10px 2px;
