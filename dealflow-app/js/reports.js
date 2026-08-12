@@ -151,7 +151,11 @@ function sanitizeForPdf(text) {
 // as 8/11 on screen. Appending a local time component forces the browser
 // to parse it as local midnight instead, matching the real calendar day.
 function formatDateOnly(dateStr) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString();
+  // No year — the only current caller (dates_contacted) always sits inside
+  // a table already scoped to "for week/month of ___", so the year is
+  // redundant, and dropping it gives multiple dates a real chance of
+  // fitting on one line instead of always wrapping.
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 
 function mondayOf(d) {
@@ -465,11 +469,22 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     `;
   }
 
+  // pdfWidth/pdfHeaderFontSize (used only by addOwnerPdfTable, see below)
+  // are what keep the PDF's own column widths fixed and identical across
+  // every one of these tables, instead of each table auto-sizing its
+  // columns from its own content independently — that's what let something
+  // like the Name column land at a different width on different pages
+  // depending on what happened to be in it. Website has no spaces to wrap
+  // on (a URL is one unbroken token), so left unconstrained it either
+  // forced the whole table wider or (with the ellipsize this used to use)
+  // truncated the address — now it gets real width and plain linebreak
+  // wrapping (the default `overflow` already set in styles below), so the
+  // full address is always visible even if that takes 2-3 lines.
   const MONEY_COLUMN = { key: "annual_revenue", label: "Revenue", format: (v) => (v == null ? "—" : `$${Number(v).toLocaleString()}`) };
   const SET1_COLUMNS = [
     { key: "full_name", label: "Name" },
     { key: "company_name", label: "Company name" },
-    { key: "website", label: "Website" },
+    { key: "website", label: "Website", pdfWidth: 30 },
     { key: "city", label: "City" },
     { key: "state", label: "State" },
     { key: "industry", label: "Industry sector" },
@@ -477,20 +492,23 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     { key: "employee_count", label: "Employees" },
   ];
   const SET2_COLUMNS = [
-    { key: "contact_name", label: "Name" },
-    { key: "company_name", label: "Company name" },
-    { key: "website", label: "Website" },
-    { key: "city", label: "City" },
-    { key: "state", label: "State" },
-    { key: "industry", label: "Industry sector" },
-    { key: "call_notes", label: "Call notes" },
+    { key: "contact_name", label: "Name", pdfWidth: 16 },
+    { key: "company_name", label: "Company name", pdfWidth: 22, pdfHeaderFontSize: 6 },
+    { key: "website", label: "Website", pdfWidth: 32 },
+    { key: "city", label: "City", pdfWidth: 13 },
+    { key: "state", label: "State", pdfWidth: 9, pdfHeaderFontSize: 6 },
+    { key: "industry", label: "Industry sector", pdfWidth: 18, pdfHeaderFontSize: 6 },
+    { key: "call_notes", label: "Call notes", pdfWidth: 40 },
     // Every distinct day this dial was contacted in the period, not just
     // the most recent one — a dial reached on more than one day used to
     // silently get split into a separate row under each category it ever
     // landed in (see get_buyer_contacted_owners), each showing only 1 date;
-    // now it's one row, every date it was actually contacted.
-    { key: "dates_contacted", label: "Date(s) contacted", format: (v) => (Array.isArray(v) && v.length ? v.map(formatDateOnly).join(", ") : "—") },
-    { key: "outreach_count", label: "Outreach count" },
+    // now it's one row, every date it was actually contacted. Formatted
+    // without the year (redundant — the table itself is already scoped to
+    // "for week/month of ___") so multiple dates have a real chance of
+    // fitting on one line instead of always wrapping.
+    { key: "dates_contacted", label: "Date(s) contacted", pdfWidth: 22, pdfHeaderFontSize: 6, format: (v) => (Array.isArray(v) && v.length ? v.map(formatDateOnly).join(", ") : "—") },
+    { key: "outreach_count", label: "Outreach count", pdfWidth: 10, pdfHeaderFontSize: 5.5 },
   ];
 
   // Outreach report only, and only once exactly one buyer is selected — see
@@ -827,6 +845,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // below the top-right logo mark (see drawLogoMark), whose own footprint
   // reaches down to roughly y=21. y=20 (the previous value) left only ~3mm,
   // which on some pages looked like the logo touching the table header.
+  // Also passed as every doc.autoTable() call's own margin.top: a long
+  // table (many rows) can trigger jspdf-autotable's OWN internal page
+  // break, continuing onto a fresh page it adds itself — that continuation
+  // page ignores wherever `y` happened to be and starts at whatever
+  // margin.top the table was given, so without this every autoTable call
+  // needed its own explicit margin to keep clearing the logo on any page
+  // it might silently spill onto, not just the ones added manually above.
   const PDF_FRESH_PAGE_TOP_Y = 30;
 
   // Columns whose PDF text should only have emoji/control characters
@@ -994,6 +1019,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       styles: { font: "helvetica", fontSize: 9, cellPadding: 3, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY },
       headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold" },
       columnStyles: { 1: { halign: "right" } },
+      margin: { top: PDF_FRESH_PAGE_TOP_Y },
     });
 
     const chartY = doc.lastAutoTable.finalY + 14;
@@ -1026,6 +1052,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       didParseCell: (data) => {
         if (data.section === "body" && data.row.index === 0) data.cell.styles.fontStyle = "bold";
       },
+      margin: { top: PDF_FRESH_PAGE_TOP_Y },
     });
     // Every business-owner table (starting with "Closed"/"Leads approved by
     // client"/etc.) starts fresh on its own page, never sharing page 2 with
@@ -1039,20 +1066,6 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     // Each business-owner table is only added if it has ≥1 row (per spec —
     // absent, not shown empty) and starts a fresh page if it wouldn't fit
     // in the remaining space on the current one.
-    // Explicit widths (mm) for the two columns that can't just be left to
-    // autoTable's own content-based auto-sizing: website is one long
-    // unbroken token (a URL, no spaces to wrap on) — without a fixed width
-    // it keeps widening to fit the whole thing, squeezing every other
-    // column into a sliver and inflating row height along with it, so it
-    // gets a modest fixed width with ellipsize instead. Call notes is
-    // free-form text that's routinely the longest content in the row, so
-    // it's given the most room of any column here, wider than everything
-    // else on purpose rather than leaving it to fight for space.
-    const PDF_OWNER_COLUMN_WIDTHS = {
-      website: { cellWidth: 26, overflow: "ellipsize" },
-      call_notes: { cellWidth: 42 },
-    };
-
     const addOwnerPdfTable = (title, rows, columns) => {
       if (!rows.length) return;
       if (y > 250) {
@@ -1063,9 +1076,21 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       doc.setFontSize(10.5);
       doc.setTextColor(...PDF_NAVY);
       doc.text(title, 14, y);
+      // Fixed per-column widths (see SET1_COLUMNS/SET2_COLUMNS' own pdfWidth)
+      // are what keep every one of these tables using identical column
+      // widths, instead of each one auto-sizing independently from
+      // whatever happens to be in its own rows. pdfHeaderFontSize shrinks
+      // just that column's header (jspdf-autotable's columnStyles override
+      // headStyles per-column) for the handful of labels that don't fit
+      // their fixed width at the normal 7pt without wrapping to 2 lines.
       const columnStyles = {};
       columns.forEach((c, idx) => {
-        if (PDF_OWNER_COLUMN_WIDTHS[c.key]) columnStyles[idx] = PDF_OWNER_COLUMN_WIDTHS[c.key];
+        if (c.pdfWidth || c.pdfHeaderFontSize) {
+          columnStyles[idx] = {
+            ...(c.pdfWidth ? { cellWidth: c.pdfWidth } : {}),
+            ...(c.pdfHeaderFontSize ? { fontSize: c.pdfHeaderFontSize } : {}),
+          };
+        }
       });
       doc.autoTable({
         startY: y + 4,
@@ -1075,6 +1100,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
         headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
         columnStyles,
+        margin: { top: PDF_FRESH_PAGE_TOP_Y },
       });
       y = doc.lastAutoTable.finalY + 12;
     };
