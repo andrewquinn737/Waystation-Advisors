@@ -1957,7 +1957,7 @@ function renderDialModal() {
             </div>
             ${
               isCalledTodayVisible(dial)
-                ? `<button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Called today</button>`
+                ? `<button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Contacted today</button>`
                 : ""
             }
           </div>
