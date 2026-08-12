@@ -891,7 +891,15 @@ html.is-desktop-device .contact-action-tel { display: none; }
 
 .dials-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .dials-tabbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-.dials-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+/* #addTabBtn ("+") is appended as the LAST CHILD of this element by
+   js/dials.js's renderTabs() rather than staying a separate flex item next
+   to it — so on desktop it wraps as part of the same flex-wrap row as the
+   tab chips: it sits right after the last tab when there's room on that
+   line, and only drops to a new line below the tabs when there isn't,
+   instead of always floating to the right of a (possibly multi-line) tab
+   block. align-items:center keeps the round button vertically centered
+   against the tab buttons' slightly different height on shared rows. */
+.dials-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .dial-tab {
   padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
   font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer;

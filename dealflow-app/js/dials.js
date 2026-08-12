@@ -775,6 +775,15 @@ function renderTabs() {
       .join("");
     wireTabInteractions();
   }
+  // Re-appended (moved, not cloned — same node, so its click listener from
+  // module init stays bound) as the last child of #dialTabs itself rather
+  // than staying a separate sibling in .dials-tabbar. That makes it one more
+  // item in the SAME wrapping flex row as the tab chips (see .dials-tabs in
+  // css/style.css), so on desktop it naturally sits right after the last tab
+  // when there's room and only drops to its own line below the tabs when
+  // there isn't — instead of always floating to the right of the whole
+  // (possibly multi-line) tab block.
+  els.dialTabs.appendChild(els.addTabBtn);
   updateArchiveMenuVisibility();
   loadDials();
 }
@@ -1096,11 +1105,13 @@ function reorderTabToPointer(wrap, clientX) {
       break;
     }
   }
-  if (target) {
-    if (wrap.nextElementSibling !== target) els.dialTabs.insertBefore(wrap, target);
-  } else if (els.dialTabs.lastElementChild !== wrap) {
-    els.dialTabs.appendChild(wrap);
-  }
+  // Dragged past every other tab (target === null) means "last" — insert
+  // right before the "+" button rather than appendChild, since #addTabBtn
+  // now lives inside #dialTabs too (see renderTabs) and is always its last
+  // child; a plain appendChild would land wrap AFTER the button instead of
+  // before it, visibly reordering the button on every drag-to-end.
+  const insertBeforeEl = target || els.addTabBtn;
+  if (wrap.nextElementSibling !== insertBeforeEl) els.dialTabs.insertBefore(wrap, insertBeforeEl);
 }
 
 function wireTabInteractions() {
