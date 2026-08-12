@@ -849,6 +849,7 @@ function buildClientViewHTML(client) {
     ${buildPhoneNumbersHTML(client)}
     ${rfLink("LinkedIn", client.linkedin)}
     ${rf("Person responsible", client.intern_name)}
+    ${isBuyer ? "" : rf("Intended buyer", client._intendedBuyerName || "None")}
     ${isBuyer ? "" : rf("Industry sector", client.industry)}
     ${isBuyer ? "" : rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
     ${isBuyer ? "" : rf("Employees", client.employee_count)}
@@ -2054,6 +2055,11 @@ async function handleEditSave() {
   const { error } = await supabase.from("clients").update(data).eq("id", currentClient.id);
   if (error) return showError(document.getElementById("clientModalError"), error);
   Object.assign(currentClient, data);
+  // Re-resolve in case intended_buyer_id just changed — _intendedBuyerName
+  // is a separate stashed display name, not part of `data`, so without this
+  // the view we're about to render right below would still show whichever
+  // buyer was intended BEFORE this save.
+  await resolveIntendedBuyerName(currentClient);
   currentMode = "view";
   renderModalBody();
   await loadClients();
@@ -2108,13 +2114,29 @@ function openCreateModal() {
   renderModalBody();
 }
 
+// Resolves clients.intended_buyer_id (a bare FK) into a display name,
+// stashed on the client object (client._intendedBuyerName) — shared by both
+// the read-only Profile view (openDetailModal, below) and edit mode
+// (editProfileBtn's click handler) so "Intended buyer" shows correctly as
+// soon as a seller client's Profile is opened, not only once you'd already
+// clicked into Edit. get_client_full_name() RPC rather than a plain query —
+// an admin can set intended_buyer_id to any buyer, not just ones a given
+// team owns, so a team lead viewing this same client later could otherwise
+// be blocked by clients_select_own RLS from even seeing that buyer's name.
+async function resolveIntendedBuyerName(client) {
+  if (client.client_type === "seller" && client.intended_buyer_id) {
+    const { data } = await supabase.rpc("get_client_full_name", { p_client_id: client.intended_buyer_id });
+    client._intendedBuyerName = data || null;
+  }
+}
+
 async function openDetailModal(client, initialSubTab = "profile") {
   currentClient = client;
   currentMode = "view";
   currentSubTab = initialSubTab;
   els.clientModal.classList.remove("hidden");
   lockPageScroll();
-  await loadClientEvents();
+  await Promise.all([loadClientEvents(), resolveIntendedBuyerName(currentClient)]);
   renderModalBody();
 }
 
@@ -2169,19 +2191,13 @@ if (isAdmin || isTeamLead) {
 // visible above.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 els.editProfileBtn.addEventListener("click", async () => {
-  // Resolve the intended buyer's display name before entering edit mode —
-  // clients.intended_buyer_id is just a bare FK, and clientForm.js's HTML
-  // builder is a plain synchronous string template with nowhere to await a
-  // lookup itself, so it's fetched here and stashed on the client object
-  // (see personalAndContactSectionsHTML's use of client._intendedBuyerName).
-  // get_client_full_name() RPC rather than a plain query — an admin can set
-  // intended_buyer_id to any buyer, not just ones a given team owns, so a
-  // team lead viewing this same client later could otherwise be blocked by
-  // clients_select_own RLS from even seeing that buyer's name.
-  if (currentClient.client_type === "seller" && currentClient.intended_buyer_id) {
-    const { data } = await supabase.rpc("get_client_full_name", { p_client_id: currentClient.intended_buyer_id });
-    currentClient._intendedBuyerName = data || null;
-  }
+  // See resolveIntendedBuyerName's own comment — already resolved once when
+  // the Profile view first opened, but redone here too in case it changed
+  // since (e.g. an admin edited it elsewhere) while this same modal was
+  // still open. clientForm.js's HTML builder is a plain synchronous string
+  // template with nowhere to await a lookup of its own, so it has to be
+  // fetched and stashed on the client object before entering edit mode.
+  await resolveIntendedBuyerName(currentClient);
   currentMode = "edit";
   renderModalBody();
 });
