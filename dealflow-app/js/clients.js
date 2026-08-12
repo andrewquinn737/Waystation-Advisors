@@ -977,16 +977,28 @@ function timelineEventDateStr(e) {
 
 // What shows on the Timeline row's 2nd line — normally just the type label,
 // but a Client meeting names its counterpart (see openCounterpartPicker /
-// logSharedClientEvent) and a Task shows its own description instead of the
-// generic "Task" label.
+// logSharedClientEvent), a Task shows its own description instead of the
+// generic "Task" label, and on a buyer client's Timeline every other shared
+// milestone (client_approval, loi, due_diligence, close — see
+// SHARED_EVENT_TYPES) names the seller it's attached to, since a buyer can
+// have several sellers moving through the same stage at once and the plain
+// label alone doesn't say which one this row is about.
 function eventTypeDisplay(e) {
+  const label = EVENT_TYPE_LABELS[e.event_type] || e.event_type;
   if (e.event_type === "client_meeting" && e.details?.counterpart_name) {
     return `Client meeting with ${e.details.counterpart_name}`;
+  }
+  if (
+    currentClient?.client_type === "buyer" &&
+    SHARED_EVENT_TYPES.has(e.event_type) &&
+    e.details?.counterpart_name
+  ) {
+    return `${label}: ${e.details.counterpart_name}`;
   }
   if (e.event_type === "task" && e.details?.task_description) {
     return e.details.task_description;
   }
-  return EVENT_TYPE_LABELS[e.event_type] || e.event_type;
+  return label;
 }
 
 // True if the event's calendar date (in the viewer's local timezone) is
