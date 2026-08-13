@@ -63,18 +63,11 @@ const CONTACT_STATUSES = [
   { value: "not_interested", label: "Not interested", bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)", dot: "var(--status-not-interested-dot)" },
   { value: "no_response", label: "No response, try again", bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)", dot: "var(--status-no-response-dot)" },
   { value: "callback_interested", label: "Callback, interested", bg: "var(--status-callback-bg)", border: "var(--status-callback-border)", dot: "var(--status-callback-dot)" },
-  { value: "intro_call_scheduled", label: "Intro call scheduled", bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)", dot: "var(--status-scheduled-dot)" },
+  { value: "intro_call_scheduled", label: "Accepted intro call", bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)", dot: "var(--status-scheduled-dot)" },
 ];
 function statusInfo(value) {
   return CONTACT_STATUSES.find((s) => s.value === value) || CONTACT_STATUSES[0];
 }
-
-// "Called today" only makes sense for statuses that still represent an
-// active, in-progress prospect — white (uncontacted), orange (no response,
-// try again), and yellow (callback, interested). It's hidden for green
-// (intro call scheduled), red (not interested), and gray (unable to
-// contact), where logging "called today" doesn't add anything.
-const SHOW_CALLED_TODAY_STATUSES = new Set(["uncontacted", "no_response", "callback_interested"]);
 
 // Which statuses are currently hidden from every list/tab (toggled via the
 // palette filter button).
@@ -200,6 +193,7 @@ const els = {
   newListCreateBtn: document.getElementById("newListCreateBtn"),
   newListCancelBtn: document.getElementById("newListCancelBtn"),
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
+  emailReplyConfirmModal: document.getElementById("emailReplyConfirmModal"),
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
@@ -335,7 +329,7 @@ function emptyDial() {
     full_name: "", city: "", state: "", email: "",
     mobile_phone: "", company_phone: "", linkedin: "", company_name: "",
     website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted",
-    called_today_date: null,
+    contacted_mobile_date: null, contacted_company_date: null, contacted_email_date: null,
   };
 }
 
@@ -566,7 +560,7 @@ function rowsToDials(rows, listId) {
             // deal-stage values seen in actual CSV exports that aren't in
             // CSV_STATUS_VALUE_MAP above, since they're specific to certain
             // sheets rather than universal) count as real, live engagement —
-            // grouped under "Intro call scheduled" rather than falling all
+            // grouped under "Accepted intro call" rather than falling all
             // the way back to "Uncontacted" like every other unrecognized
             // value.
             d.contact_status = "intro_call_scheduled";
@@ -601,31 +595,41 @@ function todayDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Same, one calendar day ahead — used only to set status_hide_effective_date
-// on a category change into a hide-Called-today status (see
-// updateDialStatus/isCalledTodayVisible below), so the button doesn't
-// actually disappear until the NEXT local day rather than the instant you
-// pick one of those 3 categories.
-function tomorrowDateStr() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Which `dials` date column tracks "checked today" for each contact
+// method's white circle (see contactCheckCircleHTML/toggleContactCheck
+// below) — one independent daily toggle per method, replacing the old
+// single "Called today" button/called_today_date. Each resets the same way
+// called_today_date used to: it's just a date, compared against
+// todayDateStr(), so a stale non-today value naturally reads as unchecked
+// with no cron job needed.
+const CONTACT_METHOD_DATE_COLUMNS = {
+  mobile: "contacted_mobile_date",
+  company: "contacted_company_date",
+  email: "contacted_email_date",
+};
+
+// How many of the 3 circles are checked today — drives the "Contacted today
+// x0"/"x1"/"x2"/"x3" display (white at 0, green otherwise). See
+// buildContactedTodayDisplayHTML.
+function contactedTodayCount(dial) {
+  const today = todayDateStr();
+  return Object.values(CONTACT_METHOD_DATE_COLUMNS).filter((col) => dial[col] === today).length;
 }
 
-// Keeps today's already-logged call_status_changes row (if any) in sync
-// with the dial's own info as it gets filled in during/after the same
-// call — toggleDidCallToday() only snapshots once, at the exact moment
-// "Called today" is clicked, which in practice is often BEFORE the outcome
-// is known (status is set and notes are typed once the call has actually
-// happened). Confirmed as a real bug in production: freshly-logged calls
-// were coming through with null website/city/state/industry/call_notes
-// even though the dial itself had all of it, because those fields hadn't
-// been filled in yet at the instant Called-today was toggled. Only ever
-// UPDATEs a row that already exists for today — never inserts one (that
-// stays toggleDidCallToday's job alone), and never touches a PAST day's
-// already-frozen snapshot.
+// Keeps today's already-logged call_status_changes row(s) in sync with the
+// dial's own info as it gets filled in during/after the same call —
+// toggleContactCheck() only snapshots once, at the exact moment a circle is
+// checked, which in practice is often BEFORE the outcome is known (status is
+// set and notes are typed once the call has actually happened). Confirmed as
+// a real bug in production: freshly-logged calls were coming through with
+// null website/city/state/industry/call_notes even though the dial itself
+// had all of it, because those fields hadn't been filled in yet at the
+// instant a circle was checked. Only ever UPDATEs row(s) that already exist
+// for today (there can be up to 3 now, one per checked circle) — never
+// inserts one (that stays toggleContactCheck's job alone), and never touches
+// a PAST day's already-frozen snapshot.
 async function syncTodaysCallLogSnapshot(fields) {
-  if (!currentDial || currentDial.called_today_date !== todayDateStr()) return;
+  if (!currentDial || contactedTodayCount(currentDial) === 0) return;
   const today = todayDateStr();
   await supabase
     .from("call_status_changes")
@@ -636,27 +640,128 @@ async function syncTodaysCallLogSnapshot(fields) {
     .lt("changed_at", `${today}T23:59:59.999`);
 }
 
-// Whether the "Called today" button should currently show for this dial —
-// always true for the 3 "active prospect" statuses (SHOW_CALLED_TODAY_STATUSES),
-// and ALSO true for the other 3 ("Not interested", "Unable to contact",
-// "Intro call scheduled") until status_hide_effective_date (set by
-// updateDialStatus whenever you switch INTO one of those 3) actually
-// arrives — so switching categories throughout the day never hides it
-// mid-day; it only hides starting the next day for whichever of those 3
-// categories the dial is still sitting in at that point. A dial with no
-// recorded date at all was already sitting in a hide category before this
-// column existed, so that's treated the same as "already effective"
-// (hidden) rather than suddenly reappearing for old data.
-function isCalledTodayVisible(dial) {
-  const status = dial.contact_status || "uncontacted";
-  if (SHOW_CALLED_TODAY_STATUSES.has(status)) return true;
-  if (!dial.status_hide_effective_date) return false;
-  return dial.status_hide_effective_date > todayDateStr();
+// ---------------------------------------------------------------------------
+// Per-contact-method "contacted today" check circles — one next to each
+// listed contact method's instant-action icons (mobile/company phone,
+// email), white/unchecked by default, green with a checkmark once checked.
+// Same size and spacing as the instant-call/text/email icons they sit next
+// to (see .dial-contact-check reusing .contact-action-btn's sizing/gap in
+// css/style.css) since they're rendered as one more item inside that same
+// .contact-actions row — see contactIcons.js's `extra` param.
+// ---------------------------------------------------------------------------
+const CONTACT_CHECK_SVG = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+
+function contactCheckCircleHTML(method, dial) {
+  const checked = dial[CONTACT_METHOD_DATE_COLUMNS[method]] === todayDateStr();
+  return `<button type="button" class="contact-action-btn dial-contact-check ${checked ? "checked" : ""}" data-method="${method}" title="Mark contacted">${checked ? CONTACT_CHECK_SVG : ""}</button>`;
 }
 
-// One row of a phone number with its "(Mobile)"/"(Company)" label + instant
-// buildPhoneNumbersHTML (the "Phone numbers" Mobile/Company display block)
-// now lives in contactIcons.js, shared with clients.js.
+// Wires every .dial-contact-check circle currently in the dial modal body —
+// called once per render, right after els.dialModalBody.innerHTML is set
+// (same pattern as stopContactActionPropagation next to it).
+function wireContactCheckCircles() {
+  els.dialModalBody.querySelectorAll(".dial-contact-check[data-method]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleContactCheck(btn.dataset.method);
+    });
+  });
+}
+
+// Non-interactive "Contacted today xN" display — white at 0, green
+// otherwise. Replaces the old clickable "Called today" button; the circles
+// above are the only way to change this now (see toggleContactCheck).
+function buildContactedTodayDisplayHTML(dial) {
+  const count = contactedTodayCount(dial);
+  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}">Contacted today x${count}</div>`;
+}
+
+// Checking/unchecking one of the 3 per-contact-method circles — the same
+// underlying mechanic as the old single "Called today" toggle (a date column
+// compared against todayDateStr(), naturally resetting each day), just split
+// three ways so up to 3 can be checked independently the same day instead of
+// only 1. Each checked circle logs its own call_status_changes row, tagged
+// with which method it was (contact_method) so unchecking that ONE circle
+// later the same day can delete exactly that row instead of guessing among
+// however many others are also logged today for this dial.
+//
+// Email is the one exception: checking it (mobile/company check instantly)
+// first asks "Have they replied to an email?" via els.emailReplyConfirmModal
+// — only a "Yes" there actually checks the circle and logs the contact.
+// Unchecking an already-checked email circle is instant either way, same as
+// mobile/company.
+let contactCheckToggleInFlight = false;
+async function toggleContactCheck(method) {
+  if (contactCheckToggleInFlight) return;
+  const col = CONTACT_METHOD_DATE_COLUMNS[method];
+  const today = todayDateStr();
+  const isChecked = currentDial[col] === today;
+
+  if (!isChecked && method === "email") {
+    openConfirmModal(els.emailReplyConfirmModal, "emailReplyConfirmYesBtn", "emailReplyConfirmNoBtn", () => commitContactCheck(method, true));
+    return;
+  }
+  await commitContactCheck(method, !isChecked);
+}
+
+async function commitContactCheck(method, checking) {
+  if (contactCheckToggleInFlight) return;
+  contactCheckToggleInFlight = true;
+  try {
+    // Same reasoning as updateDialStatus — flush any pending notes edit
+    // before this re-renders the popup.
+    await flushCallNotes();
+    const col = CONTACT_METHOD_DATE_COLUMNS[method];
+    const today = todayDateStr();
+
+    if (!checking) {
+      const { error } = await supabase.from("dials").update({ [col]: null }).eq("id", currentDial.id);
+      if (error) return showError(els.dialModalError, error);
+      currentDial[col] = null;
+      await supabase
+        .from("call_status_changes")
+        .delete()
+        .eq("dial_id", currentDial.id)
+        .eq("user_id", profile.id)
+        .eq("contact_method", method)
+        .gte("changed_at", `${today}T00:00:00`)
+        .lt("changed_at", `${today}T23:59:59.999`);
+    } else {
+      const { error } = await supabase.from("dials").update({ [col]: today }).eq("id", currentDial.id);
+      if (error) return showError(els.dialModalError, error);
+      currentDial[col] = today;
+      // Permanent, FK-less snapshot for the Reports feature (see
+      // js/reports.js) — dial_lists rows are hard-deleted (cascading to
+      // their dials) when a tab is removed, so this is the only place these
+      // facts survive that deletion. contact_method tags which circle logged
+      // this row so a later uncheck of that SAME circle can find and delete
+      // only this one row, even if other circles also logged rows today.
+      const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
+      await supabase.from("call_status_changes").insert({
+        user_id: profile.id,
+        dial_id: currentDial.id,
+        dial_type: currentType,
+        list_id: currentDial.list_id,
+        contact_status_at_call: currentDial.contact_status,
+        contact_method: method,
+        buyer_id: currentListForBuyer?.buyer_id || null,
+        company_name: currentDial.company_name || null,
+        contact_name: currentDial.full_name || null,
+        website: currentDial.website || null,
+        city: currentDial.city || null,
+        state: currentDial.state || null,
+        industry: currentDial.industry || null,
+        call_notes: currentDial.call_notes || null,
+      });
+    }
+
+    const idx = dials.findIndex((d) => d.id === currentDial.id);
+    if (idx !== -1) dials[idx][col] = currentDial[col];
+    renderDialModal();
+  } finally {
+    contactCheckToggleInFlight = false;
+  }
+}
 
 // Call notes are only ever shown in display mode, where they're directly
 // editable (autosaves on blur — see wireCallNotesAutosave).
@@ -674,13 +779,13 @@ function buildCallNotesLiveHTML(dial) {
 // now, rather than waiting for a "blur" event to get around to firing.
 // Called from every place that can take the user away from the notes field —
 // blur itself, swiping/prev/next/arrow-keying to a different dial, changing
-// the category, toggling "Did call today", opening edit mode, and closing the
-// popup — so notes are never silently dropped if one of those happens before
-// blur would have fired on its own, and so a status-button click can no
-// longer race a still-in-flight notes save into overwriting the just-typed
-// text with stale data on the next render (see goToDial/updateDialStatus/
-// toggleDidCallToday, all of which now `await` this before doing anything
-// else).
+// the category, toggling a contact-method check circle, opening edit mode,
+// and closing the popup — so notes are never silently dropped if one of
+// those happens before blur would have fired on its own, and so a
+// status-button click can no longer race a still-in-flight notes save into
+// overwriting the just-typed text with stale data on the next render (see
+// goToDial/updateDialStatus/commitContactCheck, all of which now `await`
+// this before doing anything else).
 async function flushCallNotes() {
   const notesEl = document.getElementById("d_call_notes_live");
   if (!notesEl || !currentDial) return;
@@ -1850,8 +1955,8 @@ function renderDialsTable() {
 function buildDialViewHTML(dial) {
   const isBuyer = currentType === "buyer";
   return `
-    ${rfContact("Email", dial.email, "email")}
-    ${buildPhoneNumbersHTML(dial)}
+    ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial))}
+    ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial))}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${isBuyer ? "" : rfWebsite("Website", dial.website)}
     ${isBuyer ? "" : rf("Industry sector", dial.industry)}
@@ -1923,21 +2028,23 @@ function renderDialModal() {
 
   const subtitleHTML = isCreate ? "" : dialSubtitleHTML(currentDial);
 
-  // Header (title/subtitle/Create-client/close) and the edit-button row
-  // below it are fully rebuilt every render — they depend on which dial and
-  // mode is active — then re-wired, same pattern as the body/actions below.
-  // The actions row and the status/edit row are both nested inside a shared
-  // right-aligned column (.dial-modal-header-right) rather than being two
-  // independent flex rows stacked by plain document flow — that's what keeps
-  // the gap between them small and constant (set by the column's own `gap`)
-  // instead of being dictated by whatever height the (often two-line,
-  // wrapping) name/subtitle block on the left happens to need. It also means
-  // "Schedule intro call" (top) / the status dropdown ("Categories" -
-  // Uncontacted/Not interested/etc) / "Did call today" all end up with their
-  // right edges lined up automatically, since they share the same
-  // right-aligned column and the status dropdown + Did-call-today stretch to
-  // match each other's width (see .dial-status-col).
-  const calledToday = dial.called_today_date === todayDateStr();
+  // Header (title/subtitle/status/close) and the edit-button row below it
+  // are fully rebuilt every render — they depend on which dial and mode is
+  // active — then re-wired, same pattern as the body/actions below. Both
+  // rows are nested inside a shared right-aligned column
+  // (.dial-modal-header-right) rather than being independent flex rows
+  // stacked by plain document flow — that's what keeps the gap between them
+  // small and constant (set by the column's own `gap`) instead of being
+  // dictated by whatever height the (often two-line, wrapping) name/subtitle
+  // block on the left happens to need.
+  //
+  // Top row: the status/"Categories" dropdown, then the close (x). Row
+  // below: normally the "Contacted today xN" display (see
+  // buildContactedTodayDisplayHTML) next to Edit; when the category is
+  // "Accepted intro call" (intro_call_scheduled), "Schedule intro call"
+  // takes that slot instead and the Contacted-today display drops to its
+  // own row underneath.
+  const isIntroScheduled = dial.contact_status === "intro_call_scheduled";
   els.dialModalHeader.innerHTML = `
     <div class="dial-modal-header">
       <div class="dial-modal-header-main">
@@ -1946,34 +2053,38 @@ function renderDialModal() {
       </div>
       <div class="dial-modal-header-right">
         <div class="dial-modal-header-actions">
-          ${isViewingExisting ? `<button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>` : ""}
+          ${
+            isViewingExisting
+              ? `
+          <div class="dial-status-dropdown">
+            <button type="button" class="dial-status-btn" id="dialStatusBtn"
+              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
+            <div class="dial-status-menu hidden" id="dialStatusMenu">
+              ${CONTACT_STATUSES.map(
+                (s) => `
+                <button type="button" class="dial-status-option" data-value="${s.value}">
+                  <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
+                </button>`
+              ).join("")}
+            </div>
+          </div>
+          `
+              : ""
+          }
           <button type="button" class="fs-close" id="dialModalClose">&times;</button>
         </div>
         ${
           isViewingExisting
             ? `
         <div class="dial-modal-editrow">
-          <div class="dial-status-col">
-            <div class="dial-status-dropdown">
-              <button type="button" class="dial-status-btn" id="dialStatusBtn"
-                style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
-              <div class="dial-status-menu hidden" id="dialStatusMenu">
-                ${CONTACT_STATUSES.map(
-                  (s) => `
-                  <button type="button" class="dial-status-option" data-value="${s.value}">
-                    <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(s.label)}
-                  </button>`
-                ).join("")}
-              </div>
-            </div>
-            ${
-              isCalledTodayVisible(dial)
-                ? `<button type="button" class="dial-did-call-btn ${calledToday ? "active" : ""}" id="dialDidCallBtn">Contacted today</button>`
-                : ""
-            }
-          </div>
+          ${
+            isIntroScheduled
+              ? `<button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>`
+              : buildContactedTodayDisplayHTML(dial)
+          }
           <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
         </div>
+        ${isIntroScheduled ? buildContactedTodayDisplayHTML(dial) : ""}
         `
             : ""
         }
@@ -1982,7 +2093,9 @@ function renderDialModal() {
   `;
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
   if (isViewingExisting) {
-    document.getElementById("scheduleIntroCallFromDialBtn").addEventListener("click", () => handleScheduleIntroCallFromDial(currentDial));
+    if (isIntroScheduled) {
+      document.getElementById("scheduleIntroCallFromDialBtn").addEventListener("click", () => handleScheduleIntroCallFromDial(currentDial));
+    }
     document.getElementById("dialEditBtn").addEventListener("click", async () => {
       // Flush any just-typed call notes before the view-mode notes textarea
       // gets torn down for the edit form — otherwise a race between this
@@ -1992,13 +2105,6 @@ function renderDialModal() {
       dialMode = "edit";
       renderDialModal();
     });
-    const didCallBtn = document.getElementById("dialDidCallBtn");
-    // Disabling synchronously on click (in addition to the didCallToggleInFlight
-    // guard inside toggleDidCallToday itself) gives an immediate visual cue
-    // that the press registered, so there's no moment where an impatient
-    // second click feels necessary — see toggleDidCallToday's comment for the
-    // duplicate-call bug this combination fixes.
-    if (didCallBtn) didCallBtn.addEventListener("click", () => { didCallBtn.disabled = true; toggleDidCallToday(); });
     const statusBtn = document.getElementById("dialStatusBtn");
     const statusMenu = document.getElementById("dialStatusMenu");
     statusBtn.addEventListener("click", (e) => {
@@ -2017,6 +2123,7 @@ function renderDialModal() {
   const fieldsHTML = dialMode === "edit" || isCreate ? buildDialEditHTML(dial) : buildDialViewHTML(dial);
   els.dialModalBody.innerHTML = fieldsHTML;
   stopContactActionPropagation(els.dialModalBody);
+  if (isViewingExisting) wireContactCheckCircles();
 
   if (dialMode === "edit" || isCreate) {
     els.dialModalActions.innerHTML = `
@@ -2070,7 +2177,7 @@ async function handleEditDialSave() {
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
   // See syncTodaysCallLogSnapshot's comment — these are the same snapshot
-  // fields toggleDidCallToday() captures, kept in sync if they're corrected
+  // fields commitContactCheck() captures, kept in sync if they're corrected
   // through the edit form later the same day a call was already logged.
   await syncTodaysCallLogSnapshot({
     company_name: data.company_name,
@@ -2088,8 +2195,8 @@ async function handleEditDialSave() {
 // Sets the dial's quick call-outcome status. Not part of the edit form —
 // this is a standalone dropdown in the popup's header row that autosaves
 // immediately, same pattern as the Call notes autosave. Changing this no
-// longer affects the weekly call count — that's now the separate "Did call
-// today" toggle below it (see toggleDidCallToday).
+// longer affects the weekly call count — that's the separate per-contact-
+// method check circles (see toggleContactCheck).
 async function updateDialStatus(newStatus) {
   // Flush any pending call-notes edit FIRST and wait for it to finish before
   // touching contact_status or re-rendering — without this await, the notes
@@ -2102,15 +2209,7 @@ async function updateDialStatus(newStatus) {
   // dial.contact_status while currentDial briefly held stale/partial data
   // from the race.
   await flushCallNotes();
-  const data = {
-    contact_status: newStatus,
-    // See isCalledTodayVisible's comment — switching TO one of the 3 hide
-    // categories only takes effect starting tomorrow (stays visible for the
-    // rest of today no matter how many times you flip between categories),
-    // while switching TO one of the 3 show categories un-hides it right
-    // away, so this clears the field immediately in that case.
-    status_hide_effective_date: SHOW_CALLED_TODAY_STATUSES.has(newStatus) ? null : tomorrowDateStr(),
-  };
+  const data = { contact_status: newStatus };
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
@@ -2120,97 +2219,6 @@ async function updateDialStatus(newStatus) {
 
   renderDialModal();
   renderDialsTable();
-}
-
-// "Did call today" — an independent toggle (not tied to contact_status) that
-// adds/removes exactly one call from this week's count on Profile. Selecting
-// it sets called_today_date to today and logs one call_status_changes row;
-// unselecting clears the date and removes that row again. Naturally "resets"
-// at the start of each day since the button's checked state is just
-// (dial.called_today_date === todayDateStr()) — no cron job needed, and it
-// never touches any other day's already-logged calls.
-//
-// Guards against a real bug that duplicated calls: this function is async
-// and its very first read (isCalledToday) happens BEFORE any await settles.
-// If the button didn't visibly flip green right away (flushCallNotes/the
-// update can take a moment) and someone impatiently clicked it again, the
-// second call's isCalledToday read the same stale "not called yet" state as
-// the first — both took the "else" branch and both inserted a
-// call_status_changes row for one press, inflating the week's/today's count.
-// didCallToggleInFlight makes every click after the first a no-op until the
-// in-flight one fully finishes and re-renders.
-let didCallToggleInFlight = false;
-async function toggleDidCallToday() {
-  if (didCallToggleInFlight) return;
-  didCallToggleInFlight = true;
-  try {
-  // Same reasoning as updateDialStatus — flush any pending notes edit before
-  // this re-renders the popup.
-  await flushCallNotes();
-  const today = todayDateStr();
-  const isCalledToday = currentDial.called_today_date === today;
-
-  if (isCalledToday) {
-    const { error } = await supabase.from("dials").update({ called_today_date: null }).eq("id", currentDial.id);
-    if (error) return showError(els.dialModalError, error);
-    currentDial.called_today_date = null;
-    await supabase
-      .from("call_status_changes")
-      .delete()
-      .eq("dial_id", currentDial.id)
-      .eq("user_id", profile.id)
-      .gte("changed_at", `${today}T00:00:00`)
-      .lt("changed_at", `${today}T23:59:59.999`);
-  } else {
-    const { error } = await supabase.from("dials").update({ called_today_date: today }).eq("id", currentDial.id);
-    if (error) return showError(els.dialModalError, error);
-    currentDial.called_today_date = today;
-    // dial_type is a snapshot of currentType (the active Sellers/Buyers
-    // toggle) at the moment this call is logged — currentDial always
-    // belongs to whichever side is currently selected (dials only ever
-    // holds the active tab's rows), so this needs no extra lookup. Lets the
-    // Profile page's Outreach calls counter/graph filter to just the
-    // currently-active side (see loadCallsChart in js/profile.js).
-    // list_id/contact_status_at_call/buyer_id/company_name/contact_name/
-    // website/city/state/industry/call_notes are a permanent snapshot for
-    // the Reports feature (see js/reports.js) — dial_lists rows are
-    // hard-deleted (cascading to their dials) when a tab is removed, so
-    // this is the only place these facts survive that deletion. Not foreign
-    // keys on purpose; they just need to keep their original value forever,
-    // even once the tab/dial/buyer-assignment they came from no longer
-    // resolves to anything. buyer_id comes from the dial's own list (looked
-    // up in the already-in-memory allLists — dial_lists.buyer_id, see the
-    // "Buyer" picker required on tab creation) since a dial row itself has
-    // no buyer_id column of its own. company_name/contact_name/website/
-    // city/state/industry/call_notes feed the "Contacted business owners"
-    // static list and the buyer-centric business-owner tables on the
-    // Outreach report — like contact_status_at_call, they're captured once
-    // here and never updated afterward even if the dial's info changes
-    // later that same day.
-    const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
-    await supabase.from("call_status_changes").insert({
-      user_id: profile.id,
-      dial_id: currentDial.id,
-      dial_type: currentType,
-      list_id: currentDial.list_id,
-      contact_status_at_call: currentDial.contact_status,
-      buyer_id: currentListForBuyer?.buyer_id || null,
-      company_name: currentDial.company_name || null,
-      contact_name: currentDial.full_name || null,
-      website: currentDial.website || null,
-      city: currentDial.city || null,
-      state: currentDial.state || null,
-      industry: currentDial.industry || null,
-      call_notes: currentDial.call_notes || null,
-    });
-  }
-
-  const idx = dials.findIndex((d) => d.id === currentDial.id);
-  if (idx !== -1) dials[idx].called_today_date = currentDial.called_today_date;
-  renderDialModal();
-  } finally {
-    didCallToggleInFlight = false;
-  }
 }
 
 function handleDeleteDial() {
@@ -2430,7 +2438,7 @@ async function handleScheduleIntroCallFromDial(dial) {
       });
       data.assigned_to = profile.id;
       // Which dial list this seller client was sourced from — a permanent,
-      // FK-less snapshot (see the matching comment in toggleDidCallToday())
+      // FK-less snapshot (see the matching comment in commitContactCheck())
       // so it survives the tab later being deleted. Prospective-only: this
       // is the one and only place a client's origin gets captured, so
       // clients created before this existed have no way to backfill it.

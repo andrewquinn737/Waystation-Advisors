@@ -71,9 +71,14 @@ export function locationPinLink(city, state, extraClass = "") {
 
 // Full labeled read-only row with quick-action icons (Timeline/Profile-style
 // detail views). Only used in view mode — actions are hidden while editing.
-export function rfContact(label, value, kind) {
+// `extra` (optional) is raw HTML appended inside the same .contact-actions
+// wrapper as the icons, after them — used by js/dials.js to add its own
+// per-contact-method "contacted today" check circle without this shared
+// module needing to know anything about that Dials-only feature. Every
+// existing caller omits it, so output is unchanged for them.
+export function rfContact(label, value, kind, extra = "") {
   const v = value ? String(value) : "";
-  const actionsHTML = v ? contactActionIcons(kind === "phone" ? { phone: v } : { email: v }) : "";
+  const actionsHTML = v ? contactActionIcons(kind === "phone" ? { phone: v, extra } : { email: v, extra }) : "";
   return `
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
@@ -87,12 +92,13 @@ export function rfContact(label, value, kind) {
 // One phone number's own labeled row (used by buildPhoneNumbersHTML below) —
 // same layout as rfContact but with a fixed "(Mobile)"/"(Company)" suffix
 // instead of a left-hand label, since both numbers share one "Phone numbers"
-// section instead of each getting their own readonly-field.
-function phoneNumberRow(number, kind) {
+// section instead of each getting their own readonly-field. `extra` — see
+// rfContact's comment above.
+function phoneNumberRow(number, kind, extra = "") {
   return `
     <div class="rf-value-row" style="margin-bottom: 8px;">
       <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
-      ${contactActionIcons({ phone: number })}
+      ${contactActionIcons({ phone: number, extra })}
     </div>`;
 }
 
@@ -100,11 +106,14 @@ function phoneNumberRow(number, kind) {
 // mobile_phone/company_phone are present on `entity` (a dial OR a client;
 // both use these same two column names), each with its own instant-contact
 // icons. Mobile is still the one used everywhere else for instant call/text
-// (list rows, cards) — this is only about what's displayed here.
-export function buildPhoneNumbersHTML(entity) {
+// (list rows, cards) — this is only about what's displayed here. `extraFor`
+// (optional) — see rfContact's comment on `extra`; called once per present
+// phone kind ("mobile"/"company") so a caller can give each its own extra
+// HTML (js/dials.js uses this for its per-method check circle).
+export function buildPhoneNumbersHTML(entity, extraFor) {
   const rows = [];
-  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, "Mobile"));
-  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company"));
+  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, "Mobile", extraFor ? extraFor("mobile") : ""));
+  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company", extraFor ? extraFor("company") : ""));
   return `
     <div class="readonly-field">
       <div class="rf-label">Phone numbers</div>
@@ -113,8 +122,10 @@ export function buildPhoneNumbersHTML(entity) {
 }
 
 // Compact icon-only cluster (no label), for list/card rows. `phone` gets a
-// text + call icon; `email` gets a mail icon. Either can be omitted.
-export function contactActionIcons({ phone, email } = {}) {
+// text + call icon; `email` gets a mail icon. Either can be omitted. `extra`
+// — see rfContact's comment above; only ever appended when at least one icon
+// is actually rendered, since there's nothing to attach it to otherwise.
+export function contactActionIcons({ phone, email, extra = "" } = {}) {
   const parts = [];
   if (phone) {
     parts.push(`<a class="contact-action-btn" href="sms:${escapeHtml(phone)}" title="Text">${CONTACT_ICONS.sms}</a>`);
@@ -125,7 +136,7 @@ export function contactActionIcons({ phone, email } = {}) {
   if (email) {
     parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(email))}" title="Email">${CONTACT_ICONS.mailto}</a>`);
   }
-  return parts.length ? `<div class="contact-actions">${parts.join("")}</div>` : "";
+  return parts.length ? `<div class="contact-actions">${parts.join("")}${extra}</div>` : "";
 }
 
 // Wires up stopPropagation on any contact-action-btn links inside `container`

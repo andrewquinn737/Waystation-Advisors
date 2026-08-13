@@ -667,6 +667,16 @@ tr.clickable-row { cursor: pointer; }
    so it's hidden there — text and email quick-actions stay on both. See
    html.is-desktop-device further down (device-detection block). */
 html.is-desktop-device .contact-action-tel { display: none; }
+/* Per-contact-method "contacted today" check circle (Dials only, see
+   contactCheckCircleHTML in js/dials.js) — one more item inside the same
+   .contact-actions row as the instant-call/text/email icons above, so it
+   picks up their exact size (28px) and spacing (6px gap) for free just by
+   sharing .contact-action-btn. White/empty until checked, green with a
+   checkmark once it is — same on/off shape as .timeline-confirm-btn in
+   js/clients.js's Timeline. */
+.dial-contact-check { color: #fff; }
+@media (hover: hover) { .dial-contact-check:hover { border-color: var(--success); } }
+.dial-contact-check.checked { background: var(--success); border-color: var(--success); }
 
 .edit-icon-btn {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
@@ -1023,63 +1033,49 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
    further than the default so it reads as centered next to the location
    text rather than tucked up against it. */
 .location-pin-link.pin-body-row { margin-left: 4px; top: 1px; }
-/* Groups the actions row (Schedule intro call / X) and the status/edit row
-   into one right-aligned column, instead of two independently-flowing flex
-   rows. This is what keeps the gap between them small and CONSTANT (set by
-   this column's own `gap`) rather than being dictated by however tall the
+/* Groups the actions row (status/"Categories" dropdown + X) and the edit row
+   below it (Contacted-today display or Schedule intro call, + the edit
+   pencil) into one right-aligned column, instead of independently-flowing
+   flex rows. This is what keeps the gap between them small and CONSTANT (set
+   by this column's own `gap`) rather than being dictated by however tall the
    name/subtitle block on the left happens to be (which could wrap to two
-   lines) — and what makes "Schedule intro call", the status/"Categories"
-   dropdown, and "Did call today" all line up on their right edges, since all
-   three now live in the same right-aligned column. */
+   lines) — and what right-aligns every row, including the Contacted-today
+   display's own extra row underneath when "Schedule intro call" bumps it
+   down (see renderDialModal in js/dials.js). */
 .dial-modal-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.dial-modal-editrow { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
-/* Status dropdown + "Did call today" stacked directly under one another,
-   right-aligned, with the edit (pencil) button beside the whole stack. */
-.dial-status-col { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
-/* "Schedule intro call" — same height as the status dropdown/Did-call-today
-   buttons beside it (32px), and a softer, muted yellow: just a touch darker
-   than the "Callback, interested" status tint rather than the vivid yellow
-   used for the Calendly button elsewhere (see .btn.yellow), which read as
-   too bold/heavy sitting right next to the softer status colors. */
+.dial-modal-editrow { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+/* "Schedule intro call" — only shown once the category is "Accepted intro
+   call" (see renderDialModal), sitting left of the edit button in place of
+   the Contacted-today display. Same height as that display (30px) and a
+   softer, muted yellow: just a touch darker than the "Callback, interested"
+   status tint rather than the vivid yellow used for the Calendly button
+   elsewhere (see .btn.yellow), which read as too bold/heavy sitting right
+   next to the softer status colors. */
 .dial-schedule-intro-btn {
-  height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; display: inline-flex; align-items: center; justify-content: center;
   padding: 0 14px; border-radius: 7px; border: none; cursor: pointer;
   font-size: 12.5px; font-weight: 600; white-space: nowrap;
   background: #f2e2a0; color: #6b5410;
-  /* Its own text is shorter than the status dropdown/"Did call today"
-     buttons in .dial-status-col underneath, which stretch to match each
-     other's natural width — without this, "Schedule intro call" ended up
-     narrower and its LEFT edge sat further right than theirs (right edges
-     already lined up via .dial-modal-header-right's align-items:flex-end).
-     min-width just extends it leftward to roughly match. */
-  min-width: 158px;
 }
 @media (hover: hover) { .dial-schedule-intro-btn:hover { background: #ecd684; } }
-.dial-did-call-btn {
-  height: 30px; border-radius: 7px; border: 2px solid var(--border); background: var(--surface);
-  color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; padding: 0 12px; white-space: nowrap;
-  /* min-width matches the button's previous rendered width (measured live)
-     from when its label was "Did call today" — shortening the label to
-     "Called today" would otherwise shrink the button since nothing else
-     forces its width. */
-  min-width: 129px;
+/* "Contacted today xN" — a plain, non-interactive display (not a button;
+   nothing changes it directly, only the per-contact-method check circles
+   below do, see .dial-contact-check) — white at 0 checked circles today,
+   green once at least one is. */
+.dial-contacted-today-display {
+  height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 7px; border: 2px solid var(--border); background: var(--surface);
+  color: var(--text-muted); font-size: 12px; font-weight: 600; padding: 0 12px; white-space: nowrap;
 }
-@media (hover: hover) { .dial-did-call-btn:hover { background: var(--gold-soft); } }
-.dial-did-call-btn.active { background: var(--success); border-color: var(--success); color: #fff; }
+.dial-contacted-today-display.active { background: var(--success); border-color: var(--success); color: #fff; }
 
-/* Quick call-status dropdown, left of the edit button in the popup's
-   edit-row. Never colors the popup itself — only the list rows/cards. */
+/* Status/"Categories" dropdown — now at the top of the popup, left of the
+   close (x) button (see .dial-modal-header-actions above). Never colors the
+   popup itself — only the list rows/cards. */
 .dial-status-dropdown { position: relative; }
-/* width:100% matters here: .dial-status-dropdown (this button's parent) is
-   the flex item that stretches to match "Did call today" in .dial-status-col
-   (see align-items:stretch there) — but a stretched block parent doesn't
-   automatically widen an inline-block button inside it. Without this, the
-   button's own right edge fell short of the stretched wrapper's edge (and
-   therefore short of "Did call today" and "Schedule intro call" above it),
-   which is what made it look shifted left / misaligned. */
 .dial-status-btn {
-  width: 100%; height: 32px; min-width: 100px; border-radius: 7px; border: 2px solid var(--border);
+  height: 32px; min-width: 100px; border-radius: 7px; border: 2px solid var(--border);
   cursor: pointer; padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--text);
   white-space: nowrap;
 }

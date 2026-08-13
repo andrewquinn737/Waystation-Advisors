@@ -70,7 +70,7 @@ const CHART_METRIC_LABELS = [
   ["approved_targets", "Approved targets"],
   ["targets_contacted", "Targets contacted"],
   ["attempted_contacts", "Attempted contacts"],
-  ["intro_call_scheduled", "Intro call scheduled"],
+  ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
   ["no_response", "No response, try again"],
   ["unable_to_contact", "Unable to contact"],
@@ -87,7 +87,7 @@ const CHART_METRIC_LABELS = [
 const GRAPH_METRIC_LABELS = [
   ["targets_contacted", "Targets contacted"],
   ["attempted_contacts", "Total number of contacts"],
-  ["intro_call_scheduled", "Intro call scheduled"],
+  ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
   ["no_response", "No response, try again"],
   ["unable_to_contact", "Unable to contact"],
@@ -112,7 +112,7 @@ const MILESTONE_TABLE_TITLES = [
 // (a contact_status_at_call value) exactly. " for week/month of ___" is
 // appended at render time (see renderBuyerCentricSection).
 const CONTACTED_TABLE_TITLES = [
-  ["intro_call_scheduled", "Intro call scheduled"],
+  ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
   ["no_response", "No response, try again"],
   ["unable_to_contact", "Unable to contact"],

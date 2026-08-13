@@ -227,6 +227,20 @@
     </div>
   </div>
 
+  <!-- Checking the Email contact-check circle first asks this — only "Yes"
+       actually checks it (see toggleContactCheck in js/dials.js). Same
+       .modal-backdrop/.modal shell as #confirmDeleteModal above, so it
+       stacks over the dial detail modal the same proven way. -->
+  <div class="modal-backdrop hidden" id="emailReplyConfirmModal">
+    <div class="modal">
+      <h2>Have they replied to an email?</h2>
+      <div class="form-actions">
+        <button type="button" class="btn" id="emailReplyConfirmYesBtn">Yes</button>
+        <button type="button" class="btn secondary" id="emailReplyConfirmNoBtn">No</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bulk delete confirmation for Select mode's Delete button -->
   <div class="modal-backdrop hidden" id="confirmBulkDeleteModal">
     <div class="modal">
