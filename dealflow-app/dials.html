@@ -286,17 +286,27 @@
   </div>
 
   <!-- Import dials from CSV (admin-only, see menuImportBtn in js/dials.js).
-       The CSV's filename (minus extension) becomes the name of a new tab
-       under Current; one dial is created per row, with columns matched by
-       header name to the closest dial field. Buyer is required, same as
-       New list above. -->
+       Each CSV's filename (minus extension) becomes the name of its own new
+       tab under Current — up to 10 files at once; one dial is created per
+       row, with columns matched by header name to the closest dial field.
+       Buyer is required (applied to every tab created this way), same as
+       New list above. #importDialsDropzone additionally accepts a native
+       drag-and-drop of files from the Finder/desktop file system on top of
+       the existing Choose-CSV button — see wireImportDropzone in
+       js/dials.js; the drop hint text itself is desktop-only (see
+       html.is-desktop-device .import-dials-drop-hint in css/style.css)
+       since dragging files in from the OS isn't a mobile browser thing, but
+       the drop handling itself is harmless to leave wired everywhere. -->
   <div class="modal-backdrop hidden" id="importDialsModal">
     <div class="modal">
       <h2>Import dials from CSV</h2>
       <div id="importDialsError" class="error-msg hidden"></div>
-      <p class="help-text" style="margin-top:0;">Column headers in the first row are matched to dial fields (First name, Last name, Company name, Email, Mobile phone, Company phone, LinkedIn, City, State, Website, Industry, Summary, Call notes) automatically.</p>
-      <input type="file" id="importDialsFileInput" accept=".csv,text/csv" class="hidden" />
-      <button type="button" class="btn secondary" id="importDialsChooseBtn">Choose CSV</button>
+      <p class="help-text" style="margin-top:0;">Column headers in the first row are matched to dial fields (First name, Last name, Company name, Email, Mobile phone, Company phone, LinkedIn, City, State, Website, Industry, Summary, Call notes) automatically. Select up to 10 files — each becomes its own tab.</p>
+      <div class="import-dials-dropzone" id="importDialsDropzone">
+        <input type="file" id="importDialsFileInput" accept=".csv,text/csv" multiple class="hidden" />
+        <button type="button" class="btn secondary" id="importDialsChooseBtn">Choose CSV files</button>
+        <div class="import-dials-drop-hint">or drag CSV files here</div>
+      </div>
       <div id="importDialsFileName" class="help-text"></div>
       <label for="importDialsBuyerSelect">Buyer</label>
       <select id="importDialsBuyerSelect"></select>

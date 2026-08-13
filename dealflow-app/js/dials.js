@@ -205,6 +205,7 @@ const els = {
   introCallTimeConfirmBtn: document.getElementById("introCallTimeConfirmBtn"),
   importDialsModal: document.getElementById("importDialsModal"),
   importDialsError: document.getElementById("importDialsError"),
+  importDialsDropzone: document.getElementById("importDialsDropzone"),
   importDialsFileInput: document.getElementById("importDialsFileInput"),
   importDialsChooseBtn: document.getElementById("importDialsChooseBtn"),
   importDialsFileName: document.getElementById("importDialsFileName"),
@@ -1564,16 +1565,19 @@ els.menuAddNewBtn.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Import dials from CSV (admin/team-lead — els.menuImportBtn is only
 // unhidden for those roles, see the `if (isAdmin || isTeamLead)` line near
-// the top of this file).
+// the top of this file). Up to MAX_IMPORT_FILES CSVs at once, each becoming
+// its own new tab — picked either via the native file input (multiple) or
+// dragged in from the Finder/desktop onto #importDialsDropzone.
 // ---------------------------------------------------------------------------
-let selectedImportFile = null;
+const MAX_IMPORT_FILES = 10;
+let selectedImportFiles = [];
 
 function openImportDialsModal() {
   els.importDialsError.classList.add("hidden");
   els.importDialsFileName.textContent = "";
   els.importDialsImportBtn.disabled = true;
   els.importDialsFileInput.value = "";
-  selectedImportFile = null;
+  selectedImportFiles = [];
   els.importDialsModal.classList.remove("hidden");
   populateBuyerSelect(els.importDialsBuyerSelect);
 }
@@ -1583,64 +1587,132 @@ els.menuImportBtn.addEventListener("click", () => {
   openImportDialsModal();
 });
 els.importDialsCancelBtn.addEventListener("click", () => els.importDialsModal.classList.add("hidden"));
-// The visible "Choose CSV" button just proxies to the real (hidden) file
-// input — clicking a styled button instead of the native input directly
-// gives a consistent look on both desktop (Finder) and mobile (Files/Photos
-// picker), both of which open from input[type=file] the same way.
+// The visible "Choose CSV files" button just proxies to the real (hidden)
+// file input — clicking a styled button instead of the native input
+// directly gives a consistent look on both desktop (Finder) and mobile
+// (Files/Photos picker), both of which open from input[type=file] the same
+// way. Shared by both that input's change event AND a drag-and-drop onto
+// #importDialsDropzone (see wireImportDropzone below) — either path ends up
+// here with a plain array of File objects.
+function setSelectedImportFiles(files) {
+  const csvFiles = files.filter((f) => /\.csv$/i.test(f.name) || f.type === "text/csv");
+  if (csvFiles.length > MAX_IMPORT_FILES) {
+    selectedImportFiles = [];
+    els.importDialsFileName.textContent = "";
+    els.importDialsImportBtn.disabled = true;
+    els.importDialsError.textContent = `Select ${MAX_IMPORT_FILES} CSV files or fewer at a time (${csvFiles.length} selected).`;
+    els.importDialsError.classList.remove("hidden");
+    return;
+  }
+  els.importDialsError.classList.add("hidden");
+  selectedImportFiles = csvFiles;
+  els.importDialsFileName.textContent = csvFiles.length
+    ? `${csvFiles.length} file${csvFiles.length === 1 ? "" : "s"} selected: ${csvFiles.map((f) => f.name).join(", ")}`
+    : "";
+  els.importDialsImportBtn.disabled = !csvFiles.length;
+}
 els.importDialsChooseBtn.addEventListener("click", () => els.importDialsFileInput.click());
 els.importDialsFileInput.addEventListener("change", () => {
-  const file = els.importDialsFileInput.files?.[0] || null;
-  selectedImportFile = file;
-  els.importDialsFileName.textContent = file ? file.name : "";
-  els.importDialsImportBtn.disabled = !file;
+  setSelectedImportFiles([...(els.importDialsFileInput.files || [])]);
 });
 
+// Drag-and-drop onto the dropzone — wired unconditionally (harmless on
+// touch devices, which never fire drag events at all; the drop-hint text
+// itself is what's actually hidden on mobile, see css/style.css). dragover
+// must call preventDefault() or the browser refuses the drop entirely.
+function wireImportDropzone() {
+  const zone = els.importDialsDropzone;
+  ["dragenter", "dragover"].forEach((evt) =>
+    zone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      zone.classList.add("dragover");
+    })
+  );
+  ["dragleave", "dragend"].forEach((evt) => zone.addEventListener(evt, () => zone.classList.remove("dragover")));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    setSelectedImportFiles([...(e.dataTransfer?.files || [])]);
+  });
+}
+wireImportDropzone();
+
 els.importDialsImportBtn.addEventListener("click", async () => {
-  if (!selectedImportFile) return;
+  if (!selectedImportFiles.length) return;
   els.importDialsError.classList.add("hidden");
   els.importDialsImportBtn.disabled = true;
-  try {
-    const text = await selectedImportFile.text();
-    const rows = parseCSV(text).filter((r) => r.some((c) => (c || "").trim() !== ""));
-    if (rows.length < 2) {
-      throw new Error("That CSV doesn't have any data rows to import.");
-    }
-    // The new tab's name is the CSV's filename (minus the .csv extension),
-    // always created under Current — regardless of whether Current or
-    // Archived happens to be selected right now — per spec.
-    const tabName = selectedImportFile.name.replace(/\.csv$/i, "").trim() || "Imported";
-    const sortOrder = allLists.filter((l) => l.dial_type === currentType && l.status === "current").length;
-    const { data: newList, error: listErr } = await supabase
-      .from("dial_lists")
-      .insert({ name: tabName, dial_type: currentType, status: "current", sort_order: sortOrder, buyer_id: els.importDialsBuyerSelect.value || null })
-      .select()
-      .single();
-    if (listErr) throw listErr;
 
-    const dialRows = rowsToDials(rows, newList.id);
-    if (!dialRows.length) {
-      throw new Error("No data rows found in that CSV.");
-    }
-    const { error: insertErr } = await supabase.from("dials").insert(dialRows);
-    if (insertErr) throw insertErr;
+  // sort_order is computed once up front and incremented locally (rather
+  // than re-reading allLists.length each iteration, which stays stale until
+  // the final loadLists() below) so multiple new tabs land in file order
+  // instead of every one of them competing for the same slot.
+  let sortOrder = allLists.filter((l) => l.dial_type === currentType && l.status === "current").length;
+  let lastNewListId = null;
+  const failures = [];
+  const totalAttempted = selectedImportFiles.length;
 
-    // Land the user on the tab that was just created, switching to Current
-    // first if Archived was selected so the new tab is actually visible.
+  for (const file of selectedImportFiles) {
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text).filter((r) => r.some((c) => (c || "").trim() !== ""));
+      if (rows.length < 2) {
+        throw new Error("no data rows to import");
+      }
+      // Each file's tab name is its own filename (minus .csv), always
+      // created under Current — regardless of whether Current or Archived
+      // happens to be selected right now — per spec.
+      const tabName = file.name.replace(/\.csv$/i, "").trim() || "Imported";
+      const { data: newList, error: listErr } = await supabase
+        .from("dial_lists")
+        .insert({ name: tabName, dial_type: currentType, status: "current", sort_order: sortOrder, buyer_id: els.importDialsBuyerSelect.value || null })
+        .select()
+        .single();
+      if (listErr) throw listErr;
+      sortOrder++;
+
+      const dialRows = rowsToDials(rows, newList.id);
+      if (!dialRows.length) {
+        throw new Error("no data rows found");
+      }
+      const { error: insertErr } = await supabase.from("dials").insert(dialRows);
+      if (insertErr) throw insertErr;
+
+      lastNewListId = newList.id;
+    } catch (err) {
+      failures.push(`${file.name} (${err.message || "could not import"})`);
+    }
+  }
+
+  // Land the user on the LAST tab that was actually created, switching to
+  // Current first if Archived was selected so it's actually visible — even
+  // a partial run (some files failed) still lands on whatever did succeed
+  // rather than leaving the view on wherever it happened to be before.
+  if (lastNewListId) {
     if (currentStatus !== "current") {
       currentStatus = "current";
       els.menuStatusBtn.querySelector(".menu-item-label").textContent = "Current";
       els.menuStatusBtn.dataset.status = "current";
       persistStatus();
     }
-    currentListId = newList.id;
+    currentListId = lastNewListId;
     persistCurrentListId();
-    els.importDialsModal.classList.add("hidden");
     await loadLists();
-  } catch (err) {
-    els.importDialsError.textContent = err.message || "Could not import that CSV.";
+  }
+
+  // The selection is always cleared after an attempt, success or not —
+  // re-clicking Import with the same file list would re-import whatever
+  // already succeeded a second time, creating duplicate tabs.
+  selectedImportFiles = [];
+  els.importDialsFileInput.value = "";
+  els.importDialsFileName.textContent = "";
+  els.importDialsImportBtn.disabled = true;
+
+  if (failures.length) {
+    els.importDialsError.textContent = `${failures.length} of ${totalAttempted} file(s) failed — ${failures.join("; ")}. Re-select just those to try again.`;
     els.importDialsError.classList.remove("hidden");
-  } finally {
     els.importDialsImportBtn.disabled = false;
+  } else {
+    els.importDialsModal.classList.add("hidden");
   }
 });
 

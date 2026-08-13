@@ -457,6 +457,23 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .modal h2 { margin: 0 0 4px; font-size: 17px; }
 .modal .close { position: absolute; }
 
+/* Import-dials CSV picker (see #importDialsDropzone/wireImportDropzone in
+   js/dials.js) — wraps the existing "Choose CSV files" button in a dashed
+   drop target that also accepts files dragged in from the Finder/desktop.
+   .dragover is toggled on/off purely in JS while a drag is over the zone. */
+.import-dials-dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 18px 12px; border: 2px dashed var(--border); border-radius: var(--radius);
+  margin: 10px 0; transition: border-color .12s ease, background .12s ease;
+}
+.import-dials-dropzone.dragover { border-color: var(--accent); background: var(--gold-soft); }
+/* Dragging files in from the OS isn't a mobile-browser thing — the actual
+   drop handling stays wired everywhere (harmless on touch devices, which
+   simply never fire the drag events), but the hint text itself only makes
+   sense to show on desktop. */
+.import-dials-drop-hint { display: none; font-size: 12.5px; color: var(--text-muted); }
+html.is-desktop-device .import-dials-drop-hint { display: block; }
+
 /* ---- Full-screen modal (e.g. Teams) ---- */
 .fullscreen-modal {
   position: fixed; inset: 0; background: var(--surface);
