@@ -671,12 +671,9 @@ function wireContactCheckCircles() {
 // Non-interactive "Contacted today xN" display — white at 0, green
 // otherwise. Replaces the old clickable "Called today" button; the circles
 // above are the only way to change this now (see toggleContactCheck).
-// `extraClass` (optional) — see .dial-modal-header-row-last in
-// css/style.css, applied by renderDialModal only when this display is
-// rendered as its own bumped-down row (not inline next to Edit).
-function buildContactedTodayDisplayHTML(dial, extraClass = "") {
+function buildContactedTodayDisplayHTML(dial) {
   const count = contactedTodayCount(dial);
-  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""} ${extraClass}">Contacted today x${count}</div>`;
+  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}">Contacted today x${count}</div>`;
 }
 
 // Checking/unchecking one of the 3 per-contact-method circles — the same
@@ -2045,8 +2042,10 @@ function renderDialModal() {
   // below: normally the "Contacted today xN" display (see
   // buildContactedTodayDisplayHTML) next to Edit; when the category is
   // "Accepted intro call" (intro_call_scheduled), "Schedule intro call"
-  // takes that slot instead and the Contacted-today display drops to its
-  // own row underneath.
+  // takes that slot instead and the Contacted-today display renders
+  // directly underneath IT (see .dial-schedule-intro-col in css/style.css)
+  // rather than under the row as a whole — so its right edge lines up with
+  // Schedule-intro-call's right edge specifically, not Edit's.
   const isIntroScheduled = dial.contact_status === "intro_call_scheduled";
   els.dialModalHeader.innerHTML = `
     <div class="dial-modal-header">
@@ -2079,15 +2078,19 @@ function renderDialModal() {
         ${
           isViewingExisting
             ? `
-        <div class="dial-modal-editrow${isIntroScheduled ? "" : " dial-modal-header-row-last"}">
+        <div class="dial-modal-editrow">
           ${
             isIntroScheduled
-              ? `<button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>`
+              ? `
+          <div class="dial-schedule-intro-col">
+            <button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>
+            ${buildContactedTodayDisplayHTML(dial)}
+          </div>
+          `
               : buildContactedTodayDisplayHTML(dial)
           }
           <button type="button" class="edit-icon-btn" id="dialEditBtn" title="Edit">&#9998;</button>
         </div>
-        ${isIntroScheduled ? buildContactedTodayDisplayHTML(dial, "dial-modal-header-row-last") : ""}
         `
             : ""
         }

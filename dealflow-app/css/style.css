@@ -1039,22 +1039,20 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
    flex rows. This is what keeps the gap between them small and CONSTANT (set
    by this column's own `gap`) rather than being dictated by however tall the
    name/subtitle block on the left happens to be (which could wrap to two
-   lines) — and what right-aligns every row, including the Contacted-today
-   display's own extra row underneath when "Schedule intro call" bumps it
-   down (see renderDialModal in js/dials.js). */
+   lines). */
 .dial-modal-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.dial-modal-editrow { display: flex; align-items: center; gap: 8px; }
-/* Goes on whichever row is actually LAST inside .dial-modal-header-right —
-   normally .dial-modal-editrow itself, or the bumped-down Contacted-today
-   display when "Schedule intro call" is shown instead (see renderDialModal
-   in js/dials.js) — so the space before the dial body below is always 10px
-   regardless of which one that is, while the column's own `gap` (6px) stays
-   the ONLY thing spacing the header rows from each other. Putting this
-   margin on .dial-modal-editrow unconditionally used to add an extra 10px
-   on top of that 6px gap between it and the bumped-down row whenever both
-   were present, throwing off the otherwise-equal spacing between rows. */
-.dial-modal-header-row-last { margin-bottom: 10px; }
+.dial-modal-editrow { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
+/* When the category is "Accepted intro call" (see renderDialModal in
+   js/dials.js), the Contacted-today display renders directly underneath
+   "Schedule intro call" instead of next to Edit — this nested column is
+   what makes ITS right edge line up with Schedule-intro-call's right edge
+   specifically, rather than with Edit's (which .dial-modal-editrow's own
+   align-items:flex-end would otherwise right-align it to, since Edit sits
+   further right than Schedule-intro-call). Edit stays a sibling of this
+   whole column, not a member of it. Same 6px gap as the outer header column
+   for the same "equal spacing" reasons. */
+.dial-schedule-intro-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 /* "Schedule intro call" — only shown once the category is "Accepted intro
    call" (see renderDialModal), sitting left of the edit button in place of
    the Contacted-today display. Same height as that display (30px) and a
