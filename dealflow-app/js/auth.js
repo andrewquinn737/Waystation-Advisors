@@ -2,6 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import { setOwnEmail } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError } from "./offlineCache.js";
+import { defaultTimezone } from "./eventTime.js";
 
 function hidePageLoadingOverlay() {
   document.getElementById("pageLoadingOverlay")?.classList.add("hidden");
@@ -24,7 +25,7 @@ export async function requireSession() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link")
+    .select("id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone")
     .eq("id", session.user.id)
     .single();
 
@@ -48,6 +49,22 @@ export async function requireSession() {
     resolvedProfile = cached;
   } else {
     cacheSet("profile_" + session.user.id, profile);
+  }
+
+  // Keeps profiles.timezone in sync with this device's actual current zone
+  // — daily "upcoming event" push notifications are generated server-side
+  // with no live browser context of their own (see
+  // run_daily_event_notifications()/format_upcoming_event_message() in
+  // supabase/schema.sql), so the RECIPIENT's own timezone has to already be
+  // on file for that text to be formatted in it rather than the event's own
+  // stored timezone (whoever scheduled it, not necessarily who's reading the
+  // notification). Fire-and-forget, same pattern as subscribeToPush below —
+  // harmless to re-check every page load, and picks up a real device
+  // move/DST change automatically next time the app is opened.
+  const deviceTimezone = defaultTimezone();
+  if (resolvedProfile.timezone !== deviceTimezone) {
+    supabase.from("profiles").update({ timezone: deviceTimezone }).eq("id", session.user.id);
+    resolvedProfile.timezone = deviceTimezone;
   }
 
   // Lets the shared "Email" instant-contact icon (js/contactIcons.js) try to
