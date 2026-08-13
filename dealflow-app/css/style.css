@@ -1044,7 +1044,17 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
    down (see renderDialModal in js/dials.js). */
 .dial-modal-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .dial-modal-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.dial-modal-editrow { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.dial-modal-editrow { display: flex; align-items: center; gap: 8px; }
+/* Goes on whichever row is actually LAST inside .dial-modal-header-right —
+   normally .dial-modal-editrow itself, or the bumped-down Contacted-today
+   display when "Schedule intro call" is shown instead (see renderDialModal
+   in js/dials.js) — so the space before the dial body below is always 10px
+   regardless of which one that is, while the column's own `gap` (6px) stays
+   the ONLY thing spacing the header rows from each other. Putting this
+   margin on .dial-modal-editrow unconditionally used to add an extra 10px
+   on top of that 6px gap between it and the bumped-down row whenever both
+   were present, throwing off the otherwise-equal spacing between rows. */
+.dial-modal-header-row-last { margin-bottom: 10px; }
 /* "Schedule intro call" — only shown once the category is "Accepted intro
    call" (see renderDialModal), sitting left of the edit button in place of
    the Contacted-today display. Same height as that display (30px) and a
