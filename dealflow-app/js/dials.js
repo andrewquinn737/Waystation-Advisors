@@ -595,6 +595,30 @@ function todayDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// The real UTC instants a LOCAL calendar date (as produced by todayDateStr)
+// starts and ends at — for filtering call_status_changes.changed_at
+// (timestamptz) by "today" in commitContactCheck/syncTodaysCallLogSnapshot.
+// `new Date(\`${dateStr}T00:00:00\`)` (no offset suffix) parses as LOCAL
+// midnight per the JS Date spec, same fix as formatDateOnly in
+// js/reports.js; .toISOString() then carries the correct UTC offset.
+// Confirmed as a REAL bug in production: the old code built the window as
+// bare `${today}T00:00:00`/`${today}T23:59:59.999` strings with no offset,
+// which PostgREST parses as UTC — for anyone in a negative UTC-offset
+// timezone, an evening check/uncheck (after ~5-6pm US time, once UTC has
+// already rolled to the next calendar day) landed OUTSIDE that UTC-today
+// window entirely. Unchecking still cleared the dial's own checked flag
+// correctly (a plain string compare, no timestamp math involved), so the
+// circle visibly went white/unchecked — but the delete silently matched
+// nothing, leaving the call_status_changes row (and its contact count)
+// permanently stuck, with no way to tell from the UI that it hadn't
+// actually been removed.
+function localDayBoundsIso(dateStr) {
+  const start = new Date(`${dateStr}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
 // Which `dials` date column tracks "checked today" for each contact
 // method's white circle (see contactCheckCircleHTML/toggleContactCheck
 // below) — one independent daily toggle per method, replacing the old
@@ -630,14 +654,14 @@ function contactedTodayCount(dial) {
 // a PAST day's already-frozen snapshot.
 async function syncTodaysCallLogSnapshot(fields) {
   if (!currentDial || contactedTodayCount(currentDial) === 0) return;
-  const today = todayDateStr();
+  const { startIso, endIso } = localDayBoundsIso(todayDateStr());
   await supabase
     .from("call_status_changes")
     .update(fields)
     .eq("dial_id", currentDial.id)
     .eq("user_id", profile.id)
-    .gte("changed_at", `${today}T00:00:00`)
-    .lt("changed_at", `${today}T23:59:59.999`);
+    .gte("changed_at", startIso)
+    .lt("changed_at", endIso);
 }
 
 // ---------------------------------------------------------------------------
@@ -718,14 +742,15 @@ async function commitContactCheck(method, checking) {
       const { error } = await supabase.from("dials").update({ [col]: null }).eq("id", currentDial.id);
       if (error) return showError(els.dialModalError, error);
       currentDial[col] = null;
+      const { startIso, endIso } = localDayBoundsIso(today);
       await supabase
         .from("call_status_changes")
         .delete()
         .eq("dial_id", currentDial.id)
         .eq("user_id", profile.id)
         .eq("contact_method", method)
-        .gte("changed_at", `${today}T00:00:00`)
-        .lt("changed_at", `${today}T23:59:59.999`);
+        .gte("changed_at", startIso)
+        .lt("changed_at", endIso);
     } else {
       const { error } = await supabase.from("dials").update({ [col]: today }).eq("id", currentDial.id);
       if (error) return showError(els.dialModalError, error);
