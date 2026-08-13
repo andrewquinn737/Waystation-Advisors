@@ -474,13 +474,27 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // — a plain table of the given rows/columns, only ever called for a
   // non-empty row set (each individual table is omitted entirely, not shown
   // empty, when it has none — see the caller).
+  // Per-column CSS hook for the two columns that need something the default
+  // auto-width <table> layout doesn't give them on its own: Outreach count
+  // needs its "\n"-joined lines respected (see .outreach-count-cell), and
+  // Call notes needs a wider minimum so it doesn't get squeezed as cramped
+  // as the browser's own column-width algorithm would otherwise leave it
+  // once every other column's content is accounted for (see .call-notes-cell
+  // in css/style.css). Applied to both header and body cells so the width
+  // isn't left depending on which row happens to render first.
+  function ownerCellClass(key) {
+    if (key === "outreach_count") return "outreach-count-cell";
+    if (key === "call_notes") return "call-notes-cell";
+    return "";
+  }
+
   function buildOwnerTableHTML(title, rows, columns) {
-    const headCells = columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("");
+    const headCells = columns.map((c) => `<th class="${ownerCellClass(c.key)}">${escapeHtml(c.label)}</th>`).join("");
     const bodyRows = rows
       .map(
         (r) =>
           `<tr>${columns
-            .map((c) => `<td class="${c.key === "outreach_count" ? "outreach-count-cell" : ""}">${escapeHtml(c.format ? c.format(r[c.key], r) : r[c.key] ?? "—")}</td>`)
+            .map((c) => `<td class="${ownerCellClass(c.key)}">${escapeHtml(c.format ? c.format(r[c.key], r) : r[c.key] ?? "—")}</td>`)
             .join("")}</tr>`
       )
       .join("");

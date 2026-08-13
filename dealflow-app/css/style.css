@@ -407,13 +407,24 @@ tr:last-child td { border-bottom: none; }
 #reportsBuyerCentricWrap { margin-top: 20px; }
 #reportsBuyerCentricWrap h3 { font-size: 14px; font-weight: 600; margin: 20px 0 8px; }
 #reportsBuyerCentricWrap > h3:first-child { margin-top: 0; }
-.reports-contacted-dials-scroll { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+/* overflow-x:auto lets the table scroll horizontally instead of overflowing
+   the box/modal if .call-notes-cell's min-width below ever pushes the
+   table's natural width past the container — the table's own `width: 100%`
+   would otherwise just get overridden and spill out with nothing to catch it. */
+.reports-contacted-dials-scroll { max-height: 320px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 /* Outreach count cell in the period-category business-owner tables (see
    formatOutreachCountCell/SET2_COLUMNS in js/reports.js) — up to 2 lines
    ("N calls" / "N email(s)") joined with a literal "\n", which jspdf-autotable
    already renders as a real line break in the PDF; this is that same "\n"
    respected on-screen instead of being collapsed like normal HTML whitespace. */
 .outreach-count-cell { white-space: pre-line; }
+/* Call notes reads as the most important free-text column in these tables
+   (it's deliberately the widest column in the PDF too, see SET2_COLUMNS),
+   but the default auto-width <table> layout was squeezing it down small
+   once every other column's own content was accounted for — a plain
+   min-width is enough to force it real room without needing a fixed
+   percent-width layout for the whole table. */
+.call-notes-cell { min-width: 220px; }
 .reports-contacted-dials-scroll table { border: none; border-radius: 0; }
 .reports-contacted-dials-scroll thead th { position: sticky; top: 0; z-index: 1; }
 td.muted { color: var(--text-muted); }
