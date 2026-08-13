@@ -408,6 +408,12 @@ tr:last-child td { border-bottom: none; }
 #reportsBuyerCentricWrap h3 { font-size: 14px; font-weight: 600; margin: 20px 0 8px; }
 #reportsBuyerCentricWrap > h3:first-child { margin-top: 0; }
 .reports-contacted-dials-scroll { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+/* Outreach count cell in the period-category business-owner tables (see
+   formatOutreachCountCell/SET2_COLUMNS in js/reports.js) — up to 2 lines
+   ("N calls" / "N email(s)") joined with a literal "\n", which jspdf-autotable
+   already renders as a real line break in the PDF; this is that same "\n"
+   respected on-screen instead of being collapsed like normal HTML whitespace. */
+.outreach-count-cell { white-space: pre-line; }
 .reports-contacted-dials-scroll table { border: none; border-radius: 0; }
 .reports-contacted-dials-scroll thead th { position: sticky; top: 0; z-index: 1; }
 td.muted { color: var(--text-muted); }

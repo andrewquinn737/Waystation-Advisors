@@ -158,6 +158,27 @@ function formatDateOnly(dateStr) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 
+// "Outreach count" cell content for the period-category tables (SET2) — a
+// per-contact-method breakdown instead of one bare total, since a dial can
+// now be checked contacted via mobile/company/email independently the same
+// day (see js/dials.js's 3 check circles). Mobile and company both bucket
+// under "call" (both phone-based); email is its own line. Whichever line(s)
+// are actually >0 are the only ones shown — the numbers always sum to the
+// dial's total outreach_count for the period, since get_buyer_contacted_owners
+// computes calls_count/email_count as a strict partition of every logged
+// contact (see that RPC). Joined with "\n" — jspdf-autotable renders that as
+// a real line break in the PDF cell, and the on-screen table's matching
+// .outreach-count-cell CSS class (white-space: pre-line) does the same in
+// the browser, so one format function serves both call sites.
+function formatOutreachCountCell(row) {
+  const calls = row.calls_count || 0;
+  const emails = row.email_count || 0;
+  const parts = [];
+  if (calls > 0) parts.push(`${calls} call${calls === 1 ? "" : "s"}`);
+  if (emails > 0) parts.push(`${emails} email${emails === 1 ? "" : "s"}`);
+  return parts.join("\n");
+}
+
 function mondayOf(d) {
   const dd = new Date(d);
   const day = dd.getDay(); // 0=Sun..6=Sat
@@ -456,7 +477,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   function buildOwnerTableHTML(title, rows, columns) {
     const headCells = columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("");
     const bodyRows = rows
-      .map((r) => `<tr>${columns.map((c) => `<td>${escapeHtml(c.format ? c.format(r[c.key]) : r[c.key] ?? "—")}</td>`).join("")}</tr>`)
+      .map(
+        (r) =>
+          `<tr>${columns
+            .map((c) => `<td class="${c.key === "outreach_count" ? "outreach-count-cell" : ""}">${escapeHtml(c.format ? c.format(r[c.key], r) : r[c.key] ?? "—")}</td>`)
+            .join("")}</tr>`
+      )
       .join("");
     return `
       <h3>${escapeHtml(title)}</h3>
@@ -497,8 +523,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     { key: "website", label: "Website", pdfWidth: 32 },
     { key: "city", label: "City", pdfWidth: 13 },
     { key: "state", label: "State", pdfWidth: 9, pdfHeaderFontSize: 6 },
-    { key: "industry", label: "Industry sector", pdfWidth: 18, pdfHeaderFontSize: 6 },
-    { key: "call_notes", label: "Call notes", pdfWidth: 40 },
+    { key: "industry", label: "Industry sector", pdfWidth: 16, pdfHeaderFontSize: 6 },
+    { key: "call_notes", label: "Call notes", pdfWidth: 36 },
     // Every distinct day this dial was contacted in the period, not just
     // the most recent one — a dial reached on more than one day used to
     // silently get split into a separate row under each category it ever
@@ -507,8 +533,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     // without the year (redundant — the table itself is already scoped to
     // "for week/month of ___") so multiple dates have a real chance of
     // fitting on one line instead of always wrapping.
-    { key: "dates_contacted", label: "Date(s) contacted", pdfWidth: 22, pdfHeaderFontSize: 6, format: (v) => (Array.isArray(v) && v.length ? v.map(formatDateOnly).join(", ") : "—") },
-    { key: "outreach_count", label: "Outreach count", pdfWidth: 10, pdfHeaderFontSize: 5.5 },
+    { key: "dates_contacted", label: "Date(s) contacted", pdfWidth: 20, pdfHeaderFontSize: 6, format: (v) => (Array.isArray(v) && v.length ? v.map(formatDateOnly).join(", ") : "—") },
+    // Widened from 10 (previously a bare single number) now that the cell
+    // holds up to 2 lines — see formatOutreachCountCell. Width taken from
+    // industry/call_notes/dates_contacted above (call_notes stays clearly
+    // the widest column, per its own earlier requirement).
+    { key: "outreach_count", label: "Outreach count", pdfWidth: 18, pdfHeaderFontSize: 6, format: (_v, row) => formatOutreachCountCell(row) },
   ];
 
   // Outreach report only, and only once exactly one buyer is selected — see
@@ -861,7 +891,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
 
   function ownerRowToPdfCells(row, columns) {
     return columns.map((c) => {
-      if (c.format) return String(c.format(row[c.key]));
+      if (c.format) return String(c.format(row[c.key], row));
       const raw = row[c.key];
       if (raw == null || raw === "") return "—";
       return (PDF_NO_TITLE_CASE_KEYS.has(c.key) ? stripForPdf(raw) : sanitizeForPdf(raw)) || "—";
@@ -1063,10 +1093,24 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     doc.addPage();
     y = PDF_FRESH_PAGE_TOP_Y;
 
+    // Never shrink a cell's font past this, however long its longest word is
+    // — an unreadably tiny cell is worse than one that just looks tight.
+    const PDF_CELL_MIN_FONT_SIZE = 4;
+
     // Each business-owner table is only added if it has ≥1 row (per spec —
     // absent, not shown empty) and starts a fresh page if it wouldn't fit
-    // in the remaining space on the current one.
-    const addOwnerPdfTable = (title, rows, columns) => {
+    // in the remaining space on the current one. `shrinkToFit` (only passed
+    // for the period-category/SET2 tables — see the call sites below) makes
+    // every body cell except Website check whether its single longest word
+    // fits the column's fixed width at the table's normal 7.5pt; if not, the
+    // WHOLE cell's font is scaled down (not just the long word) just enough
+    // for that word to fit, so a normal-length cell stays at full size while
+    // one long word (long company name, long call note token, a full state
+    // name like "North Carolina") shrinks itself down instead of overflowing
+    // or forcing every row in the table smaller. Website is excluded on
+    // purpose — a URL has no spaces to wrap on, and an earlier fix already
+    // gave it the width/wrapping treatment it needs (see SET2_COLUMNS).
+    const addOwnerPdfTable = (title, rows, columns, shrinkToFit = false) => {
       if (!rows.length) return;
       if (y > 250) {
         doc.addPage();
@@ -1101,6 +1145,33 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
         headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold", fontSize: 7 },
         columnStyles,
         margin: { top: PDF_FRESH_PAGE_TOP_Y },
+        didParseCell: !shrinkToFit
+          ? undefined
+          : (data) => {
+              if (data.section !== "body") return;
+              const colDef = columns[data.column.index];
+              if (!colDef || colDef.key === "website") return;
+              const text = String(data.cell.raw ?? "").trim();
+              if (!text) return;
+              const baseFontSize = data.cell.styles.fontSize;
+              const availableWidth = (colDef.pdfWidth || 20) - 5; // 2.5 cellPadding each side
+              if (availableWidth <= 0) return;
+              doc.setFont("helvetica", "normal");
+              // Multi-line cell content (dates_contacted/outreach_count use
+              // "\n") is checked one line at a time, not as one long string —
+              // a line break is an intentional fit point, not something that
+              // should force the whole cell smaller.
+              let maxWordWidth = 0;
+              text.split("\n").forEach((line) => {
+                line.split(/\s+/).filter(Boolean).forEach((word) => {
+                  const w = (doc.getStringUnitWidth(word) * baseFontSize) / doc.internal.scaleFactor;
+                  if (w > maxWordWidth) maxWordWidth = w;
+                });
+              });
+              if (maxWordWidth > availableWidth) {
+                data.cell.styles.fontSize = Math.max(baseFontSize * (availableWidth / maxWordWidth), PDF_CELL_MIN_FONT_SIZE);
+              }
+            },
       });
       y = doc.lastAutoTable.finalY + 12;
     };
@@ -1109,7 +1180,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       addOwnerPdfTable(title, milestoneClients.filter((r) => r.milestone_type === type), SET1_COLUMNS);
     });
     CONTACTED_TABLE_TITLES.forEach(([category, title]) => {
-      addOwnerPdfTable(`${title} for ${periodLabel}`, contactedOwners.filter((r) => r.category === category), SET2_COLUMNS);
+      addOwnerPdfTable(`${title} for ${periodLabel}`, contactedOwners.filter((r) => r.category === category), SET2_COLUMNS, true);
     });
 
     drawLogoMark(doc);
