@@ -343,6 +343,14 @@ input, select, textarea {
   background: var(--surface);
   color: var(--text);
 }
+/* A native date input's own OS-drawn calendar icon reserves extra width
+   beyond the field's declared box (most visible next to a same-width
+   <select>, e.g. #introCallTimeDateInput sitting above #introCallTimeSelect/
+   #introCallTimeZoneSelect in dials.html's "Confirm the scheduled time"
+   popup) — appearance:none strips that reserved space so it actually
+   renders the same width as any other width:100% field beside it, same as
+   every "date box is longer than the boxes under it" report traces back to. */
+input[type="date"] { appearance: none; -webkit-appearance: none; }
 textarea { resize: vertical; min-height: 60px; }
 .btn {
   display: inline-block;
