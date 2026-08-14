@@ -2079,8 +2079,16 @@ async function handleEditSave() {
 
 function handleDelete() {
   openConfirmDelete(async () => {
-    const { error } = await supabase.from("clients").delete().eq("id", currentClient.id);
+    // count: "exact" so an RLS-blocked delete (permission denied but no
+    // Postgres error — the delete just matches 0 rows) is caught explicitly
+    // instead of silently closing the modal as if it worked. Real bug found
+    // in production: clients_delete_own was missing the same team-lead
+    // clause clients_update_own already had, so a team lead deleting an
+    // intern's client saw the modal close with the client still there on
+    // the next load, no error shown anywhere.
+    const { error, count } = await supabase.from("clients").delete({ count: "exact" }).eq("id", currentClient.id);
     if (error) return showError(document.getElementById("clientModalError"), error);
+    if (!count) return showError(document.getElementById("clientModalError"), new Error("You don't have permission to delete this client."));
     closeModal();
     await loadClients();
   });
