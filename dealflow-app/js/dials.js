@@ -2497,11 +2497,17 @@ function getMissingDialClientFields(dial) {
 }
 
 // Clicking "Schedule Intro Call" only validates the dial has enough info and
-// opens the Calendly form — it does NOT create the client yet. The client
-// record is only actually inserted once "Open Calendly" is pressed inside
-// that form (see createClient below), so backing out of this popup without
-// opening Calendly never leaves behind an orphaned client with no intro call
-// attached.
+// opens the Calendly form — it does NOT create the client yet, and neither
+// does opening Calendly or booking a time in it. The client record is only
+// actually inserted once the date/time/timezone confirmation step right
+// after Calendly closes is itself confirmed (see createClientFromDial/
+// openIntroCallTimeConfirmModal below), bundled together with logging that
+// new client's very first Timeline entry — so nothing about the client
+// exists in the database until that one step finishes, and backing out
+// anywhere before it never leaves behind an orphaned client with no intro
+// call attached. Calendly itself is pre-filled straight from the dial's own
+// name/email (see the `prefill` opt) rather than from a client row that
+// doesn't exist yet.
 async function handleScheduleIntroCallFromDial(dial) {
   const { missing, labels } = getMissingDialClientFields(dial);
   if (missing.length) {
@@ -2514,84 +2520,87 @@ async function handleScheduleIntroCallFromDial(dial) {
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     profile,
-    createClient: async () => {
-      // client_type must match whichever side (Sellers/Buyers toggle) this
-      // dial actually belongs to — defaultClient()'s own default is
-      // "seller", which used to apply even from a buyer dial since nothing
-      // here ever overrode it. Company name / Industry never transfer for a
-      // buyer dial since they're never collected on one in the first place
-      // (see buildDialEditHTML/getMissingDialClientFields above) — clean,
-      // since clientForm.js's buyer branch has no company fields at all.
-      const isBuyer = currentType === "buyer";
-      const data = defaultClient(profile, {
-        client_type: currentType,
-        full_name: dial.full_name || "",
-        city: dial.city || "",
-        state: dial.state || "",
-        email: dial.email || "",
-        // Both numbers transfer over as their own fields now (mobile stays
-        // the one used for instant call/text everywhere else in the app).
-        mobile_phone: dial.mobile_phone || "",
-        company_phone: dial.company_phone || "",
-        linkedin: dial.linkedin || "",
-        ...(isBuyer ? {} : { company_name: dial.company_name || "", industry: dial.industry || "" }),
-        // Call notes from the dial transfer straight into the new client's
-        // Other notes field.
-        other_notes: dial.call_notes || "",
-      });
-      data.assigned_to = profile.id;
-      // Which dial list this seller client was sourced from — a permanent,
-      // FK-less snapshot (see the matching comment in commitContactCheck())
-      // so it survives the tab later being deleted. Prospective-only: this
-      // is the one and only place a client's origin gets captured, so
-      // clients created before this existed have no way to backfill it.
-      // Lets "Intro calls completed" be attributed to the buyer the tab was
-      // assigned to (dial_lists.buyer_id), not just to whoever's account
-      // owns the resulting client.
-      data.source_list_id = dial.list_id || null;
-      // Explicit at creation time rather than relying solely on the
-      // source_list_id -> dial_lists.buyer_id fallback every reporting RPC
-      // uses (coalesce(c.intended_buyer_id, dl.buyer_id)) — that fallback
-      // silently breaks if the tab is later deleted or reassigned, and (real
-      // bug found in production) some clients never even got source_list_id
-      // populated in the first place (bulk-created outside this flow), so
-      // they never resolved to any buyer at all. Setting it here makes the
-      // attribution permanent and independent of the tab's own fate.
-      data.intended_buyer_id = (isBuyer ? null : allLists.find((l) => l.id === dial.list_id)?.buyer_id) || null;
-      // Sellers have no website field of their own to fall back on
-      // otherwise — captured here for the same "buyer-centric business-
-      // owner tables" reason as source_list_id above (see js/reports.js).
-      data.website = dial.website || null;
-
-      const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
-      if (error) throw error;
-      return inserted;
-    },
-    // Scheduling from Dials DOES now log a client_events "intro_call" row on
-    // the new client's Timeline, with the real date/time/timezone just
-    // confirmed in Calendly — see openIntroCallTimeConfirmModal below.
-    // (Reversed from the previous behavior, where Dials scheduling
-    // deliberately logged nothing to Timeline.) The "intro calls scheduled"
-    // count on the Profile page is unaffected — that's logged inside
-    // wireIntroCallForm itself (js/introCall.js) via the `userId` opt above,
-    // same as before.
-    onCalendlyClosed: async (client) => {
+    prefill: { full_name: dial.full_name || "", email: dial.email || "", client_type: currentType },
+    onCalendlyClosed: async () => {
       els.introCallPopup.classList.add("hidden");
-      openIntroCallTimeConfirmModal(client);
+      openIntroCallTimeConfirmModal(dial);
     },
   });
 }
 
+// Builds the new client record from a dial's info — split out of
+// handleScheduleIntroCallFromDial above so openIntroCallTimeConfirmModal can
+// call it itself once the real scheduled date/time/timezone is known,
+// instead of this running the moment Calendly opens (see that function's own
+// top comment for why the client is deliberately created this late).
+async function createClientFromDial(dial) {
+  // client_type must match whichever side (Sellers/Buyers toggle) this
+  // dial actually belongs to — defaultClient()'s own default is "seller",
+  // which used to apply even from a buyer dial since nothing here ever
+  // overrode it. Company name / Industry never transfer for a buyer dial
+  // since they're never collected on one in the first place (see
+  // buildDialEditHTML/getMissingDialClientFields above) — clean, since
+  // clientForm.js's buyer branch has no company fields at all.
+  const isBuyer = currentType === "buyer";
+  const data = defaultClient(profile, {
+    client_type: currentType,
+    full_name: dial.full_name || "",
+    city: dial.city || "",
+    state: dial.state || "",
+    email: dial.email || "",
+    // Both numbers transfer over as their own fields now (mobile stays the
+    // one used for instant call/text everywhere else in the app).
+    mobile_phone: dial.mobile_phone || "",
+    company_phone: dial.company_phone || "",
+    linkedin: dial.linkedin || "",
+    ...(isBuyer ? {} : { company_name: dial.company_name || "", industry: dial.industry || "" }),
+    // Call notes from the dial transfer straight into the new client's
+    // Other notes field.
+    other_notes: dial.call_notes || "",
+  });
+  data.assigned_to = profile.id;
+  // Which dial list this seller client was sourced from — a permanent,
+  // FK-less snapshot (see the matching comment in commitContactCheck())
+  // so it survives the tab later being deleted. Prospective-only: this
+  // is the one and only place a client's origin gets captured, so
+  // clients created before this existed have no way to backfill it.
+  // Lets "Intro calls completed" be attributed to the buyer the tab was
+  // assigned to (dial_lists.buyer_id), not just to whoever's account
+  // owns the resulting client.
+  data.source_list_id = dial.list_id || null;
+  // Explicit at creation time rather than relying solely on the
+  // source_list_id -> dial_lists.buyer_id fallback every reporting RPC
+  // uses (coalesce(c.intended_buyer_id, dl.buyer_id)) — that fallback
+  // silently breaks if the tab is later deleted or reassigned, and (real
+  // bug found in production) some clients never even got source_list_id
+  // populated in the first place (bulk-created outside this flow), so
+  // they never resolved to any buyer at all. Setting it here makes the
+  // attribution permanent and independent of the tab's own fate.
+  data.intended_buyer_id = (isBuyer ? null : allLists.find((l) => l.id === dial.list_id)?.buyer_id) || null;
+  // Sellers have no website field of their own to fall back on
+  // otherwise — captured here for the same "buyer-centric business-
+  // owner tables" reason as source_list_id above (see js/reports.js).
+  data.website = dial.website || null;
+
+  const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
+  if (error) throw error;
+  return inserted;
+}
+
 // ---------------------------------------------------------------------------
 // Shown right after the Calendly popup auto-closes on a confirmed booking
-// (see onCalendlyClosed above). Calendly's own postMessage never exposes the
-// actual chosen start time (a platform limitation — see the comment at the
-// top of js/introCall.js), so this asks for it directly instead of guessing
-// "now", then logs the new client's intro call on their Timeline with that
-// real data. No cancel option — the client and its intro_call_log credit
-// already exist by this point, so backing out here would just leave the
-// Timeline entry unlogged rather than undo anything.
-function openIntroCallTimeConfirmModal(client) {
+// (see handleScheduleIntroCallFromDial's onCalendlyClosed above). Calendly's
+// own postMessage never exposes the actual chosen start time (a platform
+// limitation — see the comment at the top of js/introCall.js), so this asks
+// for it directly instead of guessing "now" — and this is also where the new
+// client record itself finally gets created (see createClientFromDial),
+// bundled together with logging that client's very first Timeline entry, in
+// one step. Nothing about this client exists in the database until this
+// modal is actually confirmed. No cancel option — the booking is already
+// made in Calendly regardless, so backing out here (there's nothing to
+// "undo") just means reopening this dial's "Schedule intro call" again later
+// to finish recording it.
+function openIntroCallTimeConfirmModal(dial) {
   const modal = els.introCallTimeModal;
   const dateInput = els.introCallTimeDateInput;
   const timeSelect = els.introCallTimeSelect;
@@ -2608,6 +2617,13 @@ function openIntroCallTimeConfirmModal(client) {
 
   modal.classList.remove("hidden");
 
+  // Set once the client is actually created below — kept outside
+  // onConfirmClick's own scope (rather than a local const inside it) so
+  // that if the client_events insert fails after a successful client
+  // creation, clicking Save again to retry doesn't create a SECOND client
+  // for the same dial.
+  let createdClient = null;
+
   const onConfirmClick = async () => {
     const val = dateInput.value;
     const time = timeSelect.value;
@@ -2618,20 +2634,27 @@ function openIntroCallTimeConfirmModal(client) {
       return;
     }
     confirmBtn.disabled = true;
-    const eventDate = zonedTimeToUtcIso(val, time, timezone);
-    const { error } = await supabase.from("client_events").insert({
-      client_id: client.id,
-      event_type: "intro_call",
-      event_date: eventDate,
-      details: { via: "calendly", time, timezone },
-      created_by: profile.id,
-    });
-    confirmBtn.disabled = false;
-    if (error) {
-      errEl.textContent = error.message || String(error);
+    errEl.classList.add("hidden");
+    try {
+      if (!createdClient) {
+        createdClient = await createClientFromDial(dial);
+      }
+      const eventDate = zonedTimeToUtcIso(val, time, timezone);
+      const { error } = await supabase.from("client_events").insert({
+        client_id: createdClient.id,
+        event_type: "intro_call",
+        event_date: eventDate,
+        details: { via: "calendly", time, timezone },
+        created_by: profile.id,
+      });
+      if (error) throw error;
+    } catch (err) {
+      errEl.textContent = err.message || String(err);
       errEl.classList.remove("hidden");
+      confirmBtn.disabled = false;
       return;
     }
+    confirmBtn.disabled = false;
     cleanup();
   };
   const cleanup = () => {

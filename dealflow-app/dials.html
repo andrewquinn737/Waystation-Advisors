@@ -349,12 +349,15 @@
        booking (see wireIntroCallForm's onCalendlyClosed in js/introCall.js,
        wired from handleScheduleIntroCallFromDial in js/dials.js). Calendly's
        own postMessage doesn't expose the real chosen date/time/timezone, so
-       this confirms it manually and logs the new client's intro call with
-       that real data instead of "now". -->
+       this confirms it manually — and this is also where the new client
+       record itself actually gets created (see createClientFromDial in
+       js/dials.js), together with its Timeline "intro_call" entry, using
+       that real date/time/timezone instead of "now". Nothing about the
+       client exists in the database until this modal is confirmed. -->
   <div class="modal-backdrop hidden" id="introCallTimeModal">
     <div class="modal">
       <h2>Confirm the scheduled time</h2>
-      <p class="help-text">Enter the date/time you and the client just picked in Calendly.</p>
+      <p class="help-text">Enter the date/time you and the client just picked in Calendly. Record the event in the app to finish creating your client.</p>
       <label for="introCallTimeDateInput">Date</label>
       <input type="date" id="introCallTimeDateInput" />
       <label for="introCallTimeSelect">Time</label>

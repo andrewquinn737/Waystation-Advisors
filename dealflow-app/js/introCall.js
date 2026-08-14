@@ -67,15 +67,19 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 }
 
 // container: element the form HTML above was injected into.
-// opts: { client, createClient, profile, logToGraph, onCalendlyClosed(client), onScheduled(client) }
-//   - client: an already-existing client row ({full_name,email,id,...}).
-//   - createClient: alternative to `client` — an async function called the
-//     moment "Open Calendly" is clicked, which should create the client
-//     record and return it (or throw/return null on failure, showing its own
-//     error). Used by the Dials "Schedule Intro Call" flow so the client
-//     isn't actually created in the database until Calendly is opened —
-//     clicking "Schedule Intro Call" itself only validates the dial's info
-//     and opens this form, it no longer creates anything.
+// opts: { client, prefill, profile, logToGraph, onCalendlyClosed(client), onScheduled(client) }
+//   - client: an already-existing client row ({full_name,email,client_type,id,...}).
+//   - prefill: alternative to `client` — a plain {full_name, email,
+//     client_type} object, used only to pre-fill Calendly's popup and to tag
+//     the intro_call_log credit below. No client record is created by this
+//     module at all in this mode; the caller is expected to create the real
+//     client itself later (see the Dials "Schedule Intro Call" flow —
+//     handleScheduleIntroCallFromDial/createClientFromDial/
+//     openIntroCallTimeConfirmModal in js/dials.js — which defers actual
+//     creation all the way until the date/time/timezone confirmation step
+//     right after Calendly closes, bundled together with logging that
+//     client's first Timeline entry, so nothing about the client exists in
+//     the database at all until that step is completed).
 //   - profile: the signed-in profile row (id, role, team_id) — used both to
 //     log intro_call_log (so the Profile page's "Intro calls" tracker can
 //     count every time this flow is used, from either Dials or Clients,
@@ -95,41 +99,29 @@ export function buildIntroCallFormHTML({ allowSkip = false } = {}) {
 //     handleScheduleIntroCallFromDial in js/dials.js) — it opens its own
 //     date/time/timezone confirmation step there, since Calendly's
 //     postMessage doesn't expose the actual chosen time (see the top-of-file
-//     comment).
+//     comment). Receives `client` as-is (undefined in `prefill` mode, since
+//     no client exists yet — Dials' own handler doesn't need it, it already
+//     has the dial in its own closure).
 //   - onScheduled(client): fired after onCalendlyClosed, same as before.
 export function wireIntroCallForm(container, opts) {
-  const { client: initialClient, createClient, profile, logToGraph = true, onCalendlyClosed, onScheduled } = opts;
+  const { client: initialClient, prefill, profile, logToGraph = true, onCalendlyClosed, onScheduled } = opts;
   const userId = profile?.id;
   const btn = container.querySelector("#scheduleCallBtn");
   const skipBtn = container.querySelector("#skipCalendlyBtn");
   const errEl = container.querySelector("#introCallError");
   const successEl = container.querySelector("#introCallSuccess");
 
-  // Shared by both the normal "Open Calendly" click and the "Skip Calendly"
-  // click below — resolves/creates the client record, same as before.
-  async function resolveClient() {
-    let client = initialClient;
-    if (!client && createClient) {
-      try {
-        client = await createClient();
-      } catch (err) {
-        errEl.textContent = err?.message || "Could not create the client record.";
-        errEl.classList.remove("hidden");
-        return null;
-      }
-      if (!client) return null; // createClient already showed its own error and bailed
-    }
-    return client;
-  }
+  // Whichever of `client`/`prefill` the caller passed — used for Calendly's
+  // pre-fill and the intro_call_log credit below. Never both at once.
+  const name = initialClient?.full_name || prefill?.full_name || "";
+  const email = initialClient?.email || prefill?.email || "";
+  const clientType = initialClient?.client_type || prefill?.client_type || "seller";
 
   btn.addEventListener("click", async () => {
     errEl.classList.add("hidden");
     successEl.classList.add("hidden");
 
-    const client = await resolveClient();
-    if (!client) return;
-
-    if (!client?.email) {
+    if (!email) {
       errEl.textContent = "This client doesn't have an email on file, so Calendly can't be pre-filled. Add one first.";
       errEl.classList.remove("hidden");
       return;
@@ -150,10 +142,9 @@ export function wireIntroCallForm(container, opts) {
       return;
     }
 
-    const name = client.full_name || "";
     window.Calendly.initPopupWidget({
       url: calendlyUrl,
-      prefill: { name, email: client.email },
+      prefill: { name, email },
     });
 
     // One-shot: Calendly broadcasts this via postMessage the instant a
@@ -170,17 +161,16 @@ export function wireIntroCallForm(container, opts) {
       successEl.classList.remove("hidden");
 
       // Counts toward the Profile page's "Intro calls" weekly tracker — see
-      // loadIntroCallsChart() in js/profile.js. client_type is the client's
-      // own client_type (seller/buyer), letting that tracker filter to just
-      // the currently-active Sellers/Buyers side. Falls back to "seller" on
-      // the off chance a caller ever passes a client-like object without
-      // one, so this never violates the column's NOT NULL constraint.
+      // loadIntroCallsChart() in js/profile.js. clientType lets that tracker
+      // filter to just the currently-active Sellers/Buyers side, resolved
+      // above from whichever of client/prefill was passed (falls back to
+      // "seller" so this never violates the column's NOT NULL constraint).
       if (userId && logToGraph) {
-        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: client?.client_type || "seller" });
+        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: clientType });
       }
 
-      if (onCalendlyClosed) await onCalendlyClosed(client);
-      if (onScheduled) await onScheduled(client);
+      if (onCalendlyClosed) await onCalendlyClosed(initialClient);
+      if (onScheduled) await onScheduled(initialClient);
     };
     window.addEventListener("message", onMessage);
   });
@@ -189,25 +179,25 @@ export function wireIntroCallForm(container, opts) {
   // graph gets credited) minus actually opening Calendly, and without
   // requiring the client to have an email on file (Calendly's pre-fill is
   // the only reason that was ever needed). See the allowSkip comment on
-  // buildIntroCallFormHTML above for when this button even exists — Dials
-  // never passes allowSkip, so it never wires onCalendlyClosed through this
-  // path either.
+  // buildIntroCallFormHTML above for when this button even exists — always
+  // paired with a real `client`, never `prefill` (Dials never passes
+  // allowSkip at all, since it always needs a real Calendly booking to get
+  // the real date/time — see handleScheduleIntroCallFromDial).
   if (skipBtn) {
     skipBtn.addEventListener("click", async () => {
       errEl.classList.add("hidden");
       successEl.classList.add("hidden");
 
-      const client = await resolveClient();
-      if (!client) return;
+      if (!initialClient) return;
 
       successEl.textContent = "Logged the intro call.";
       successEl.classList.remove("hidden");
 
       if (userId && logToGraph) {
-        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: client?.client_type || "seller" });
+        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: clientType });
       }
 
-      if (onScheduled) await onScheduled(client);
+      if (onScheduled) await onScheduled(initialClient);
     });
   }
 }

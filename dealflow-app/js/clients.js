@@ -1860,9 +1860,10 @@ function openEditEventModal(eventId) {
 }
 
 // Same shared "Schedule Intro Call" form the Dials page uses (js/introCall.js)
-// — here the client already exists, so it's passed directly (no createClient
-// callback needed). eventDate/time are whatever was chosen in
-// openEventDetailsModal.
+// — here the client already exists, so it's passed directly as `client`
+// (Dials instead passes `prefill`, since its client doesn't exist yet — see
+// handleScheduleIntroCallFromDial in js/dials.js). eventDate/time are
+// whatever was chosen in openEventDetailsModal.
 function openTimelineIntroCall(eventDate, time, timezone) {
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowSkip: true });
   els.introCallPopup.classList.remove("hidden");
