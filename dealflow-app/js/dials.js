@@ -2144,6 +2144,14 @@ function renderDialModal() {
   // rather than under the row as a whole — so its right edge lines up with
   // Schedule-intro-call's right edge specifically, not Edit's.
   const isIntroScheduled = dial.contact_status === "intro_call_scheduled";
+  // Hidden again once used for THIS arrival at the category — see
+  // openIntroCallTimeConfirmModal's success path, which sets
+  // dial._scheduleIntroCallUsed, and updateDialStatus, which resets it back
+  // to false only on a genuine fresh switch INTO "Accepted intro call" (so
+  // switching to a different category and back re-shows the button).
+  // Ephemeral/in-memory only — resets on page reload, same as
+  // hiddenStatuses elsewhere in this file.
+  const showScheduleIntroBtn = isIntroScheduled && !dial._scheduleIntroCallUsed;
   els.dialModalHeader.innerHTML = `
     <div class="dial-modal-header">
       <div class="dial-modal-header-main">
@@ -2177,7 +2185,7 @@ function renderDialModal() {
             ? `
         <div class="dial-modal-editrow">
           ${
-            isIntroScheduled
+            showScheduleIntroBtn
               ? `
           <div class="dial-schedule-intro-col">
             <button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>
@@ -2196,7 +2204,7 @@ function renderDialModal() {
   `;
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
   if (isViewingExisting) {
-    if (isIntroScheduled) {
+    if (showScheduleIntroBtn) {
       document.getElementById("scheduleIntroCallFromDialBtn").addEventListener("click", () => handleScheduleIntroCallFromDial(currentDial));
     }
     document.getElementById("dialEditBtn").addEventListener("click", async () => {
@@ -2312,10 +2320,19 @@ async function updateDialStatus(newStatus) {
   // dial.contact_status while currentDial briefly held stale/partial data
   // from the race.
   await flushCallNotes();
+  // A fresh arrival at "Accepted intro call" (switching in from some other
+  // category — not just re-saving while already sitting in it) re-shows the
+  // "Schedule intro call" button if a previous use had hidden it — see
+  // renderDialModal's showScheduleIntroBtn and the success path in
+  // openIntroCallTimeConfirmModal, which is what sets this flag true.
+  const wasAlreadyIntroScheduled = currentDial.contact_status === "intro_call_scheduled";
   const data = { contact_status: newStatus };
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
+  if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled) {
+    currentDial._scheduleIntroCallUsed = false;
+  }
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) Object.assign(dials[idx], data);
   await syncTodaysCallLogSnapshot({ contact_status_at_call: newStatus });
@@ -2655,6 +2672,13 @@ function openIntroCallTimeConfirmModal(dial) {
       return;
     }
     confirmBtn.disabled = false;
+    // Hides "Schedule intro call" on this dial again now that it's been
+    // used — see renderDialModal's showScheduleIntroBtn, which reads this
+    // same flag. Only a fresh arrival at "Accepted intro call" (see
+    // updateDialStatus) resets it back to false, so switching to a
+    // different category and back re-shows the button.
+    dial._scheduleIntroCallUsed = true;
+    renderDialModal();
     cleanup();
   };
   const cleanup = () => {
