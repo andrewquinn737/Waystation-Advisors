@@ -1491,7 +1491,7 @@ function fmtShortDate(d) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-// Weekly quota — also drives the "(N more calls to reach quota)" /
+// Weekly quota — also drives the "(N more contacts to reach quota)" /
 // "(Quota met)" text under the calls-this-week heading. Sellers only — see
 // loadCallsChart(), which skips the quota entirely in Buyers mode (a buyer-
 // side intern isn't held to the same 50-cold-calls/week target).
@@ -1649,7 +1649,7 @@ async function loadCallsChart() {
         const remaining = quota - thisWeekCount;
         return remaining <= 0
           ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
-          : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more call${remaining === 1 ? "" : "s"} to reach quota)</div>`;
+          : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more contact${remaining === 1 ? "" : "s"} to reach quota)</div>`;
       })();
   els.callsThisWeekText.innerHTML = `${thisWeekCount} attempted contact${thisWeekCount === 1 ? "" : "s"} this week, ${todayCount} today${quotaHTML}`;
   renderCallsChart(els.callsChart, weekStarts, counts, quota);
