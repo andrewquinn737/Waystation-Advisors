@@ -699,7 +699,17 @@ tr.clickable-row { cursor: pointer; }
 .readonly-field .rf-value { font-size: 14px; white-space: pre-wrap; }
 .readonly-field .rf-value.empty { color: var(--text-muted); font-style: italic; }
 .rf-value-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.contact-actions { display: flex; gap: 6px; flex-shrink: 0; }
+/* margin-left:auto (not just .rf-value-row's own justify-content:space-between)
+   is what actually keeps this pinned right once html.is-mobile-device's
+   flex-wrap:wrap (below) lets a long email/value push it onto its own
+   wrapped line — space-between only pushes the LAST item on a line to the
+   end when there's more than one item sharing that line; with just one item
+   alone on a wrapped line (long value pushed it down, actions has nowhere
+   else to go but its own line) space-between collapses to flex-start,
+   landing the instant call/text/email icons on the LEFT instead. Harmless
+   on desktop, where .rf-value-row never wraps in the first place, so
+   .contact-actions already sits on the same line as the value either way. */
+.contact-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .contact-action-btn {
   width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
   color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
