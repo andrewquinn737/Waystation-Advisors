@@ -2022,7 +2022,7 @@ function renderDialsTable() {
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
           </div>
-          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone || d.company_phone, email: d.email })}
+          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone || d.company_phone, email: d.email, linkedin: d.linkedin })}
         </div>`
         )
         .join("")}

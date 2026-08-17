@@ -125,7 +125,13 @@ export function buildPhoneNumbersHTML(entity, extraFor) {
 // text + call icon; `email` gets a mail icon. Either can be omitted. `extra`
 // — see rfContact's comment above; only ever appended when at least one icon
 // is actually rendered, since there's nothing to attach it to otherwise.
-export function contactActionIcons({ phone, email, extra = "" } = {}) {
+// `linkedin` (optional) is a fallback, not a fourth icon: only rendered when
+// there's neither a phone NOR an email to instant-contact with at all, so a
+// list row with nothing else still gets ONE quick action instead of an empty
+// spot — never shown alongside a real phone/email icon. Same "no protocol"
+// tolerance as rfWebsite (js/dials.js) — a bare "linkedin.com/in/..." value
+// still gets a working link.
+export function contactActionIcons({ phone, email, linkedin, extra = "" } = {}) {
   const parts = [];
   if (phone) {
     parts.push(`<a class="contact-action-btn" href="sms:${escapeHtml(phone)}" title="Text">${CONTACT_ICONS.sms}</a>`);
@@ -135,6 +141,13 @@ export function contactActionIcons({ phone, email, extra = "" } = {}) {
   }
   if (email) {
     parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(email))}" title="Email">${CONTACT_ICONS.mailto}</a>`);
+  }
+  if (!phone && !email && linkedin) {
+    const href = /^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`;
+    // The LinkedIn wordmark's own lowercase "in" lettermark, as plain text
+    // rather than a hand-drawn SVG — more recognizable than an invented
+    // glyph would be, and nothing to get subtly wrong.
+    parts.push(`<a class="contact-action-btn" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="LinkedIn"><span class="linkedin-glyph">in</span></a>`);
   }
   return parts.length ? `<div class="contact-actions">${parts.join("")}${extra}</div>` : "";
 }

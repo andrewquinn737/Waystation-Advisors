@@ -725,6 +725,10 @@ tr.clickable-row { cursor: pointer; }
   color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
 }
 @media (hover: hover) { .contact-action-btn:hover { background: var(--gold-soft); color: var(--text); } }
+/* LinkedIn fallback icon (see contactActionIcons in js/contactIcons.js) —
+   the wordmark's own lowercase "in" lettermark as text, sized to match the
+   SVG icons it sits alongside. */
+.linkedin-glyph { font-size: 12px; font-weight: 700; line-height: 1; letter-spacing: -0.5px; }
 /* "Instant call" (tel:) isn't something a desktop computer can actually do,
    so it's hidden there — text and email quick-actions stay on both. See
    html.is-desktop-device further down (device-detection block). */
