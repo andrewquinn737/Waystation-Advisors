@@ -1052,10 +1052,18 @@ async function openTransferMenu() {
     els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`;
   } else {
     els.dialTabTransferList.innerHTML = targets
-      .map(
-        (p) =>
-          `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}">${escapeHtml(p.full_name)}${p.id === profile.id ? " (you)" : ""}</button>`
-      )
+      .map((p) => {
+        // Only reachable when isOwnTab is false (viewing someone else's tab
+        // via Accounts visible) — that's the one case where the list isn't
+        // filtered down to exclude anyone, so the tab's CURRENT owner can
+        // show up as a selectable target right alongside everyone else,
+        // which read as "transfer it to... the person who already has it?"
+        // with nothing marking that option as different from the rest.
+        // Mutually exclusive with "(you)" — isOwnTab guarantees
+        // list.created_by !== profile.id whenever this branch runs.
+        const suffix = p.id === profile.id ? " (you)" : p.id === list?.created_by ? " (tab owner)" : "";
+        return `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}">${escapeHtml(p.full_name)}${suffix}</button>`;
+      })
       .join("");
     els.dialTabTransferList.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
       btn.addEventListener("click", () => completeTransfer(btn.dataset.id));
