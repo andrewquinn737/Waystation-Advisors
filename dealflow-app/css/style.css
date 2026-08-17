@@ -1001,6 +1001,13 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 }
 @media (hover: hover) { .dial-tab-transfer-option:hover { background: var(--gold-soft); } }
 .dial-tab-transfer-empty { padding: 8px; font-size: 12.5px; color: var(--text-muted); }
+/* The tab's current owner, shown non-clickable at the top of the Transfer
+   list (see openTransferMenu in js/dials.js) — same padding/font as a real
+   .dial-tab-transfer-option so it lines up, just muted and with no hover/
+   cursor since it isn't one. The divider right after it separates it from
+   the real (clickable) options below. */
+.dial-tab-transfer-owner { padding: 8px; font-size: 13px; color: var(--text-muted); }
+.dial-tab-transfer-divider { border-bottom: 1px solid var(--border); margin: 2px 0 4px; }
 
 /* Admin-only "Accounts visible" popup (Clients page) — see
    #accountsVisiblePopup in clients.html. "Select all" is styled as its own
