@@ -2584,6 +2584,18 @@ async function handleScheduleIntroCallFromDial(dial) {
 // instead of this running the moment Calendly opens (see that function's own
 // top comment for why the client is deliberately created this late).
 async function createClientFromDial(dial) {
+  // Idempotency guard: openIntroCallTimeConfirmModal's own createdClient
+  // variable only protects against a double-click within ONE still-open
+  // modal — it resets on a page reload, or on simply reopening "Schedule
+  // intro call" again after an earlier attempt got a client created but
+  // then failed on the follow-up Timeline event insert (a real, confirmed
+  // gap: nothing in the database itself prevented a second client for the
+  // same dial). source_dial_id (see clients table) is the durable version
+  // of that same check — if a client already exists for this dial, reuse
+  // it instead of creating another.
+  const { data: existing } = await supabase.from("clients").select().eq("source_dial_id", dial.id).maybeSingle();
+  if (existing) return existing;
+
   // client_type must match whichever side (Sellers/Buyers toggle) this
   // dial actually belongs to — defaultClient()'s own default is "seller",
   // which used to apply even from a buyer dial since nothing here ever
@@ -2631,9 +2643,21 @@ async function createClientFromDial(dial) {
   // otherwise — captured here for the same "buyer-centric business-
   // owner tables" reason as source_list_id above (see js/reports.js).
   data.website = dial.website || null;
+  data.source_dial_id = dial.id;
 
   const { data: inserted, error } = await supabase.from("clients").insert(data).select().single();
-  if (error) throw error;
+  if (error) {
+    // 23505 = unique_violation on clients_source_dial_id_unique — lost a
+    // race against another concurrent attempt for this same dial (the
+    // `existing` check above already covers the common sequential case;
+    // this covers two attempts landing at nearly the same instant). Either
+    // way, someone already created it — use that one instead of failing.
+    if (error.code === "23505") {
+      const { data: raceWinner } = await supabase.from("clients").select().eq("source_dial_id", dial.id).maybeSingle();
+      if (raceWinner) return raceWinner;
+    }
+    throw error;
+  }
   return inserted;
 }
 
