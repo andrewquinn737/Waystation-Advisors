@@ -539,7 +539,11 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     { key: "city", label: "City", pdfWidth: 13 },
     { key: "state", label: "State", pdfWidth: 9, pdfHeaderFontSize: 6 },
     { key: "industry", label: "Industry sector", pdfWidth: 16, pdfHeaderFontSize: 6 },
-    { key: "call_notes", label: "Call notes", pdfWidth: 36 },
+    // pdfBodyFontSize (see the didParseCell hook in addOwnerPdfTable) — free-
+    // text call notes read visually denser/heavier than the short structured
+    // values in the surrounding columns even at the same 7.5pt base, so this
+    // column alone starts smaller to match the rest of the row's formatting.
+    { key: "call_notes", label: "Call notes", pdfWidth: 36, pdfBodyFontSize: 6.5 },
     // Every distinct day this dial was contacted in the period, not just
     // the most recent one — a dial reached on more than one day used to
     // silently get split into a separate row under each category it ever
@@ -1166,6 +1170,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
               if (data.section !== "body") return;
               const colDef = columns[data.column.index];
               if (!colDef || colDef.key === "website") return;
+              if (colDef.pdfBodyFontSize) data.cell.styles.fontSize = colDef.pdfBodyFontSize;
               const text = String(data.cell.raw ?? "").trim();
               if (!text) return;
               const baseFontSize = data.cell.styles.fontSize;
