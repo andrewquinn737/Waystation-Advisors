@@ -53,6 +53,7 @@ const UNATTACHED_BUYER_LABEL = "Not attached to buyer";
 // get_buyer_progress_summary()'s `metric` column exactly.
 const SUMMARY_METRIC_LABELS = [
   ["approved_targets", "Approved targets"],
+  ["targets_contacted", "Targets contacted"],
   ["owners_talked", "Owners talked to"],
   ["owners_agreed", "Owners agreed to intro call"],
   ["intro_calls_completed", "Intro calls completed (confirmed leads)"],
