@@ -729,6 +729,16 @@ async function toggleContactCheck(method) {
   await commitContactCheck(method, !isChecked);
 }
 
+// Network blips during this write were previously surfacing the raw fetch
+// error text ("TypeError: Load failed" etc.) straight into the modal via
+// showError — every other read/write path in the app already routes a
+// connectivity failure through isNetworkError() for a friendly message
+// instead (see loadLists() above for the pattern this mirrors).
+function showContactCheckError(err) {
+  if (isNetworkError(err)) return showError(els.dialModalError, { message: "No internet connection — try again." });
+  showError(els.dialModalError, err);
+}
+
 async function commitContactCheck(method, checking) {
   if (contactCheckToggleInFlight) return;
   contactCheckToggleInFlight = true;
@@ -738,13 +748,20 @@ async function commitContactCheck(method, checking) {
     await flushCallNotes();
     const col = CONTACT_METHOD_DATE_COLUMNS[method];
     const today = todayDateStr();
+    const newValue = checking ? today : null;
+
+    // currentDial/dials are only mutated once, at the very end, after BOTH
+    // writes below are confirmed to have succeeded — previously the first
+    // write's success alone drove an immediate in-memory mutation, so a
+    // failure of the SECOND write (which went entirely unchecked) could
+    // leave currentDial silently out of sync with what the circle still
+    // displayed on screen.
+    const { error } = await supabase.from("dials").update({ [col]: newValue }).eq("id", currentDial.id);
+    if (error) return showContactCheckError(error);
 
     if (!checking) {
-      const { error } = await supabase.from("dials").update({ [col]: null }).eq("id", currentDial.id);
-      if (error) return showError(els.dialModalError, error);
-      currentDial[col] = null;
       const { startIso, endIso } = localDayBoundsIso(today);
-      await supabase
+      const { error: logError } = await supabase
         .from("call_status_changes")
         .delete()
         .eq("dial_id", currentDial.id)
@@ -752,10 +769,8 @@ async function commitContactCheck(method, checking) {
         .eq("contact_method", method)
         .gte("changed_at", startIso)
         .lt("changed_at", endIso);
+      if (logError) return showContactCheckError(logError);
     } else {
-      const { error } = await supabase.from("dials").update({ [col]: today }).eq("id", currentDial.id);
-      if (error) return showError(els.dialModalError, error);
-      currentDial[col] = today;
       // Permanent, FK-less snapshot for the Reports feature (see
       // js/reports.js) — dial_lists rows are hard-deleted (cascading to
       // their dials) when a tab is removed, so this is the only place these
@@ -763,7 +778,7 @@ async function commitContactCheck(method, checking) {
       // this row so a later uncheck of that SAME circle can find and delete
       // only this one row, even if other circles also logged rows today.
       const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
-      await supabase.from("call_status_changes").insert({
+      const { error: logError } = await supabase.from("call_status_changes").insert({
         user_id: profile.id,
         dial_id: currentDial.id,
         dial_type: currentType,
@@ -779,11 +794,15 @@ async function commitContactCheck(method, checking) {
         industry: currentDial.industry || null,
         call_notes: currentDial.call_notes || null,
       });
+      if (logError) return showContactCheckError(logError);
     }
 
+    currentDial[col] = newValue;
     const idx = dials.findIndex((d) => d.id === currentDial.id);
-    if (idx !== -1) dials[idx][col] = currentDial[col];
+    if (idx !== -1) dials[idx][col] = newValue;
     renderDialModal();
+  } catch (err) {
+    showContactCheckError(err);
   } finally {
     contactCheckToggleInFlight = false;
   }
