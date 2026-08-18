@@ -1220,7 +1220,25 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // gets desktop the same "preview, then decide whether to save" flow
   // mobile already had, using every desktop browser's own built-in PDF
   // viewer (complete with its own download button).
+  // buyerCentric is populated by fetchBuyerCentricData(), which every OTHER
+  // caller (refresh(), fired after report type/period/buyer selection
+  // changes — see e.g. the buyer-picker handlers above) kicks off WITHOUT
+  // awaiting it, so the PDF buttons can already be visible (renderOptionsMenu
+  // only checks reportType/selectedBuyerIds, not whether the fetch finished)
+  // before that background fetch actually lands. A click landing in that gap
+  // used to just silently no-op — real, confirmed symptom: the first click
+  // (sometimes two or three) did nothing, and only a later click, after the
+  // background fetch happened to finish on its own, worked. Fetching it here
+  // directly if it isn't ready yet — rather than depending on some OTHER
+  // in-flight call to eventually populate it — is what makes the very first
+  // click always work.
+  async function ensureBuyerCentricReady() {
+    if (buyerCentric) return;
+    await fetchBuyerCentricData(await resolveAccounts());
+  }
+
   els.reportsCreatePdfBtn.addEventListener("click", async () => {
+    await ensureBuyerCentricReady();
     if (!buyerCentric) return;
     const { doc, filename } = await buildReportPdf();
     doc.setProperties({ title: filename });
@@ -1248,6 +1266,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // fixable client-side), so the fallback here is a plain download instead
   // of trying to replicate the Text/Email popover.
   els.reportsSendPdfBtn.addEventListener("click", async () => {
+    await ensureBuyerCentricReady();
     if (!buyerCentric) return;
     const { doc, filename } = await buildReportPdf();
     const blob = doc.output("blob");
