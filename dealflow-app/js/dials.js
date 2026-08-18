@@ -2434,7 +2434,20 @@ function openCreateDialModal() {
 // waits this long (via setTimeout) before swapping content partway through.
 const DIAL_SWIPE_MS = 180;
 
+// Re-entrancy guard — a fast swipe or a spammed arrow key/button used to be
+// able to fire a SECOND goToDial() while the first one's animation was still
+// mid-flight. Both calls manipulate the same .dial-modal element's inline
+// transform/opacity across their own independent 180ms waits with nothing
+// serializing them, so their writes could interleave in whatever order the
+// two setTimeouts happened to resolve in — real, confirmed symptom: the
+// modal settling off-center (visually "stuck" toward one edge) instead of
+// landing back at transform: none. Blocking a new swipe outright while one
+// is already in progress removes the interleaving entirely, same pattern as
+// contactCheckToggleInFlight above.
+let dialSwipeInFlight = false;
+
 async function goToDial(delta) {
+  if (dialSwipeInFlight) return;
   if (dialMode !== "view") return; // don't discard unsaved edits by navigating away
   // Block swipe/prev/next/arrow-keys entirely while the Call notes textarea
   // is actively focused — previously this just auto-flushed (saved) whatever
@@ -2452,37 +2465,44 @@ async function goToDial(delta) {
   const newIndex = currentDialIndex + delta;
   if (newIndex < 0 || newIndex >= currentDialSet.length) return;
 
-  // Save any notes typed but not yet blurred BEFORE swapping to the next
-  // dial, and wait for it to finish before rendering — otherwise the render
-  // below could land while that save is still in flight and show/overwrite
-  // stale data for whichever dial is being left (see flushCallNotes).
-  await flushCallNotes();
+  dialSwipeInFlight = true;
+  try {
+    // Save any notes typed but not yet blurred BEFORE swapping to the next
+    // dial, and wait for it to finish before rendering — otherwise the
+    // render below could land while that save is still in flight and
+    // show/overwrite stale data for whichever dial is being left (see
+    // flushCallNotes).
+    await flushCallNotes();
 
-  const modalBox = els.dialModalBackdrop.querySelector(".dial-modal");
+    const modalBox = els.dialModalBackdrop.querySelector(".dial-modal");
 
-  // Slide + fade the current content out in the direction being swiped away
-  // from, then swap in the new dial, then slide + fade it in from the
-  // opposite side — an actual swipe transition instead of an instant snap
-  // (see .dial-modal's transition in css/style.css).
-  if (modalBox) {
-    modalBox.style.transform = delta > 0 ? "translateX(-28px)" : "translateX(28px)";
-    modalBox.style.opacity = "0";
-    await new Promise((resolve) => setTimeout(resolve, DIAL_SWIPE_MS));
-  }
+    // Slide + fade the current content out in the direction being swiped
+    // away from, then swap in the new dial, then slide + fade it in from
+    // the opposite side — an actual swipe transition instead of an instant
+    // snap (see .dial-modal's transition in css/style.css).
+    if (modalBox) {
+      modalBox.style.transform = delta > 0 ? "translateX(-28px)" : "translateX(28px)";
+      modalBox.style.opacity = "0";
+      await new Promise((resolve) => setTimeout(resolve, DIAL_SWIPE_MS));
+    }
 
-  currentDialIndex = newIndex;
-  currentDial = currentDialSet[newIndex];
-  renderDialModal();
+    currentDialIndex = newIndex;
+    currentDial = currentDialSet[newIndex];
+    renderDialModal();
 
-  if (modalBox) {
-    // Jump (no transition) to just off the opposite side, then release back
-    // to centered/opaque — that release is what animates the "slide in".
-    modalBox.classList.add("dial-modal-jump");
-    modalBox.style.transform = delta > 0 ? "translateX(28px)" : "translateX(-28px)";
-    void modalBox.offsetWidth; // force reflow so the jump above isn't itself animated
-    modalBox.classList.remove("dial-modal-jump");
-    modalBox.style.transform = "";
-    modalBox.style.opacity = "";
+    if (modalBox) {
+      // Jump (no transition) to just off the opposite side, then release
+      // back to centered/opaque — that release is what animates the "slide
+      // in".
+      modalBox.classList.add("dial-modal-jump");
+      modalBox.style.transform = delta > 0 ? "translateX(28px)" : "translateX(-28px)";
+      void modalBox.offsetWidth; // force reflow so the jump above isn't itself animated
+      modalBox.classList.remove("dial-modal-jump");
+      modalBox.style.transform = "";
+      modalBox.style.opacity = "";
+    }
+  } finally {
+    dialSwipeInFlight = false;
   }
 }
 
