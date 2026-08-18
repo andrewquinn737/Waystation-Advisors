@@ -1086,8 +1086,15 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
 .dial-modal { transition: transform 0.18s ease, opacity 0.18s ease; }
 .dial-modal.dial-modal-jump { transition: none; }
 .dial-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.dial-modal-header-main h2 { margin: 0; font-size: 17px; }
-.dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+/* min-width: 0 lets this flex item shrink below its text's intrinsic width
+   instead of forcing the whole header (and with it .dial-modal-header-right
+   — status/close/edit/contacted-today, which is flex-shrink: 0 and must
+   never move) wider than the modal on a long company name. overflow-wrap
+   on the h2/subtitle themselves covers the rarer case of one long unbroken
+   word (no spaces to wrap at). */
+.dial-modal-header-main { min-width: 0; }
+.dial-modal-header-main h2 { margin: 0; font-size: 17px; overflow-wrap: break-word; }
+.dial-modal-subtitle { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; overflow-wrap: break-word; }
 /* Company name reads slightly more prominent than the location next to it
    (see subtitle-company/subtitle-location in js/dials.js) — no comma between
    them anymore, just a space. */
