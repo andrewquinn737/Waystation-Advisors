@@ -74,7 +74,7 @@ function statusInfo(value) {
 const hiddenStatuses = new Set();
 
 // ---------------------------------------------------------------------------
-// Select mode (bulk-select dials for mass email/text/move/delete) — see
+// Select mode (bulk-select dials to move or delete) — see
 // enterSelectMode/exitSelectMode, renderDialsTable's selectMode branch, and
 // the select-mode-bar wiring below. `selectedDialIds` only ever holds ids
 // belonging to whatever tab was active when select mode was entered — select
@@ -215,18 +215,23 @@ const els = {
   selectModeBar: document.getElementById("selectModeBar"),
   selectBackBtn: document.getElementById("selectBackBtn"),
   selectAllBtn: document.getElementById("selectAllBtn"),
-  selectMassEmailBtn: document.getElementById("selectMassEmailBtn"),
-  selectMassTextBtn: document.getElementById("selectMassTextBtn"),
   selectMoveBtn: document.getElementById("selectMoveBtn"),
   selectDeleteBtn: document.getElementById("selectDeleteBtn"),
   selectMoveHint: document.getElementById("selectMoveHint"),
   confirmBulkDeleteModal: document.getElementById("confirmBulkDeleteModal"),
   confirmBulkDeleteTitle: document.getElementById("confirmBulkDeleteTitle"),
-  massContactWarningModal: document.getElementById("massContactWarningModal"),
-  massContactWarningTitle: document.getElementById("massContactWarningTitle"),
-  massContactWarningText: document.getElementById("massContactWarningText"),
-  massContactWarningContinueBtn: document.getElementById("massContactWarningContinueBtn"),
-  massContactWarningCancelBtn: document.getElementById("massContactWarningCancelBtn"),
+  menuAdvancedBtn: document.getElementById("menuAdvancedBtn"),
+  advancedSettingsPopup: document.getElementById("advancedSettingsPopup"),
+  advancedSettingsClose: document.getElementById("advancedSettingsClose"),
+  personalizedEmailRow: document.getElementById("personalizedEmailRow"),
+  personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
+  personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
+  personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
+  personalizedEmailTextarea: document.getElementById("personalizedEmailTextarea"),
+  personalizedEmailTokenCompany: document.getElementById("personalizedEmailTokenCompany"),
+  personalizedEmailTokenSeller: document.getElementById("personalizedEmailTokenSeller"),
+  personalizedEmailError: document.getElementById("personalizedEmailError"),
+  personalizedEmailEditorClose: document.getElementById("personalizedEmailEditorClose"),
 };
 
 // CSV import and Transfer are both available to team leads too now (see
@@ -246,6 +251,225 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+
+// ---------------------------------------------------------------------------
+// "Advanced" settings — 4th settings-gear item, every role (see
+// menuAdvancedBtn in dials.html). Just one row so far: Personalized email,
+// an on/off preference (profiles.personalized_email_enabled) plus a free-
+// text template (profiles.personalized_email_template) — see
+// resolvePersonalizedEmailBody below for where it's actually applied.
+// ---------------------------------------------------------------------------
+
+els.menuAdvancedBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closePageHeaderMenu();
+  renderPersonalizedEmailToggles();
+  els.advancedSettingsPopup.classList.remove("hidden");
+});
+els.advancedSettingsClose.addEventListener("click", () => els.advancedSettingsPopup.classList.add("hidden"));
+els.advancedSettingsPopup.addEventListener("click", (e) => {
+  if (e.target === els.advancedSettingsPopup) els.advancedSettingsClose.click();
+});
+
+// Keeps both switches (the Advanced-settings row's own, and the editor
+// popup's mirrored copy at the top of its text box) showing the same state
+// — either one can flip the SAME underlying preference.
+function renderPersonalizedEmailToggles() {
+  const on = profile.personalized_email_enabled === true;
+  [els.personalizedEmailToggle, els.personalizedEmailEditorToggle].forEach((el) => {
+    el.classList.toggle("on", on);
+    el.setAttribute("aria-checked", String(on));
+  });
+}
+
+async function togglePersonalizedEmailEnabled(e) {
+  e.stopPropagation(); // don't also trigger personalizedEmailRow's own click (which opens the editor)
+  const next = !(profile.personalized_email_enabled === true);
+  profile.personalized_email_enabled = next;
+  renderPersonalizedEmailToggles();
+  const { error } = await supabase.from("profiles").update({ personalized_email_enabled: next }).eq("id", profile.id);
+  if (error) {
+    console.error("Failed to update personalized_email_enabled", error);
+    profile.personalized_email_enabled = !next;
+    renderPersonalizedEmailToggles();
+  }
+}
+els.personalizedEmailToggle.addEventListener("click", togglePersonalizedEmailEnabled);
+els.personalizedEmailEditorToggle.addEventListener("click", togglePersonalizedEmailEnabled);
+
+// Tapping the ROW (not the switch — see stopPropagation above) opens the
+// fuller editor, "over" the Advanced settings popup rather than replacing
+// it — see #personalizedEmailEditorPopup's own comment in dials.html for why
+// that works from plain DOM order with no extra z-index needed.
+els.personalizedEmailRow.addEventListener("click", () => {
+  els.personalizedEmailTextarea.value = profile.personalized_email_template || "";
+  updatePersonalizedTokenChipsState();
+  renderPersonalizedEmailToggles();
+  els.personalizedEmailError.classList.add("hidden");
+  els.personalizedEmailEditorPopup.classList.remove("hidden");
+});
+
+async function savePersonalizedEmailTemplate() {
+  const val = els.personalizedEmailTextarea.value.trim() || null;
+  if (val === (profile.personalized_email_template || null)) return;
+  const { error } = await supabase.from("profiles").update({ personalized_email_template: val }).eq("id", profile.id);
+  if (error) return showError(els.personalizedEmailError, error);
+  profile.personalized_email_template = val;
+}
+// Same blur-triggered autosave as the Call notes field elsewhere on this
+// page (see flushCallNotes/wireCallNotesAutosave) — no separate Save button.
+els.personalizedEmailTextarea.addEventListener("blur", savePersonalizedEmailTemplate);
+els.personalizedEmailTextarea.addEventListener("input", updatePersonalizedTokenChipsState);
+
+els.personalizedEmailEditorClose.addEventListener("click", async () => {
+  await savePersonalizedEmailTemplate();
+  els.personalizedEmailEditorPopup.classList.add("hidden");
+});
+els.personalizedEmailEditorPopup.addEventListener("click", (e) => {
+  if (e.target === els.personalizedEmailEditorPopup) els.personalizedEmailEditorClose.click();
+});
+
+// (Company name)/(Seller name) tokens, drag-and-drop into the textarea — up
+// to MAX_PERSONALIZED_TOKENS total, combined across both. Counted as plain
+// literal-string occurrences rather than a hidden token syntax, since
+// there's no rich-text rendering inside a plain <textarea> anyway — what you
+// see in the box IS exactly what gets substituted later (see
+// resolvePersonalizedEmailBody), so there's nothing to keep in sync.
+const MAX_PERSONALIZED_TOKENS = 3;
+
+function countPersonalizedTokens(text) {
+  return (text.match(/\(Company name\)/g) || []).length + (text.match(/\(Seller name\)/g) || []).length;
+}
+
+function updatePersonalizedTokenChipsState() {
+  const atCap = countPersonalizedTokens(els.personalizedEmailTextarea.value) >= MAX_PERSONALIZED_TOKENS;
+  els.personalizedEmailTokenCompany.classList.toggle("disabled", atCap);
+  els.personalizedEmailTokenSeller.classList.toggle("disabled", atCap);
+}
+
+function insertPersonalizedToken(label) {
+  const ta = els.personalizedEmailTextarea;
+  if (countPersonalizedTokens(ta.value) >= MAX_PERSONALIZED_TOKENS) return;
+  // Inserted at wherever the textarea's own cursor/selection currently sits
+  // (replacing any selected range) — a native <textarea> doesn't expose a
+  // reliable pixel-to-character mapping for "exactly where the pointer was
+  // released" the way a contenteditable element would, so this is the
+  // standard, well-understood way template editors handle a drag-to-insert
+  // onto a plain textarea. Only trusted while the textarea is actually
+  // focused, though — an UNFOCUSED textarea's selectionStart/End both
+  // report 0 (a real browser quirk, not "no selection"), which would insert
+  // at the very START of any existing text on a first-ever drag before
+  // ever clicking in; falls back to the end in that case instead.
+  const focused = document.activeElement === ta;
+  const start = focused ? ta.selectionStart : ta.value.length;
+  const end = focused ? ta.selectionEnd : ta.value.length;
+  ta.value = ta.value.slice(0, start) + label + ta.value.slice(end);
+  const newPos = start + label.length;
+  ta.focus();
+  ta.setSelectionRange(newPos, newPos);
+  updatePersonalizedTokenChipsState();
+  savePersonalizedEmailTemplate();
+}
+
+// Custom pointer-based drag (not native HTML5 drag-and-drop, which has no
+// real touch/mobile support in virtually any mobile browser) — same long-
+// press-then-drag technique already established in this app for exactly
+// this class of interaction, see wireMemberDrag in js/profile.js (dragging a
+// team member card between team boxes). LONG_PRESS_MS/DRAG_CANCEL_PX below
+// deliberately match that implementation's own values.
+const TOKEN_LONG_PRESS_MS = 350;
+const TOKEN_DRAG_CANCEL_PX = 10;
+const tokenDragState = { token: null, pointerId: null, startX: 0, startY: 0, active: false, timer: null, ghost: null, offsetX: 0, offsetY: 0 };
+
+function cancelTokenLongPressTimer() {
+  if (tokenDragState.timer) {
+    clearTimeout(tokenDragState.timer);
+    tokenDragState.timer = null;
+  }
+}
+
+function startTokenDragVisuals(chip, e) {
+  tokenDragState.active = true;
+  const rect = chip.getBoundingClientRect();
+  const ghost = chip.cloneNode(true);
+  ghost.classList.add("personalized-email-drag-ghost");
+  ghost.classList.remove("disabled");
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  document.body.appendChild(ghost);
+  tokenDragState.ghost = ghost;
+  tokenDragState.offsetX = e.clientX - rect.left;
+  tokenDragState.offsetY = e.clientY - rect.top;
+}
+
+function moveTokenDragGhost(e) {
+  if (!tokenDragState.ghost) return;
+  tokenDragState.ghost.style.left = `${e.clientX - tokenDragState.offsetX}px`;
+  tokenDragState.ghost.style.top = `${e.clientY - tokenDragState.offsetY}px`;
+}
+
+function wirePersonalizedEmailTokenDrag(chip, label) {
+  chip.addEventListener("pointerdown", (e) => {
+    if (chip.classList.contains("disabled")) return;
+    tokenDragState.token = label;
+    tokenDragState.pointerId = e.pointerId;
+    tokenDragState.startX = e.clientX;
+    tokenDragState.startY = e.clientY;
+    tokenDragState.active = false;
+    cancelTokenLongPressTimer();
+    tokenDragState.timer = setTimeout(() => {
+      // Same reasoning as wireMemberDrag's own setPointerCapture call — keeps
+      // pointermove/pointerup routed here even once the pointer moves off
+      // the chip's own bounds (which is the whole point of dragging it).
+      if (chip.setPointerCapture) chip.setPointerCapture(e.pointerId);
+      startTokenDragVisuals(chip, e);
+    }, TOKEN_LONG_PRESS_MS);
+  });
+
+  chip.addEventListener("pointermove", (e) => {
+    if (tokenDragState.token !== label) return;
+    if (!tokenDragState.active) {
+      const dx = e.clientX - tokenDragState.startX;
+      const dy = e.clientY - tokenDragState.startY;
+      if (Math.sqrt(dx * dx + dy * dy) > TOKEN_DRAG_CANCEL_PX) cancelTokenLongPressTimer();
+      return;
+    }
+    e.preventDefault();
+    moveTokenDragGhost(e);
+  });
+
+  const endDrag = (e) => {
+    cancelTokenLongPressTimer();
+    if (tokenDragState.token !== label) return;
+    const wasActive = tokenDragState.active;
+    if (tokenDragState.ghost) {
+      tokenDragState.ghost.remove();
+      tokenDragState.ghost = null;
+    }
+    tokenDragState.token = null;
+    tokenDragState.active = false;
+    if (!wasActive) return;
+    const rect = els.personalizedEmailTextarea.getBoundingClientRect();
+    const overTextarea = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (overTextarea) insertPersonalizedToken(label);
+  };
+  chip.addEventListener("pointerup", endDrag);
+  chip.addEventListener("pointercancel", endDrag);
+}
+wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenCompany, "(Company name)");
+wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenSeller, "(Seller name)");
+
+// Applied wherever Dials builds an instant-Email link (see contactActionIcons/
+// rfContact in js/contactIcons.js). Returns null (regular mailto:, no
+// pre-filled body) unless the signed-in user has both the toggle on AND an
+// actual template saved. company_name/full_name come straight off the dial
+// itself, so a placeholder a dial has no value for just becomes empty text
+// rather than leaving the literal "(Company name)" in a sent email.
+function resolvePersonalizedEmailBody(dial) {
+  if (!profile.personalized_email_enabled || !profile.personalized_email_template) return null;
+  return profile.personalized_email_template.split("(Company name)").join(dial.company_name || "").split("(Seller name)").join(dial.full_name || "");
+}
 
 els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
 
@@ -1758,8 +1982,8 @@ els.importDialsImportBtn.addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Select mode — bulk-select dials in the current tab for mass email/text,
-// moving to another tab, or deleting. See the module-level selectMode/
+// Select mode — bulk-select dials in the current tab to move to another
+// tab, or delete. See the module-level selectMode/
 // moveMode/selectedDialIds declared near the top of this file, and the
 // selectMode branch inside renderDialsTable() for the selection-circle UI.
 // ---------------------------------------------------------------------------
@@ -1831,52 +2055,6 @@ els.selectAllBtn.addEventListener("click", () => {
   renderDialsTable();
 });
 
-// Shared by Mass email / Mass text — kind is "email" or "phone". Warns first
-// if any selected dial is missing that contact method, then (if continuing)
-// only includes the dials that actually have it.
-function handleMassContact(kind) {
-  const selected = dials.filter((d) => selectedDialIds.has(d.id));
-  if (!selected.length) return;
-  const withInfo = selected.filter((d) => (kind === "email" ? !!d.email : !!d.mobile_phone));
-  const missingCount = selected.length - withInfo.length;
-
-  const proceed = () => {
-    if (!withInfo.length) return;
-    if (kind === "email") {
-      window.location.href = `mailto:${withInfo.map((d) => d.email).join(",")}`;
-    } else {
-      const numbers = withInfo.map((d) => d.mobile_phone).join(",");
-      window.location.href = `sms:${numbers}`;
-    }
-  };
-
-  if (missingCount > 0) {
-    const noun = kind === "email" ? "an email" : "a mobile number";
-    els.massContactWarningTitle.textContent = `Some dials are missing ${noun}`;
-    els.massContactWarningText.textContent = `${missingCount} of the ${selected.length} selected dial${selected.length === 1 ? "" : "s"} ${
-      missingCount === 1 ? "doesn't" : "don't"
-    } have ${noun} on file. Continuing will only ${kind === "email" ? "email" : "text"} the ${withInfo.length} that ${withInfo.length === 1 ? "does" : "do"}.`;
-    els.massContactWarningModal.classList.remove("hidden");
-    const cleanup = () => {
-      els.massContactWarningModal.classList.add("hidden");
-      els.massContactWarningContinueBtn.removeEventListener("click", onContinue);
-      els.massContactWarningCancelBtn.removeEventListener("click", onCancel);
-    };
-    const onContinue = () => {
-      cleanup();
-      proceed();
-    };
-    const onCancel = () => cleanup();
-    els.massContactWarningContinueBtn.addEventListener("click", onContinue);
-    els.massContactWarningCancelBtn.addEventListener("click", onCancel);
-  } else {
-    proceed();
-  }
-}
-
-els.selectMassEmailBtn.addEventListener("click", () => handleMassContact("email"));
-els.selectMassTextBtn.addEventListener("click", () => handleMassContact("phone"));
-
 els.selectMoveBtn.addEventListener("click", () => {
   if (!selectedDialIds.size) return;
   moveMode = true;
@@ -1918,16 +2096,22 @@ els.selectDeleteBtn.addEventListener("click", () => {
 
 // Tapping anywhere outside the select-mode-bar and outside the dials list
 // itself exits select mode (per spec). Clicks inside any modal (the bulk
-// delete confirm, the mass-contact warning, or any other popup) are exempt —
-// those manage their own dismissal and shouldn't also tear down select mode
-// underneath them. A tab tap while moveMode is active is also exempt — that's
-// handled by wireTabInteractions' click handler (completeMoveToList), which
-// itself calls exitSelectMode() when it's done.
+// delete confirm or any other popup) are exempt — those manage their own
+// dismissal and shouldn't also tear down select mode underneath them. The
+// triangle button/menu and the settings gear button/menu are exempt too —
+// real, confirmed bug: opening either while select mode was active used to
+// immediately exit it (neither is inside selectModeBar or dialsTableWrap),
+// hiding the selection bar the moment you tried to open Options. A tab tap
+// while moveMode is active is also exempt — that's handled by
+// wireTabInteractions' click handler (completeMoveToList), which itself
+// calls exitSelectMode() when it's done.
 document.addEventListener("click", (e) => {
   if (!selectMode) return;
   if (e.target.closest(".modal-backdrop")) return;
   if (els.selectModeBar.contains(e.target)) return;
   if (els.dialsTableWrap.contains(e.target)) return;
+  if (e.target.closest("#pageMenuToggle") || els.pageHeaderMenu.contains(e.target)) return;
+  if (e.target.closest("#pageSettingsBtn") || els.settingsMenu.contains(e.target)) return;
   if (moveMode && e.target.closest(".dial-tab")) return;
   exitSelectMode();
 });
@@ -2049,7 +2233,7 @@ function renderDialsTable() {
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
           </div>
-          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone || d.company_phone, email: d.email, linkedin: d.linkedin })}
+          ${selectMode ? selectCircleHTML(d) : contactActionIcons({ phone: d.mobile_phone || d.company_phone, email: d.email, linkedin: d.linkedin, personalizedEmailBody: resolvePersonalizedEmailBody(d) })}
         </div>`
         )
         .join("")}
@@ -2093,7 +2277,7 @@ function renderDialsTable() {
 function buildDialViewHTML(dial) {
   const isBuyer = currentType === "buyer";
   return `
-    ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial))}
+    ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolvePersonalizedEmailBody(dial))}
     ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial))}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${isBuyer ? "" : rfWebsite("Website", dial.website)}

@@ -46,13 +46,18 @@ function isGmailAddress(email) {
 // everyone, except when the signed-in user's own profile email is a Gmail
 // address — then this opens Gmail's own compose view instead, with
 // `authuser` set to that address so Gmail preselects the matching account
-// rather than whichever Google account happens to be default.
-function buildEmailHref(targetEmail) {
+// rather than whichever Google account happens to be default. `body`
+// (optional) — see js/dials.js's "Personalized email" feature: pre-fills the
+// mail app's message body with that dial's own resolved template text,
+// instead of leaving it blank. Omitted everywhere else.
+function buildEmailHref(targetEmail, body) {
   if (isGmailAddress(ownEmail)) {
     const params = new URLSearchParams({ view: "cm", fs: "1", to: targetEmail, authuser: ownEmail });
+    if (body) params.set("body", body);
     return `https://mail.google.com/mail/?${params.toString()}`;
   }
-  return `mailto:${targetEmail}`;
+  if (!body) return `mailto:${targetEmail}`;
+  return `mailto:${targetEmail}?${new URLSearchParams({ body }).toString()}`;
 }
 
 // Small pin icon shown next to a dial/client's location — opens that
@@ -75,10 +80,11 @@ export function locationPinLink(city, state, extraClass = "") {
 // wrapper as the icons, after them — used by js/dials.js to add its own
 // per-contact-method "contacted today" check circle without this shared
 // module needing to know anything about that Dials-only feature. Every
-// existing caller omits it, so output is unchanged for them.
-export function rfContact(label, value, kind, extra = "") {
+// existing caller omits it, so output is unchanged for them. `personalizedEmailBody`
+// (optional, email kind only) — see contactActionIcons' own comment.
+export function rfContact(label, value, kind, extra = "", personalizedEmailBody) {
   const v = value ? String(value) : "";
-  const actionsHTML = v ? contactActionIcons(kind === "phone" ? { phone: v, extra } : { email: v, extra }) : "";
+  const actionsHTML = v ? contactActionIcons(kind === "phone" ? { phone: v, extra } : { email: v, extra, personalizedEmailBody }) : "";
   return `
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
@@ -130,8 +136,13 @@ export function buildPhoneNumbersHTML(entity, extraFor) {
 // list row with nothing else still gets ONE quick action instead of an empty
 // spot — never shown alongside a real phone/email icon. Same "no protocol"
 // tolerance as rfWebsite (js/dials.js) — a bare "linkedin.com/in/..." value
-// still gets a working link.
-export function contactActionIcons({ phone, email, linkedin, extra = "" } = {}) {
+// still gets a working link. `personalizedEmailBody` (optional) — see
+// js/dials.js's "Personalized email" advanced setting: when the signed-in
+// user has it turned on, this is that dial's own resolved template text
+// (placeholders already substituted), pre-filling the mail app's message
+// body instead of leaving it blank. Every other caller (Clients, and Dials'
+// own detail-modal phone rows) omits it, so their output is unchanged.
+export function contactActionIcons({ phone, email, linkedin, personalizedEmailBody, extra = "" } = {}) {
   const parts = [];
   if (phone) {
     parts.push(`<a class="contact-action-btn" href="sms:${escapeHtml(phone)}" title="Text">${CONTACT_ICONS.sms}</a>`);
@@ -140,7 +151,7 @@ export function contactActionIcons({ phone, email, linkedin, extra = "" } = {}) 
     parts.push(`<a class="contact-action-btn contact-action-tel" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);
   }
   if (email) {
-    parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(email))}" title="Email">${CONTACT_ICONS.mailto}</a>`);
+    parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(email, personalizedEmailBody))}" title="Email">${CONTACT_ICONS.mailto}</a>`);
   }
   if (!phone && !email && linkedin) {
     const href = /^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`;

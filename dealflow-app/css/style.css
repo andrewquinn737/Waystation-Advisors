@@ -288,12 +288,16 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 }
 
 /* Select-mode toolbar (Dials page) — replaces the page-header-menu while
-   bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode. */
+   bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode.
+   Always one row, never wrapping: flex-wrap: nowrap plus each button
+   shrinking (flex: 1 1 0, min-width: 0) so 4 buttons always fit; overflow-x
+   is a pure safety net for an extreme narrow-screen case, not the normal
+   path. */
 .select-mode-bar {
-  display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 16px;
+  display: flex; flex-wrap: nowrap; gap: 6px; margin: 8px 0 16px; overflow-x: auto;
 }
 .select-mode-btn {
-  flex: 1 1 auto; white-space: nowrap; padding: 9px 12px; border-radius: 999px;
+  flex: 1 1 0; min-width: 0; white-space: nowrap; padding: 9px 8px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
 }
@@ -302,6 +306,62 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 @media (hover: hover) { .select-mode-btn.danger:hover { background: #fdecec; } }
 .select-mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .select-mode-hint { font-size: 12.5px; font-weight: 600; color: var(--accent); margin: -10px 0 14px; }
+
+/* Reusable on/off switch (Advanced settings' Personalized email row, and its
+   own editor popup's mirrored copy — see js/dials.js). Plain div-based
+   rather than a styled <input type="checkbox"> since it's toggled purely via
+   click handlers already (matches the app's existing role="switch" pattern
+   elsewhere). */
+.toggle-switch {
+  position: relative; display: inline-block; flex-shrink: 0; width: 40px; height: 24px;
+  border-radius: 999px; background: var(--border); cursor: pointer; transition: background .15s ease;
+}
+.toggle-switch-thumb {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s ease;
+}
+.toggle-switch.on { background: var(--accent); }
+.toggle-switch.on .toggle-switch-thumb { transform: translateX(16px); }
+
+/* "Advanced settings" popup's row list — currently just Personalized email,
+   built to hold more rows later without changing shape. Tapping the row
+   (not its switch, which stops its own click from bubbling here) opens the
+   fuller editor popup. */
+.advanced-settings-list { margin: 10px 0; }
+.advanced-settings-row {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  padding: 12px 2px; border: none; border-bottom: 1px solid var(--border); background: none;
+  cursor: pointer; font-family: inherit; font-size: 14px; color: var(--text); text-align: left;
+}
+.advanced-settings-row:last-child { border-bottom: none; }
+
+/* Personalized email template editor — see #personalizedEmailEditorPopup in
+   dials.html. */
+.personalized-email-editor-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.personalized-email-editor-header h2 { margin: 0; }
+.personalized-email-textarea {
+  width: 100%; min-height: 140px; margin: 10px 0; padding: 10px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font-family: inherit; font-size: 14px; resize: vertical; box-sizing: border-box;
+}
+.personalized-email-tokens { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+/* touch-action: none stops a touch-drag from also panning the page — same
+   reasoning as any other custom pointer-driven drag in this app (see
+   .team-drag-ghost's own source, js/profile.js's wireMemberDrag). */
+.personalized-email-token {
+  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--gold-soft);
+  color: var(--text); font-size: 12.5px; font-weight: 700; cursor: grab; font-family: inherit;
+  touch-action: none; user-select: none;
+}
+.personalized-email-token:active { cursor: grabbing; }
+.personalized-email-token.disabled { opacity: .4; cursor: not-allowed; }
+/* Floating clone that follows the pointer while dragging a token — same
+   shape/z-index as .team-drag-ghost (js/profile.js), the app's existing
+   drag-ghost precedent, just without that one's rotate/dim styling since a
+   pill-shaped chip doesn't need it. */
+.personalized-email-drag-ghost {
+  position: fixed; z-index: 300; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.25); opacity: .95;
+}
 
 /* Selection circle shown in place of instant-contact icons while select
    mode is active (mobile card + desktop table row alike). */

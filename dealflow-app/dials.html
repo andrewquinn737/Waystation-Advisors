@@ -109,17 +109,28 @@
         <span class="menu-item-label" id="notificationsLabel">Notifications: On</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line class="notif-slash" x1="3" y1="3" x2="21" y2="21"/></svg></span>
       </button>
+      <!-- 4th settings option — opens #advancedSettingsPopup (see
+           js/dials.js). Available to every role, same as Notifications
+           above, since the one setting it holds so far (Personalized
+           email) is a personal preference with nothing admin/team-lead-
+           specific about it. -->
+      <button type="button" class="page-header-menu-item" id="menuAdvancedBtn">
+        <span class="menu-item-label">Advanced</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>
+      </button>
     </div>
     <div class="categories-submenu hidden" id="categoriesSubmenu"></div>
 
     <!-- Shown instead of the page-header-menu while bulk-selecting dials
          (see js/dials.js's enterSelectMode/exitSelectMode). Tapping anywhere
-         outside this bar and outside the dials list itself exits select mode. -->
+         outside this bar and outside the dials list itself exits select mode
+         — opening the triangle/settings menus is exempt (see the outside-
+         click listener in js/dials.js), so select mode survives that. Only
+         4 options now (Mass email/Mass text removed) — kept to one row
+         always, see .select-mode-bar in css/style.css. -->
     <div class="select-mode-bar hidden" id="selectModeBar">
       <button type="button" class="select-mode-btn" id="selectBackBtn">Back</button>
       <button type="button" class="select-mode-btn" id="selectAllBtn">Select all</button>
-      <button type="button" class="select-mode-btn" id="selectMassEmailBtn">Mass email</button>
-      <button type="button" class="select-mode-btn" id="selectMassTextBtn">Mass text</button>
       <button type="button" class="select-mode-btn" id="selectMoveBtn">Move</button>
       <button type="button" class="select-mode-btn danger" id="selectDeleteBtn">Delete</button>
     </div>
@@ -253,15 +264,51 @@
     </div>
   </div>
 
-  <!-- Warning shown by Select mode's Mass email/Mass text when some of the
-       selected dials are missing that contact method -->
-  <div class="modal-backdrop hidden" id="massContactWarningModal">
+  <!-- "Advanced" settings popup (see menuAdvancedBtn above). Just one row so
+       far — Personalized email, with its own on/off switch on the right and
+       a tap-to-open editor (see #personalizedEmailEditorPopup right below,
+       which opens ON TOP of this one — same "popup over a popup" shape as
+       js/dials.js's other stacked popups, here relying on plain DOM order
+       instead of an explicit z-index override since both start at the base
+       .modal-backdrop stacking level). -->
+  <div class="modal-backdrop hidden" id="advancedSettingsPopup">
     <div class="modal">
-      <h2 id="massContactWarningTitle">Some dials are missing this info</h2>
-      <p id="massContactWarningText" class="help-text"></p>
+      <h2>Advanced settings</h2>
+      <div class="advanced-settings-list">
+        <button type="button" class="advanced-settings-row" id="personalizedEmailRow">
+          <span class="advanced-settings-row-label">Personalized email</span>
+          <span class="toggle-switch" id="personalizedEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
+      </div>
       <div class="form-actions">
-        <button type="button" class="btn" id="massContactWarningContinueBtn">Continue</button>
-        <button type="button" class="btn secondary" id="massContactWarningCancelBtn">Cancel</button>
+        <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Personalized email template editor — opened by tapping the
+       "Personalized email" row above (not its switch, which just toggles
+       on/off in place). When on, tapping the Email instant-contact icon on
+       a dial (see js/dials.js) opens the mail app with this text as the
+       message body instead of a blank one, (Company name)/(Seller name)
+       already swapped for that dial's own info. Drag either token below
+       into the text box to insert it wherever the cursor currently sits —
+       up to 3 total (see js/dials.js's MAX_PERSONALIZED_TOKENS). -->
+  <div class="modal-backdrop hidden" id="personalizedEmailEditorPopup">
+    <div class="modal">
+      <div class="personalized-email-editor-header">
+        <h2>Personalized email</h2>
+        <span class="toggle-switch" id="personalizedEmailEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+      </div>
+      <p class="help-text">This fills in the mail app's message body when you tap the Email icon on a dial.</p>
+      <textarea id="personalizedEmailTextarea" class="personalized-email-textarea" placeholder="Hi (Seller name), I wanted to reach out about (Company name)..."></textarea>
+      <div class="personalized-email-tokens">
+        <button type="button" class="personalized-email-token" id="personalizedEmailTokenCompany">(Company name)</button>
+        <button type="button" class="personalized-email-token" id="personalizedEmailTokenSeller">(Seller name)</button>
+      </div>
+      <div id="personalizedEmailError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="personalizedEmailEditorClose">Done</button>
       </div>
     </div>
   </div>
