@@ -1756,11 +1756,43 @@ function openEventReportModal(existingReport, onConfirm) {
   cancelBtn.addEventListener("click", onCancelClick);
 }
 
+// Progress steps must be confirmed in order — checked here rather than at
+// log time, since scheduling/logging a LATER step ahead of an earlier one is
+// still fine (e.g. pre-scheduling a Client meeting before Client approval is
+// actually confirmed); it's specifically marking one as having ACTUALLY
+// happened out of order that's the problem, and confirming (see
+// confirmEventWithReport below) is the one and only place a step transitions
+// to "completed" and flips its Progress checkmark. This is what stops a real
+// bug found in production from happening again: a client's Client meeting
+// had been confirmed with no confirmed Client approval before it (fixed with
+// a one-time data backfill — Rex Dodd, 8/2026). Only PROGRESS_STEPS types
+// are gated (general_meeting/task aren't part of any progress list, and the
+// very first step in a side's list has no prior to check); non-gated types
+// and an already-satisfied chain both return null. `currentClientEvents` is
+// this client's own confirmed history, so a shared event (client_approval,
+// client_meeting, etc.) is checked against THIS side's own progress list —
+// exactly matching how Progress checkmarks are already computed per-client.
+function firstUnconfirmedPriorStepLabel(eventType) {
+  const steps = progressStepsFor(currentClient.client_type);
+  const idx = steps.findIndex((s) => s.type === eventType);
+  if (idx <= 0) return null;
+  const confirmedTypes = new Set(currentClientEvents.filter((e) => e.confirmed).map((e) => e.event_type));
+  for (let i = 0; i < idx; i++) {
+    if (!confirmedTypes.has(steps[i].type)) return steps[i].label;
+  }
+  return null;
+}
+
 // Marks an event confirmed AND saves its report text in one update — the
 // report lives in the existing `details` jsonb column (details.report) right
 // alongside details.time/etc, so the other keys already on the event are
 // preserved rather than clobbered by a full-column replace.
 async function confirmEventWithReport(eventId, reportText) {
+  const event = currentClientEvents.find((e) => e.id === eventId);
+  const blockedBy = event ? firstUnconfirmedPriorStepLabel(event.event_type) : null;
+  if (blockedBy) {
+    return showError(document.getElementById("clientModalError"), new Error(`Confirm "${blockedBy}" first — steps must be completed in order.`));
+  }
   const { error } = await supabase.rpc("set_client_event_confirmed", {
     p_event_id: eventId,
     p_confirmed: true,
