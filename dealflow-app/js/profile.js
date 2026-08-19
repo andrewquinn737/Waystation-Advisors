@@ -1743,14 +1743,42 @@ function fmtEventDateTime(iso, hasTime) {
   return `${dateStr}, ${timeStr}`;
 }
 
+// Whichever account's Calendly link actually gets used for an intern's
+// intro call (see resolveCalendlyLink in js/mainAdmin.js — the intern's own
+// team lead's link if they have one, else the main admin's) should be able
+// to see that intro call under Upcoming events too, even when the currently
+// selected Accounts visible filter would otherwise exclude that intern —
+// the meeting really does land on THEIR calendar. Scoped to intro_call
+// specifically, since that's the only event type ever routed through
+// someone else's Calendly link — every other meeting type is a plain
+// in-app date/time with no external calendar involved at all. Only ever
+// ADDS ids not already covered by `ids` — a team lead/main admin viewing
+// the default "Select all" pool (which already includes every intern) sees
+// no change; this only matters once Accounts visible has been narrowed.
+async function extraIntroCallOwnerIds(alreadyCoveredIds) {
+  if (isTeamLeadSync && profile.calendly_link && profile.team_id) {
+    const all = await loadAllAccountsForSelection();
+    return all.filter((a) => a.team_id === profile.team_id && a.role === "intern" && !alreadyCoveredIds.includes(a.id)).map((a) => a.id);
+  }
+  if (profile.id === mainAdminId) {
+    const all = await loadAllAccountsForSelection();
+    const teamLeadCalendlyByTeam = new Map(all.filter((a) => a.role === "team_lead").map((a) => [a.team_id, a.calendly_link]));
+    return all
+      .filter((a) => a.role === "intern" && !alreadyCoveredIds.includes(a.id) && !teamLeadCalendlyByTeam.get(a.team_id))
+      .map((a) => a.id);
+  }
+  return [];
+}
+
 async function loadUpcomingEvents() {
   const selected = await resolveSelectedAccounts();
   const ids = selected.map((a) => a.id);
+  const extraIds = await extraIntroCallOwnerIds(ids);
 
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
-  const cacheKey = "upcomingEvents_" + ids.join(",");
+  const cacheKey = "upcomingEvents_" + ids.join(",") + "|" + extraIds.join(",");
   const { data, error } = await supabase
     .from("client_events")
     .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, full_name, created_by)")
@@ -1767,6 +1795,15 @@ async function loadUpcomingEvents() {
   } else {
     hideOfflineNotice();
     eventRows = data || [];
+    if (extraIds.length) {
+      const { data: extraData } = await supabase
+        .from("client_events")
+        .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, full_name, created_by)")
+        .eq("event_type", "intro_call")
+        .gte("event_date", startOfToday.toISOString())
+        .in("clients.created_by", extraIds);
+      if (extraData?.length) eventRows = [...eventRows, ...extraData].sort((a, b) => new Date(a.event_date) - new Date(b.event_date));
+    }
     cacheSet(cacheKey, eventRows);
   }
 
