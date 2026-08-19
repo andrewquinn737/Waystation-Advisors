@@ -240,6 +240,15 @@ function contractSubtypesFor(clientType) {
   return clientType === "buyer" ? BUYER_CONTRACT_SUBTYPES : SELLER_CONTRACT_SUBTYPES;
 }
 
+// "Buyers visible" (see menuBuyersVisibleBtn wiring further down) gets its
+// own independent storageKey — separate from the shared "Accounts visible"
+// key (js/accountsVisible.js's own default) so the two selections never
+// collide or overwrite each other. Unlike Accounts visible, this one is
+// never passed to initDefaultToSelf — it has no reason to default to
+// "just me" the first time it's ever touched, so it naturally starts as
+// "Select all" (null) until a team lead/admin deliberately narrows it.
+const BUYERS_VISIBLE_KEY = "waystation_buyers_visible";
+
 let clients = [];
 let currentClient = null; // null while creating a new client
 let currentMode = "create"; // 'create' | 'view' | 'edit'
@@ -276,6 +285,10 @@ const els = {
   accountsVisiblePopup: document.getElementById("accountsVisiblePopup"),
   accountsVisibleBody: document.getElementById("accountsVisibleBody"),
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
+  menuBuyersVisibleBtn: document.getElementById("menuBuyersVisibleBtn"),
+  buyersVisiblePopup: document.getElementById("buyersVisiblePopup"),
+  buyersVisibleBody: document.getElementById("buyersVisibleBody"),
+  buyersVisibleClose: document.getElementById("buyersVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
   clientSubtabs: document.getElementById("clientSubtabs"),
@@ -466,6 +479,7 @@ function clientProgressStage(clientId) {
 function renderTable() {
   const q = els.search.value.trim().toLowerCase();
   const visibleAccountIds = getVisibleAccountIds();
+  const visibleBuyerIds = getVisibleAccountIds(BUYERS_VISIBLE_KEY);
   const rows = clients.filter(
     (c) =>
       (!q ||
@@ -483,7 +497,15 @@ function renderTable() {
       // subtractive: an empty selectedProgressStages means no filter is
       // active at all (every client passes through), matching none of the 8
       // options being picked yet.
-      (selectedProgressStages.size === 0 || selectedProgressStages.has(clientProgressStage(c.id)))
+      (selectedProgressStages.size === 0 || selectedProgressStages.has(clientProgressStage(c.id))) &&
+      // "Buyers visible" (see menuBuyersVisibleBtn wiring below) — Sellers
+      // side only, so this is a no-op on the Buyers side even if a
+      // selection is still saved from earlier. null means no filter active
+      // (every buyer's sellers pass through). Once narrowed, a seller with
+      // no buyer attached (intended_buyer_id null) never matches any
+      // specific selection — it isn't "attached to a selected buyer" under
+      // any choice — same as the feature's own description.
+      (!visibleBuyerIds || getDealSide() !== "seller" || (c.intended_buyer_id && visibleBuyerIds.has(c.intended_buyer_id)))
   );
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
 
@@ -718,6 +740,56 @@ if (isAdmin || isTeamLead) {
           return error ? [] : data || [];
         }
       : undefined,
+    onChange: renderTable,
+    escapeHtml,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// "Buyers visible" filter — Sellers side only, admin/team-lead only. Each
+// seller client is attached to at most one buyer (clients.intended_buyer_id,
+// set via the "Intended buyer" picker on the client's own Profile — see
+// openIntendedBuyerPicker), so unlike Accounts visible (which filters by who
+// OWNS a client) this filters by who a seller is ATTACHED to. Reuses the
+// exact same shared popup component as Accounts visible above, just with its
+// own independent storageKey (BUYERS_VISIBLE_KEY) and a buyer-specific
+// options list instead of an account list — see renderTable's own filter
+// clause for how the selection is actually applied.
+// ---------------------------------------------------------------------------
+
+// Shows/hides the triangle menu's "Buyers visible" item — admin/team-lead
+// only, and only while viewing Sellers (a seller's intended_buyer_id is the
+// whole premise of this filter; it has nothing to filter on the Buyers
+// side). Called once up front and again from wireDealSideToggle's callback
+// every time the Sellers/Buyers side actually changes.
+function updateBuyersVisibleBtnVisibility() {
+  els.menuBuyersVisibleBtn.classList.toggle("hidden", !(isAdmin || isTeamLead) || getDealSide() !== "seller");
+}
+updateBuyersVisibleBtnVisibility();
+
+if (isAdmin || isTeamLead) {
+  wireAccountsVisiblePopup({
+    menuBtn: els.menuBuyersVisibleBtn,
+    popupEl: els.buyersVisiblePopup,
+    bodyEl: els.buyersVisibleBody,
+    closeBtn: els.buyersVisibleClose,
+    closePageHeaderMenu: closePageHeaderMenu,
+    myProfileId: profile.id,
+    storageKey: BUYERS_VISIBLE_KEY,
+    // Derived straight from the currently loaded seller clients' own
+    // intended_buyer_id values — the button (and so this popup) is only
+    // ever reachable while `clients` holds sellers, so every non-null
+    // intended_buyer_id here is exactly the set of buyers actually worth
+    // offering as a filter. A plain id lookup on `clients` naturally
+    // respects RLS the same way every other query in this file already
+    // does, so nothing extra is needed to keep this scoped to buyers the
+    // caller can actually see.
+    getAllAccounts: async () => {
+      const buyerIds = [...new Set(clients.map((c) => c.intended_buyer_id).filter(Boolean))];
+      if (!buyerIds.length) return [];
+      const { data, error } = await supabase.from("clients").select("id, full_name").in("id", buyerIds).order("full_name", { ascending: true });
+      return error ? [] : data || [];
+    },
     onChange: renderTable,
     escapeHtml,
   });
@@ -2236,6 +2308,9 @@ if (isAdmin || isTeamLead) {
     selectedProgressStages.clear();
     persistSelectedProgressStages();
     renderProgressSubmenu();
+    // "Buyers visible" (see menuBuyersVisibleBtn) only ever applies to
+    // Sellers — re-evaluate its visibility now that the side just changed.
+    updateBuyersVisibleBtnVisibility();
     await loadClients();
     renderTable();
   });

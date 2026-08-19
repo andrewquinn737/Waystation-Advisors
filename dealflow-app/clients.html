@@ -72,6 +72,15 @@
         <span class="menu-item-label">Categories</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a1 1 0 0 1 0-10 5 5 0 0 0 0-10 10 10 0 1 0 0 20z"/><circle cx="7" cy="10" r="1"/><circle cx="10" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="17" cy="10" r="1"/></svg></span>
       </button>
+      <!-- Admin/team-lead-only, Sellers side only — each seller client is
+           attached to one buyer (clients.intended_buyer_id); this narrows
+           the list down to only sellers attached to one of the selected
+           buyers (see js/clients.js). Starts hidden; shown/hidden by JS
+           based on role and the current Sellers/Buyers side. -->
+      <button type="button" class="page-header-menu-item hidden" id="menuBuyersVisibleBtn">
+        <span class="menu-item-label">Buyers visible</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      </button>
     </div>
     <!-- Settings gear popover — admin/team-lead-only Sellers/Buyers data-side
          toggle + Accounts visible (both start hidden and are individually
@@ -153,6 +162,22 @@
       <div id="accountsVisibleBody"></div>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="accountsVisibleClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin/team-lead-only, Sellers side only, "Buyers visible" popup (see
+       menuBuyersVisibleBtn above). Each seller is attached to one buyer
+       (clients.intended_buyer_id) — this narrows the list down to only
+       sellers attached to one of the selected buyers, same Select-all/
+       individual-toggle shape as Accounts visible above. -->
+  <div class="modal-backdrop hidden" id="buyersVisiblePopup">
+    <div class="modal">
+      <h2>Buyers visible</h2>
+      <p class="help-text">Choose which buyers' attached sellers show up in your list.</p>
+      <div id="buyersVisibleBody"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="buyersVisibleClose">Done</button>
       </div>
     </div>
   </div>
