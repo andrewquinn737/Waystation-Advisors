@@ -8,7 +8,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
-import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
+import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 
 const session = await requireSession();
@@ -756,19 +756,25 @@ async function commitContactCheck(method, checking) {
     // failure of the SECOND write (which went entirely unchecked) could
     // leave currentDial silently out of sync with what the circle still
     // displayed on screen.
-    const { error } = await supabase.from("dials").update({ [col]: newValue }).eq("id", currentDial.id);
+    // withNetworkRetry — see its own comment in offlineCache.js. Absorbs the
+    // exact class of blip a user reported: "No internet connection" on a
+    // device that genuinely had wifi, most likely the PWA's first request
+    // right after resuming from background.
+    const { error } = await withNetworkRetry(() => supabase.from("dials").update({ [col]: newValue }).eq("id", currentDial.id));
     if (error) return showContactCheckError(error);
 
     if (!checking) {
       const { startIso, endIso } = localDayBoundsIso(today);
-      const { error: logError } = await supabase
-        .from("call_status_changes")
-        .delete()
-        .eq("dial_id", currentDial.id)
-        .eq("user_id", profile.id)
-        .eq("contact_method", method)
-        .gte("changed_at", startIso)
-        .lt("changed_at", endIso);
+      const { error: logError } = await withNetworkRetry(() =>
+        supabase
+          .from("call_status_changes")
+          .delete()
+          .eq("dial_id", currentDial.id)
+          .eq("user_id", profile.id)
+          .eq("contact_method", method)
+          .gte("changed_at", startIso)
+          .lt("changed_at", endIso)
+      );
       if (logError) return showContactCheckError(logError);
     } else {
       // Permanent, FK-less snapshot for the Reports feature (see
@@ -778,22 +784,24 @@ async function commitContactCheck(method, checking) {
       // this row so a later uncheck of that SAME circle can find and delete
       // only this one row, even if other circles also logged rows today.
       const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
-      const { error: logError } = await supabase.from("call_status_changes").insert({
-        user_id: profile.id,
-        dial_id: currentDial.id,
-        dial_type: currentType,
-        list_id: currentDial.list_id,
-        contact_status_at_call: currentDial.contact_status,
-        contact_method: method,
-        buyer_id: currentListForBuyer?.buyer_id || null,
-        company_name: currentDial.company_name || null,
-        contact_name: currentDial.full_name || null,
-        website: currentDial.website || null,
-        city: currentDial.city || null,
-        state: currentDial.state || null,
-        industry: currentDial.industry || null,
-        call_notes: currentDial.call_notes || null,
-      });
+      const { error: logError } = await withNetworkRetry(() =>
+        supabase.from("call_status_changes").insert({
+          user_id: profile.id,
+          dial_id: currentDial.id,
+          dial_type: currentType,
+          list_id: currentDial.list_id,
+          contact_status_at_call: currentDial.contact_status,
+          contact_method: method,
+          buyer_id: currentListForBuyer?.buyer_id || null,
+          company_name: currentDial.company_name || null,
+          contact_name: currentDial.full_name || null,
+          website: currentDial.website || null,
+          city: currentDial.city || null,
+          state: currentDial.state || null,
+          industry: currentDial.industry || null,
+          call_notes: currentDial.call_notes || null,
+        })
+      );
       if (logError) return showContactCheckError(logError);
     }
 

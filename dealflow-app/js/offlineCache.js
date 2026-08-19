@@ -56,3 +56,22 @@ export function showOfflineNotice(stale) {
 export function hideOfflineNotice() {
   document.getElementById("offlineNotice")?.classList.add("hidden");
 }
+
+// A request landing right as a PWA resumes from being backgrounded can fail
+// even though the connection is completely fine — a known iOS Safari/WKWebView
+// quirk (and the navigator.onLine read above isn't perfectly reliable either)
+// — and isNetworkError() has no way to tell that apart from an actual outage,
+// since the browser hands back the exact same "Failed to fetch"/"Load failed"
+// text either way. Real, confirmed symptom: "instant contact" reporting "No
+// internet connection" on a device that was definitely online. One silent
+// retry after a short pause absorbs a one-off blip like that before ever
+// bothering the user with it — only a SECOND consecutive failure is treated
+// as an actual connectivity problem. `fn` is a thunk returning a Supabase
+// call's `{data, error}` result (never throws on a network failure — see
+// isNetworkError's own comment on that).
+export async function withNetworkRetry(fn) {
+  const first = await fn();
+  if (!first.error || !isNetworkError(first.error)) return first;
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  return fn();
+}
