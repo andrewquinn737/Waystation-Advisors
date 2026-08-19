@@ -117,6 +117,11 @@ export function wireIntroCallForm(container, opts) {
   const email = initialClient?.email || prefill?.email || "";
   const clientType = initialClient?.client_type || prefill?.client_type || "seller";
 
+  // Tracks whichever "message" listener the MOST RECENT "Open Calendly"
+  // click registered — see below for why this has to be cleaned up on every
+  // new click, not just on a completed booking.
+  let activeOnMessage = null;
+
   btn.addEventListener("click", async () => {
     errEl.classList.add("hidden");
     successEl.classList.add("hidden");
@@ -142,6 +147,24 @@ export function wireIntroCallForm(container, opts) {
       return;
     }
 
+    // Going in and out of Calendly — opening it, backing out without
+    // booking, then opening it again — used to leave the PREVIOUS attempt's
+    // "message" listener still registered below: Calendly only ever tells
+    // the page "a booking was confirmed" (calendly.event_scheduled), never
+    // "the popup was closed without one", so nothing cleaned up an abandoned
+    // attempt's listener on its own. Real, confirmed symptom: booking on
+    // (say) the 4th attempt broadcast ONE calendly.event_scheduled message
+    // that reached all 4 still-live listeners at once (postMessage fires
+    // every registered listener, not just the newest), logging the intro
+    // call multiple times for a single actual booking. Removing whatever the
+    // previous attempt left behind before registering a new one guarantees
+    // at most one listener is ever live, no matter how many times "Open
+    // Calendly" gets clicked before an actual booking happens.
+    if (activeOnMessage) {
+      window.removeEventListener("message", activeOnMessage);
+      activeOnMessage = null;
+    }
+
     window.Calendly.initPopupWidget({
       url: calendlyUrl,
       prefill: { name, email },
@@ -155,6 +178,7 @@ export function wireIntroCallForm(container, opts) {
     const onMessage = async (e) => {
       if (e.data?.event !== "calendly.event_scheduled") return;
       window.removeEventListener("message", onMessage);
+      activeOnMessage = null;
       window.Calendly.closePopupWidget();
 
       successEl.textContent = "Intro call scheduled.";
@@ -172,6 +196,7 @@ export function wireIntroCallForm(container, opts) {
       if (onCalendlyClosed) await onCalendlyClosed(initialClient);
       if (onScheduled) await onScheduled(initialClient);
     };
+    activeOnMessage = onMessage;
     window.addEventListener("message", onMessage);
   });
 

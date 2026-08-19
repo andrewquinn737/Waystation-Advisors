@@ -2702,7 +2702,19 @@ async function createClientFromDial(dial) {
 // made in Calendly regardless, so backing out here (there's nothing to
 // "undo") just means reopening this dial's "Schedule intro call" again later
 // to finish recording it.
+// Guards #introCallTimeConfirmBtn against accumulating more than one live
+// click listener if this modal is ever opened again before a previous
+// open's listener was cleaned up — see the matching fix in introCall.js
+// (activeOnMessage) for the actual root cause this pairs with. Only the
+// LATEST open's listener should ever be able to fire; without this, a click
+// on Confirm re-runs every still-attached one, each independently creating
+// its own client + intro_call event for what was really only one booking.
+let introCallTimeConfirmCleanup = null;
+
 function openIntroCallTimeConfirmModal(dial) {
+  introCallTimeConfirmCleanup?.();
+  introCallTimeConfirmCleanup = null;
+
   const modal = els.introCallTimeModal;
   const dateInput = els.introCallTimeDateInput;
   const timeSelect = els.introCallTimeSelect;
@@ -2769,8 +2781,10 @@ function openIntroCallTimeConfirmModal(dial) {
   const cleanup = () => {
     modal.classList.add("hidden");
     confirmBtn.removeEventListener("click", onConfirmClick);
+    introCallTimeConfirmCleanup = null;
   };
   confirmBtn.addEventListener("click", onConfirmClick);
+  introCallTimeConfirmCleanup = cleanup;
 }
 
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
