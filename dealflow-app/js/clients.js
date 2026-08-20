@@ -18,6 +18,7 @@ import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } fro
 import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
+import { skeletonListHtml } from "./placeholders.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -414,7 +415,16 @@ function clientCompanyAndLocation(c) {
 // List view
 // ---------------------------------------------------------------------------
 
+// Same 4 columns renderTable's real <table> uses (Name/Company/Location/
+// Person responsible) — see skeletonListHtml in js/placeholders.js.
+const CLIENTS_SKELETON_COLUMN_WIDTHS = ["55%", "60%", "45%", "40%"];
+
 async function loadClients() {
+  // Shown the instant a fetch starts (see placeholders.js) rather than
+  // leaving the previous side's now-stale rows up, or a blank area, while
+  // this one loads — replaced by the real render (or an empty-state
+  // message, or the offline-cache fallback below) as soon as it resolves.
+  els.tableWrap.innerHTML = skeletonListHtml({ columnWidths: CLIENTS_SKELETON_COLUMN_WIDTHS });
   const cacheKey = "clients_" + getDealSide();
   const { data, error } = await supabase
     .from("clients")

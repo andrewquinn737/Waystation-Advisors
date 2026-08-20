@@ -10,6 +10,7 @@ import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } fro
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
+import { skeletonListHtml } from "./placeholders.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -2171,12 +2172,21 @@ document.addEventListener("click", (e) => {
 // Dials list (spreadsheet-like table)
 // ---------------------------------------------------------------------------
 
+// Same 5 columns renderDialsTable's real <table> uses (Name/Company/
+// Location/Phone/Email) — see skeletonListHtml in js/placeholders.js.
+const DIALS_SKELETON_COLUMN_WIDTHS = ["55%", "65%", "45%", "50%", "70%"];
+
 async function loadDials() {
   if (!currentListId) {
     dials = [];
     renderDialsTable();
     return;
   }
+  // Shown the instant a fetch starts (see placeholders.js) rather than
+  // leaving the previous list's now-stale rows up, or a blank area, while
+  // this one loads — replaced by the real render (or an empty-state
+  // message, or the offline-cache fallback below) as soon as it resolves.
+  els.dialsTableWrap.innerHTML = skeletonListHtml({ columnWidths: DIALS_SKELETON_COLUMN_WIDTHS });
   const cacheKey = "dials_" + currentListId;
   const { data, error } = await supabase.from("dials").select("*").eq("list_id", currentListId);
   if (error) {

@@ -22,6 +22,14 @@
   --success: #1f9d55;
   --warn: #c98a12;
   --radius: 8px;
+  /* Skeleton-loading shimmer (see .skeleton-bar below) — deliberately its
+     own tokens rather than reusing --border/--gold-soft directly: those are
+     tuned for subtle dividers/tints against white, and read as barely
+     visible at the small sizes a skeleton bar/circle actually needs to be
+     clearly legible at (confirmed visually — the first pass using
+     --border/--gold-soft was nearly invisible). */
+  --skeleton-base: #e4dcc7;
+  --skeleton-shine: #f8f1de;
 
   /* Dial "Categories" / contact-status colors (see CONTACT_STATUSES in
      js/dials.js) — used for the status dropdown, the Categories filter
@@ -85,6 +93,8 @@
     --danger: #ff6b61;
     --success: #34c973;
     --warn: #e0a83e;
+    --skeleton-base: #2e2b23;
+    --skeleton-shine: #423d30;
 
     /* Same hue family as the light-mode status colors above, just re-tuned
        to dark, muted background tints with brighter swatches/dots so they
@@ -675,6 +685,49 @@ tr.clickable-row { cursor: pointer; }
 .mobile-only { display: none; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 14px; }
 .error-msg { background: #fdecec; color: var(--danger); padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+
+/* Skeleton-screen loading placeholders (see js/placeholders.js) — a gray
+   shape shimmers across a moving gradient rather than showing a blank area
+   or a spinner while a list is being fetched. --skeleton-base/-shine (see
+   :root above) are warm-neutral tones tuned specifically for this — visible
+   in both light and dark mode without needing anything more here. */
+.skeleton-bar {
+  display: inline-block;
+  height: 13px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-shine) 50%, var(--skeleton-base) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 150% 0; }
+  100% { background-position: -150% 0; }
+}
+/* A skeleton row/card never looks clickable or reacts to hover — there's
+   nothing to click yet. */
+tr.skeleton-row, .skeleton-card { cursor: default; }
+@media (hover: hover) { tr.skeleton-row:hover { background: none; } }
+/* Reuses .contact-action-btn's own 28px circle sizing directly (see
+   skeletonMobileCard in js/placeholders.js) so the placeholder lands at the
+   exact size of the real instant-contact icon it stands in for. The
+   gradient/background-size/animation are repeated here explicitly (not just
+   inherited from .skeleton-bar above) — confirmed as a real bug: .skeleton-
+   bar and .contact-action-btn are both single-class selectors of equal
+   specificity, and .contact-action-btn's own `background: var(--surface)`
+   happens to be declared LATER in this file, so it was silently winning and
+   leaving the icon circles plain white instead of shimmering. */
+.contact-action-btn.skeleton-bar {
+  height: 28px;
+  border-color: transparent;
+  background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-shine) 50%, var(--skeleton-base) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.skeleton-bar-name { height: 15px; margin-bottom: 6px; }
+.skeleton-bar-sub { height: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar { animation: none; }
+}
 
 /* Shared "you're offline" banner (see js/offlineCache.js's showOfflineNotice/
    hideOfflineNotice) — one per page, reused by whichever loader last hit a
