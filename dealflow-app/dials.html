@@ -43,9 +43,10 @@
        js/placeholders.js — not a generic one, and not a spinner) the moment
        the DOM is ready, well before dials.js itself has even started
        running its own await requireSession(). -->
-  <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
   <script type="module">
-    import { skeletonDialsPage } from "./js/placeholders.js";
+    import { skeletonDialsPage, skeletonTopnavHtml } from "./js/placeholders.js";
+    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
     document.getElementById("pageLoadingSkeleton").innerHTML = skeletonDialsPage();
   </script>
   <nav class="topnav" id="topnav"></nav>

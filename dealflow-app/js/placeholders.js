@@ -98,6 +98,63 @@ export function skeletonListHtml({ rows = 6, columnWidths = ["55%", "60%", "45%"
 // own per-reload use inside each page's own list-loading functions.
 // ---------------------------------------------------------------------------
 
+// Matches .topnav-bar's real shape (brand text, 3 nav links, name + role
+// badge + logout button) — see js/auth.js's renderNav(), which is what
+// actually fills #topnav, and only runs once the session/profile fetch
+// resolves (same moment #pageLoadingOverlay gets hidden). Until then #topnav
+// is genuinely empty, so without this placeholder reserving its height the
+// real topnav-bar appears out of nowhere and pushes everything below it
+// down the instant loading finishes — confirmed as a real bug (desktop
+// only; .topnav-bar is already display:none on mobile via the existing
+// html.is-mobile-device rule, so mobile never had this gap). Rendered as a
+// sibling of #pageLoadingSkeleton, not inside it — the real .topnav-bar is
+// full-width outside <main>'s own max-width/padding box, so nesting it
+// inside .skeleton-page-content would both indent it wrong and double up
+// padding that doesn't exist in the real stack.
+export function skeletonTopnavHtml() {
+  // min-height is a measured value, not a guess: .brand's "Waystation
+  // Advisors" text renders at ~43px tall (the brand font's own default line
+  // metrics run much taller than its 16px font-size would suggest), which
+  // makes the real .topnav-bar ~68px tall including its 12px/12px padding —
+  // confirmed via getBoundingClientRect() side-by-side against this exact
+  // markup. Reproducing that from individually-guessed child bar heights
+  // was unreliable (font metrics aren't predictable from font-size alone),
+  // so the container height is pinned directly instead.
+  return `
+    <div class="topnav-bar" style="min-height:68px; box-sizing:border-box;">
+      <span class="skeleton-bar" style="width:150px; height:16px;"></span>
+      <div class="links">
+        <span class="skeleton-bar" style="width:46px; height:14px;"></span>
+        <span class="skeleton-bar" style="width:46px; height:14px;"></span>
+        <span class="skeleton-bar" style="width:46px; height:14px;"></span>
+      </div>
+      <div class="who">
+        <span class="skeleton-bar" style="width:90px; height:13px;"></span>
+        <span class="skeleton-bar" style="width:60px; height:20px; border-radius:999px;"></span>
+        <span class="skeleton-bar" style="width:72px; height:24px; border-radius:6px;"></span>
+      </div>
+    </div>`;
+}
+
+// Matches .page-header's real shape (dropdown toggle + title on the left,
+// settings icon on the right — see css/style.css, identical markup shape on
+// all 3 pages, only the <h1> text differs). Unlike the topnav-bar above,
+// the real .page-header is static markup already sitting in the DOM at the
+// right position — it's only invisible because #pageLoadingOverlay's opaque
+// background sits on top of it (z-index 500, full viewport). This
+// placeholder exists purely to reserve the exact same height so nothing
+// shifts once the overlay is removed, not to stand in for missing data.
+function skeletonPageHeaderHtml() {
+  return `
+    <div class="page-header">
+      <div class="page-header-left">
+        <span class="skeleton-bar" style="width:26px; height:26px; border-radius:6px;"></span>
+        <span class="skeleton-bar" style="width:70px; height:20px;"></span>
+      </div>
+      <span class="skeleton-bar" style="width:30px; height:30px; border-radius:6px;"></span>
+    </div>`;
+}
+
 // Pill-shaped placeholders matching .dial-tab's real shape (see
 // css/style.css) — only Dials has a tabs bar, so only its own page skeleton
 // needs this.
@@ -110,6 +167,7 @@ function skeletonTabsHtml() {
 
 export function skeletonDialsPage() {
   return `
+    ${skeletonPageHeaderHtml()}
     ${skeletonTabsHtml()}
     <div style="margin-top:16px;">
       ${skeletonListHtml({ rows: 5, columnWidths: ["55%", "65%", "45%", "50%", "70%"] })}
@@ -130,6 +188,7 @@ function skeletonToolbarHtml() {
 
 export function skeletonClientsPage() {
   return `
+    ${skeletonPageHeaderHtml()}
     ${skeletonToolbarHtml()}
     ${skeletonListHtml({ rows: 6, columnWidths: ["55%", "60%", "45%", "40%"] })}
   `;
@@ -177,6 +236,7 @@ function skeletonUpcomingEventsHtml() {
 
 export function skeletonProfilePage() {
   return `
+    ${skeletonPageHeaderHtml()}
     <div class="profile-card">
       ${skeletonAvatarHtml()}
       <span class="skeleton-bar" style="width:150px; height:20px; display:block; margin-bottom:6px;"></span>

@@ -37,9 +37,10 @@
        (skeletonClientsPage in js/placeholders.js — not a generic one, and
        not a spinner) the moment the DOM is ready, well before clients.js
        itself has even started running its own await requireSession(). -->
-  <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
   <script type="module">
-    import { skeletonClientsPage } from "./js/placeholders.js";
+    import { skeletonClientsPage, skeletonTopnavHtml } from "./js/placeholders.js";
+    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
     document.getElementById("pageLoadingSkeleton").innerHTML = skeletonClientsPage();
   </script>
   <nav class="topnav" id="topnav"></nav>
