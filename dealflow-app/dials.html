@@ -264,13 +264,15 @@
     </div>
   </div>
 
-  <!-- "Advanced" settings popup (see menuAdvancedBtn above). Just one row so
-       far — Personalized email, with its own on/off switch on the right and
-       a tap-to-open editor (see #personalizedEmailEditorPopup right below,
-       which opens ON TOP of this one — same "popup over a popup" shape as
-       js/dials.js's other stacked popups, here relying on plain DOM order
-       instead of an explicit z-index override since both start at the base
-       .modal-backdrop stacking level). -->
+  <!-- "Advanced" settings popup (see menuAdvancedBtn above). Personalized
+       email has its own on/off switch on the right and a tap-to-open editor
+       (see #personalizedEmailEditorPopup right below, which opens ON TOP of
+       this one — same "popup over a popup" shape as js/dials.js's other
+       stacked popups, here relying on plain DOM order instead of an
+       explicit z-index override since both start at the base
+       .modal-backdrop stacking level). "My email is Gmail" is a plain
+       standalone toggle — no editor needed, so the whole row just flips it
+       on click (see js/dials.js). -->
   <div class="modal-backdrop hidden" id="advancedSettingsPopup">
     <div class="modal">
       <h2>Advanced settings</h2>
@@ -279,7 +281,12 @@
           <span class="advanced-settings-row-label">Personalized email</span>
           <span class="toggle-switch" id="personalizedEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
+        <button type="button" class="advanced-settings-row" id="useGmailForEmailRow">
+          <span class="advanced-settings-row-label">My email is Gmail</span>
+          <span class="toggle-switch" id="useGmailForEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
       </div>
+      <p class="help-text">Turn this on if the email listed on your Profile is hosted on Gmail — including a work address that just runs on Gmail behind the scenes. Instant email will then let Gmail pick the right account, instead of your device's default mail app (which doesn't otherwise have a way to be told which account to use).</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
       </div>

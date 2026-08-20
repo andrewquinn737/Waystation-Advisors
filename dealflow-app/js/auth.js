@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { setOwnEmail } from "./contactIcons.js";
+import { setOwnEmail, setOwnEmailIsGmail } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
@@ -26,7 +26,7 @@ export async function requireSession() {
   const { data: profile, error } = await supabase
     .from("profiles")
     .select(
-      "id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject"
+      "id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, email_is_gmail"
     )
     .eq("id", session.user.id)
     .single();
@@ -74,7 +74,11 @@ export async function requireSession() {
   // Google account the device/browser currently treats as default — see the
   // comment above setOwnEmail() for why this only ever helps Gmail addresses,
   // never phone numbers, and always falls back to a plain mailto: otherwise.
+  // email_is_gmail is the manual override for a Gmail-hosted custom work
+  // domain (set via Dials' Advanced settings), for when the address itself
+  // doesn't end in gmail.com/googlemail.com.
   setOwnEmail(resolvedProfile.email);
+  setOwnEmailIsGmail(resolvedProfile.email_is_gmail);
 
   renderNav(resolvedProfile);
 

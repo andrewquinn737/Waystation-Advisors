@@ -2,7 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML, setOwnEmailIsGmail } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
@@ -225,6 +225,8 @@ const els = {
   advancedSettingsClose: document.getElementById("advancedSettingsClose"),
   personalizedEmailRow: document.getElementById("personalizedEmailRow"),
   personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
+  useGmailForEmailRow: document.getElementById("useGmailForEmailRow"),
+  useGmailForEmailToggle: document.getElementById("useGmailForEmailToggle"),
   personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
   personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
   personalizedEmailSubjectInput: document.getElementById("personalizedEmailSubjectInput"),
@@ -255,16 +257,24 @@ wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profil
 
 // ---------------------------------------------------------------------------
 // "Advanced" settings — 4th settings-gear item, every role (see
-// menuAdvancedBtn in dials.html). Just one row so far: Personalized email,
-// an on/off preference (profiles.personalized_email_enabled) plus a free-
-// text template (profiles.personalized_email_template) — see
-// resolvePersonalizedEmailBody below for where it's actually applied.
+// menuAdvancedBtn in dials.html; deliberately NOT gated by isAdmin/
+// isTeamLead like Accounts visible/Sellers-Buyers are, since everything in
+// here is a personal preference, not an admin/team-lead capability). Two
+// rows: Personalized email, an on/off preference
+// (profiles.personalized_email_enabled) plus free-text subject/body
+// templates (personalized_email_subject/personalized_email_template) — see
+// resolvePersonalizedEmailBody/resolvePersonalizedEmailSubject below for
+// where they're actually applied; and "My email is Gmail"
+// (profiles.email_is_gmail), a plain standalone toggle with no editor of
+// its own — see setOwnEmailIsGmail's own comment in contactIcons.js for
+// what it actually does.
 // ---------------------------------------------------------------------------
 
 els.menuAdvancedBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   closePageHeaderMenu();
   renderPersonalizedEmailToggles();
+  renderUseGmailForEmailToggle();
   els.advancedSettingsPopup.classList.remove("hidden");
 });
 els.advancedSettingsClose.addEventListener("click", () => els.advancedSettingsPopup.classList.add("hidden"));
@@ -297,6 +307,30 @@ async function togglePersonalizedEmailEnabled(e) {
 }
 els.personalizedEmailToggle.addEventListener("click", togglePersonalizedEmailEnabled);
 els.personalizedEmailEditorToggle.addEventListener("click", togglePersonalizedEmailEnabled);
+
+function renderUseGmailForEmailToggle() {
+  const on = profile.email_is_gmail === true;
+  els.useGmailForEmailToggle.classList.toggle("on", on);
+  els.useGmailForEmailToggle.setAttribute("aria-checked", String(on));
+}
+
+// No editor to open here (unlike Personalized email's row) — the whole row
+// just flips the one setting it has. setOwnEmailIsGmail updates the shared
+// contactIcons.js module immediately so the very next "Email" tap already
+// reflects the change, with no reload needed.
+els.useGmailForEmailRow.addEventListener("click", async () => {
+  const next = !(profile.email_is_gmail === true);
+  profile.email_is_gmail = next;
+  renderUseGmailForEmailToggle();
+  setOwnEmailIsGmail(next);
+  const { error } = await supabase.from("profiles").update({ email_is_gmail: next }).eq("id", profile.id);
+  if (error) {
+    console.error("Failed to update email_is_gmail", error);
+    profile.email_is_gmail = !next;
+    renderUseGmailForEmailToggle();
+    setOwnEmailIsGmail(!next);
+  }
+});
 
 // Tapping the ROW (not the switch — see stopPropagation above) opens the
 // fuller editor, "over" the Advanced settings popup rather than replacing

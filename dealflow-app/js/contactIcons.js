@@ -22,24 +22,35 @@ export const CONTACT_ICONS = {
 // mail account (or which phone line, for tel:/sms:) the device actually
 // sends from — that's controlled entirely by the OS/app's own default-account
 // setting, with no override available to page content. Gmail is the one
-// concrete exception: its own compose URL accepts an `authuser` hint that
-// preselects a matching signed-in Google account instead of falling back to
-// whichever one the Gmail app/site currently treats as default. So this is a
-// best-effort upgrade that only kicks in when the signed-in user's own email
-// is a Gmail address (gmail.com/googlemail.com, including Google Workspace
-// domains that are Gmail-hosted isn't reliably detectable from the address
-// alone, so those still fall back to plain mailto:); everyone else keeps the
-// exact same mailto: link as before. Phone/text (tel:/sms:) have no Gmail-
-// style equivalent on any platform, so those are unchanged.
+// concrete exception: its own compose URL (a real https://mail.google.com/
+// link, not a mailto: — this is what lets it sidestep the OS's mail-app
+// picker entirely) accepts an `authuser` hint that preselects a matching
+// signed-in Google account instead of falling back to whichever one the
+// Gmail app/site currently treats as default. So this is a best-effort
+// upgrade that only kicks in for a Gmail address. Auto-detected for a plain
+// gmail.com/googlemail.com address; a Google Workspace domain that's
+// actually Gmail-hosted behind a custom work address isn't reliably
+// detectable from the address string alone, so that case instead relies on
+// the signed-in user explicitly flagging it (profiles.email_is_gmail, set
+// via Dials' Advanced settings — see setOwnEmailIsGmail()/its call site in
+// js/auth.js). Everyone else (including every non-Gmail provider, e.g.
+// Yahoo/Outlook — there's no equivalent trick for those) keeps the exact
+// same mailto: link as before. Phone/text (tel:/sms:) have no Gmail-style
+// equivalent on any platform, so those are unchanged.
 // ---------------------------------------------------------------------------
 let ownEmail = null;
+let ownEmailIsGmail = false;
 
 export function setOwnEmail(email) {
   ownEmail = email || null;
 }
 
+export function setOwnEmailIsGmail(flag) {
+  ownEmailIsGmail = !!flag;
+}
+
 function isGmailAddress(email) {
-  return /@(gmail\.com|googlemail\.com)$/i.test(email || "");
+  return ownEmailIsGmail || /@(gmail\.com|googlemail\.com)$/i.test(email || "");
 }
 
 // Builds the href for the "Email" instant-contact icon. Plain `mailto:` for
