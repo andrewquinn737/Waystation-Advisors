@@ -541,7 +541,7 @@ function renderTable() {
   }
 
   els.tableWrap.innerHTML = `
-    <table>
+    <table class="list-table">
       <thead>
         <tr><th>Name</th><th>Company</th><th>Location</th><th>Person responsible</th></tr>
       </thead>

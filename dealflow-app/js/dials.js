@@ -1993,7 +1993,7 @@ function renderDialsTable() {
   const selectCircleHTML = (d) => `<div class="select-circle ${selectedDialIds.has(d.id) ? "selected" : ""}"></div>`;
 
   els.dialsTableWrap.innerHTML = `
-    <table>
+    <table class="list-table">
       <thead>
         <tr>
           ${selectMode ? "<th></th>" : ""}

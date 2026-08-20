@@ -67,8 +67,13 @@ function skeletonMobileCard(rowIndex) {
 export function skeletonListHtml({ rows = 6, columnWidths = ["55%", "60%", "45%", "50%"] } = {}) {
   const tableRows = Array.from({ length: rows }, (_, i) => skeletonTableRow(columnWidths, i)).join("");
   const cards = Array.from({ length: rows }, (_, i) => skeletonMobileCard(i)).join("");
+  // .list-table (see css/style.css) is what hides this <table> on mobile in
+  // favor of .mobile-list below — a shared class rather than an id-scoped
+  // rule, since this same markup shape is now reused outside #dialsTableWrap/
+  // #tableWrap too (see the page-loading skeleton in dials.html/clients.html/
+  // profile.html).
   return `
-    <table>
+    <table class="list-table">
       <tbody>${tableRows}</tbody>
     </table>
     <div class="mobile-list">${cards}</div>

@@ -738,19 +738,18 @@ tr.skeleton-row, .skeleton-card { cursor: default; }
    starts, hidden once requireSession() resolves (see js/auth.js) — replaces
    the blank white gap that used to show while the session/profile fetch was
    in flight, which is most of what read as "delay between loading screens"
-   on a slow connection. */
+   on a slow connection. Used to hold a centered spinner; now holds a
+   skeleton instead (see #pageLoadingSkeleton in each page's own HTML,
+   populated via skeletonListHtml() in js/placeholders.js) so there's no
+   loading circle anywhere in the app, only the same shimmering placeholder
+   pattern used everywhere else something loads. */
 .page-loading-overlay {
   position: fixed; inset: 0; z-index: 500;
-  display: flex; align-items: center; justify-content: center;
   background: var(--bg);
+  overflow-y: auto;
 }
 .page-loading-overlay.hidden { display: none; }
-.page-loading-spinner {
-  width: 28px; height: 28px; border-radius: 50%;
-  border: 3px solid var(--border); border-top-color: var(--accent);
-  animation: page-loading-spin 0.7s linear infinite;
-}
-@keyframes page-loading-spin { to { transform: rotate(360deg); } }
+.page-loading-overlay .skeleton-page-content { max-width: 1080px; margin: 0 auto; padding: 24px; box-sizing: border-box; }
 /* Plain inline red text (no background box) shown right under a single
    field — used for the duplicate-email message on Add account instead of
    the boxed .error-msg banner. */
@@ -1419,8 +1418,13 @@ html.is-mobile-device table td:not([data-label])::before { content: none; }
 /* Clients and Dials get their own bespoke mobile card layout (below)
    instead of the generic labeled-card table transform above, so hide
    their <table> and show .mobile-list in its place. Finance keeps the
-   generic table-to-card transform since it wasn't redesigned. */
-html.is-mobile-device #tableWrap table, html.is-mobile-device #dialsTableWrap table { display: none; }
+   generic table-to-card transform since it wasn't redesigned. Class-based
+   (.list-table, applied to every real and skeleton table using this
+   pattern — see renderDialsTable/renderTable/skeletonListHtml) rather than
+   scoped to #tableWrap/#dialsTableWrap specifically, so any new container
+   using the same table+.mobile-list shape (e.g. the page-loading skeleton
+   below) gets the same behavior for free instead of needing its own rule. */
+html.is-mobile-device .list-table { display: none; }
 
 /* Profile read-view rows (label/value + text/call/email quick-contact
    icons) wrap instead of squeezing or overflowing on narrow screens. */
