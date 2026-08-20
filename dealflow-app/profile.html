@@ -96,6 +96,15 @@
         <span class="menu-item-label" id="notificationsLabel">Notifications: On</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line class="notif-slash" x1="3" y1="3" x2="21" y2="21"/></svg></span>
       </button>
+      <!-- 4th settings option — opens #advancedSettingsPopup (see
+           js/advancedSettings.js, wired identically from every page).
+           Available to every role, same as Notifications above, since
+           everything in it is a personal preference with nothing admin/
+           team-lead-specific about it. -->
+      <button type="button" class="page-header-menu-item" id="menuAdvancedBtn">
+        <span class="menu-item-label">Advanced</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>
+      </button>
     </div>
     <div id="errorBox" class="error-msg hidden"></div>
     <div id="offlineNotice" class="offline-notice hidden"></div>
@@ -335,6 +344,59 @@
       <div id="accountsVisibleBody"></div>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="accountsVisibleClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Advanced" settings popup (see menuAdvancedBtn above) — same markup,
+       ids, and wiring (js/advancedSettings.js) as the Dials page's copy.
+       Personalized email has its own on/off switch and a tap-to-open editor
+       (see #personalizedEmailEditorPopup right below, which opens ON TOP of
+       this one, relying on plain DOM order for stacking — same reasoning as
+       Dials'). "My email is Gmail" is a plain standalone toggle — no editor
+       needed, so the whole row just flips it on click. -->
+  <div class="modal-backdrop hidden" id="advancedSettingsPopup">
+    <div class="modal">
+      <h2>Advanced settings</h2>
+      <div class="advanced-settings-list">
+        <button type="button" class="advanced-settings-row" id="personalizedEmailRow">
+          <span class="advanced-settings-row-label">Personalized email</span>
+          <span class="toggle-switch" id="personalizedEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
+        <button type="button" class="advanced-settings-row" id="useGmailForEmailRow">
+          <span class="advanced-settings-row-label">My email is Gmail</span>
+          <span class="toggle-switch" id="useGmailForEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
+      </div>
+      <p class="help-text">Turn this on if the email listed on your Profile is hosted on Gmail — including a work address that just runs on Gmail behind the scenes. Instant email will then let Gmail pick the right account, instead of your device's default mail app (which doesn't otherwise have a way to be told which account to use).</p>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Personalized email template editor — opened by tapping the
+       "Personalized email" row above (not its switch, which just toggles
+       on/off in place). Note: on the Profile page this setting is only
+       editable here, not APPLIED — only Dials' own instant-Email icons
+       actually use it (see js/advancedSettings.js's top-of-file comment). -->
+  <div class="modal-backdrop hidden" id="personalizedEmailEditorPopup">
+    <div class="modal">
+      <div class="personalized-email-editor-header">
+        <h2>Personalized email</h2>
+        <span class="toggle-switch" id="personalizedEmailEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+      </div>
+      <p class="help-text">This fills in the mail app's subject and message body when you tap the Email icon on a dial.</p>
+      <label for="personalizedEmailSubjectInput">Subject (optional)</label>
+      <input type="text" id="personalizedEmailSubjectInput" placeholder="Quick question for (Company name)" />
+      <textarea id="personalizedEmailTextarea" class="personalized-email-textarea" placeholder="Hi (Seller name), I wanted to reach out about (Company name)..."></textarea>
+      <div class="personalized-email-tokens">
+        <button type="button" class="personalized-email-token" id="personalizedEmailTokenCompany">(Company name)</button>
+        <button type="button" class="personalized-email-token" id="personalizedEmailTokenSeller">(Seller name)</button>
+      </div>
+      <div id="personalizedEmailError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="personalizedEmailEditorClose">Done</button>
       </div>
     </div>
   </div>

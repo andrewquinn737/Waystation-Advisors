@@ -19,6 +19,7 @@ import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
+import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -292,6 +293,21 @@ const els = {
   buyersVisibleClose: document.getElementById("buyersVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
+  menuAdvancedBtn: document.getElementById("menuAdvancedBtn"),
+  advancedSettingsPopup: document.getElementById("advancedSettingsPopup"),
+  advancedSettingsClose: document.getElementById("advancedSettingsClose"),
+  personalizedEmailRow: document.getElementById("personalizedEmailRow"),
+  personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
+  useGmailForEmailRow: document.getElementById("useGmailForEmailRow"),
+  useGmailForEmailToggle: document.getElementById("useGmailForEmailToggle"),
+  personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
+  personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
+  personalizedEmailSubjectInput: document.getElementById("personalizedEmailSubjectInput"),
+  personalizedEmailTextarea: document.getElementById("personalizedEmailTextarea"),
+  personalizedEmailTokenCompany: document.getElementById("personalizedEmailTokenCompany"),
+  personalizedEmailTokenSeller: document.getElementById("personalizedEmailTokenSeller"),
+  personalizedEmailError: document.getElementById("personalizedEmailError"),
+  personalizedEmailEditorClose: document.getElementById("personalizedEmailEditorClose"),
   clientSubtabs: document.getElementById("clientSubtabs"),
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
@@ -2328,6 +2344,13 @@ if (isAdmin || isTeamLead) {
 // Notifications on/off — everyone gets this, unlike Sellers/Buyers/Accounts
 // visible above.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+// "Advanced" settings (Personalized email + My email is Gmail) — shared
+// wiring, see js/advancedSettings.js. Note: Clients' own instant-Email
+// icons don't apply Personalized email (only Dials' do — see that module's
+// top-of-file comment); this page still gets the full settings UI so the
+// preference is editable from anywhere, and "My email is Gmail" (which
+// applies app-wide) works correctly here too.
+wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu });
 els.editProfileBtn.addEventListener("click", async () => {
   // See resolveIntendedBuyerName's own comment — already resolved once when
   // the Profile view first opened, but redone here too in case it changed

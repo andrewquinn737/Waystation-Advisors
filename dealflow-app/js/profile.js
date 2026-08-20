@@ -9,6 +9,7 @@ import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
 import { getMainAdmin } from "./mainAdmin.js";
 import { wireReportsPopup } from "./reports.js";
+import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -51,6 +52,21 @@ const els = {
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
+  menuAdvancedBtn: document.getElementById("menuAdvancedBtn"),
+  advancedSettingsPopup: document.getElementById("advancedSettingsPopup"),
+  advancedSettingsClose: document.getElementById("advancedSettingsClose"),
+  personalizedEmailRow: document.getElementById("personalizedEmailRow"),
+  personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
+  useGmailForEmailRow: document.getElementById("useGmailForEmailRow"),
+  useGmailForEmailToggle: document.getElementById("useGmailForEmailToggle"),
+  personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
+  personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
+  personalizedEmailSubjectInput: document.getElementById("personalizedEmailSubjectInput"),
+  personalizedEmailTextarea: document.getElementById("personalizedEmailTextarea"),
+  personalizedEmailTokenCompany: document.getElementById("personalizedEmailTokenCompany"),
+  personalizedEmailTokenSeller: document.getElementById("personalizedEmailTokenSeller"),
+  personalizedEmailError: document.getElementById("personalizedEmailError"),
+  personalizedEmailEditorClose: document.getElementById("personalizedEmailEditorClose"),
   menuEditProfileBtn: document.getElementById("menuEditProfileBtn"),
   menuCallsViewBtn: document.getElementById("menuCallsViewBtn"),
   upcomingEventsSection: document.getElementById("upcomingEventsSection"),
@@ -2252,6 +2268,13 @@ if (isAdminSync || isTeamLeadSync) {
 // them across devices/browsers); the bell/inbox UI itself is mounted in the
 // top nav by auth.js's requireSession(), on every page, not just Profile.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+// "Advanced" settings (Personalized email + My email is Gmail) — shared
+// wiring, see js/advancedSettings.js. Note: Profile has no instant-Email
+// icons of its own that Personalized email would apply to (only Dials'
+// do — see that module's top-of-file comment); this page still gets the
+// full settings UI so the preference is editable from anywhere, and "My
+// email is Gmail" (which applies app-wide) works correctly here too.
+wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu });
 
 // Submit weekly survey (intern) vs. View Reports (team lead/admin) — only
 // one of the two ever shows, based on role. Reports popup wiring lives in
