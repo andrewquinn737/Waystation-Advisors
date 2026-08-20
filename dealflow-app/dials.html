@@ -39,13 +39,14 @@
 <body data-page="dials.html">
   <!-- Hidden by requireSession() (js/auth.js) once the session/profile fetch
        resolves — see .page-loading-overlay in css/style.css. Filled with a
-       skeleton (not a spinner — see js/placeholders.js) the moment the DOM
-       is ready, well before dials.js itself has even started running its
-       own await requireSession(). -->
+       skeleton shaped like Dials' own tabs bar + list (skeletonDialsPage in
+       js/placeholders.js — not a generic one, and not a spinner) the moment
+       the DOM is ready, well before dials.js itself has even started
+       running its own await requireSession(). -->
   <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
   <script type="module">
-    import { skeletonListHtml } from "./js/placeholders.js";
-    document.getElementById("pageLoadingSkeleton").innerHTML = skeletonListHtml({ rows: 5 });
+    import { skeletonDialsPage } from "./js/placeholders.js";
+    document.getElementById("pageLoadingSkeleton").innerHTML = skeletonDialsPage();
   </script>
   <nav class="topnav" id="topnav"></nav>
 

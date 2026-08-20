@@ -33,13 +33,14 @@
 <body data-page="profile.html">
   <!-- Hidden by requireSession() (js/auth.js) once the session/profile fetch
        resolves — see .page-loading-overlay in css/style.css. Filled with a
-       skeleton (not a spinner — see js/placeholders.js) the moment the DOM
-       is ready, well before profile.js itself has even started running its
-       own await requireSession(). -->
+       skeleton shaped like Profile's own card + chart + upcoming events
+       (skeletonProfilePage in js/placeholders.js — not a generic one, and
+       not a spinner) the moment the DOM is ready, well before profile.js
+       itself has even started running its own await requireSession(). -->
   <div class="page-loading-overlay" id="pageLoadingOverlay"><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
   <script type="module">
-    import { skeletonListHtml } from "./js/placeholders.js";
-    document.getElementById("pageLoadingSkeleton").innerHTML = skeletonListHtml({ rows: 5 });
+    import { skeletonProfilePage } from "./js/placeholders.js";
+    document.getElementById("pageLoadingSkeleton").innerHTML = skeletonProfilePage();
   </script>
   <nav class="topnav" id="topnav"></nav>
 
