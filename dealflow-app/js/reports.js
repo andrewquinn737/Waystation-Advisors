@@ -8,8 +8,8 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 //
 // Outreach report has two independent sections stacked vertically:
 //
-// 1. "Call by account" — the original per-account KPI table (Calls made,
-//    Owners talked to, Owners agreed, Intro calls completed), read from
+// 1. "Call by account" — the original per-account KPI table (Targets
+//    contacted, Owners talked to, Owners agreed, Intro calls completed), read from
 //    report_dial_rollups (keyed by list_id, with buyer_id alongside it —
 //    see the required "Buyer" picker on tab creation in js/dials.js) and
 //    pre-computed every 15 min by compute_report_rollups(), pruned to the
@@ -619,7 +619,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   function renderOutreachTable(rows) {
-    const callsLabel = periodType === "month" ? "Calls made this month" : "Calls made this week";
+    const callsLabel = periodType === "month" ? "Targets contacted this month" : "Targets contacted this week";
     const totals = rows.reduce(
       (acc, r) => ({
         callsMade: acc.callsMade + r.callsMade,
