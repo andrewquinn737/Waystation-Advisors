@@ -290,17 +290,20 @@
        "Personalized email" row above (not its switch, which just toggles
        on/off in place). When on, tapping the Email instant-contact icon on
        a dial (see js/dials.js) opens the mail app with this text as the
-       message body instead of a blank one, (Company name)/(Seller name)
-       already swapped for that dial's own info. Drag either token below
-       into the text box to insert it wherever the cursor currently sits —
-       up to 3 total (see js/dials.js's MAX_PERSONALIZED_TOKENS). -->
+       subject/message body instead of leaving them blank, (Company name)/
+       (Seller name) already swapped for that dial's own info (Seller name
+       resolves to just their FIRST name). Drag either token below into
+       whichever of the subject field or the text box currently has the
+       cursor to insert it there — no limit on how many times. -->
   <div class="modal-backdrop hidden" id="personalizedEmailEditorPopup">
     <div class="modal">
       <div class="personalized-email-editor-header">
         <h2>Personalized email</h2>
         <span class="toggle-switch" id="personalizedEmailEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
       </div>
-      <p class="help-text">This fills in the mail app's message body when you tap the Email icon on a dial.</p>
+      <p class="help-text">This fills in the mail app's subject and message body when you tap the Email icon on a dial.</p>
+      <label for="personalizedEmailSubjectInput">Subject (optional)</label>
+      <input type="text" id="personalizedEmailSubjectInput" placeholder="Quick question for (Company name)" />
       <textarea id="personalizedEmailTextarea" class="personalized-email-textarea" placeholder="Hi (Seller name), I wanted to reach out about (Company name)..."></textarea>
       <div class="personalized-email-tokens">
         <button type="button" class="personalized-email-token" id="personalizedEmailTokenCompany">(Company name)</button>
