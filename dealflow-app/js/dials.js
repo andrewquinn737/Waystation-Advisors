@@ -303,7 +303,6 @@ els.personalizedEmailEditorToggle.addEventListener("click", togglePersonalizedEm
 // that works from plain DOM order with no extra z-index needed.
 els.personalizedEmailRow.addEventListener("click", () => {
   els.personalizedEmailTextarea.value = profile.personalized_email_template || "";
-  updatePersonalizedTokenChipsState();
   renderPersonalizedEmailToggles();
   els.personalizedEmailError.classList.add("hidden");
   els.personalizedEmailEditorPopup.classList.remove("hidden");
@@ -319,7 +318,6 @@ async function savePersonalizedEmailTemplate() {
 // Same blur-triggered autosave as the Call notes field elsewhere on this
 // page (see flushCallNotes/wireCallNotesAutosave) — no separate Save button.
 els.personalizedEmailTextarea.addEventListener("blur", savePersonalizedEmailTemplate);
-els.personalizedEmailTextarea.addEventListener("input", updatePersonalizedTokenChipsState);
 
 els.personalizedEmailEditorClose.addEventListener("click", async () => {
   await savePersonalizedEmailTemplate();
@@ -329,27 +327,13 @@ els.personalizedEmailEditorPopup.addEventListener("click", (e) => {
   if (e.target === els.personalizedEmailEditorPopup) els.personalizedEmailEditorClose.click();
 });
 
-// (Company name)/(Seller name) tokens, drag-and-drop into the textarea — up
-// to MAX_PERSONALIZED_TOKENS total, combined across both. Counted as plain
-// literal-string occurrences rather than a hidden token syntax, since
-// there's no rich-text rendering inside a plain <textarea> anyway — what you
-// see in the box IS exactly what gets substituted later (see
-// resolvePersonalizedEmailBody), so there's nothing to keep in sync.
-const MAX_PERSONALIZED_TOKENS = 3;
-
-function countPersonalizedTokens(text) {
-  return (text.match(/\(Company name\)/g) || []).length + (text.match(/\(Seller name\)/g) || []).length;
-}
-
-function updatePersonalizedTokenChipsState() {
-  const atCap = countPersonalizedTokens(els.personalizedEmailTextarea.value) >= MAX_PERSONALIZED_TOKENS;
-  els.personalizedEmailTokenCompany.classList.toggle("disabled", atCap);
-  els.personalizedEmailTokenSeller.classList.toggle("disabled", atCap);
-}
-
+// (Company name)/(Seller name) tokens, drag-and-drop into the textarea — no
+// limit on how many times either can be inserted. Plain literal-string
+// substrings rather than a hidden token syntax, since there's no rich-text
+// rendering inside a plain <textarea> anyway — what you see in the box IS
+// exactly what gets substituted later (see resolvePersonalizedEmailBody).
 function insertPersonalizedToken(label) {
   const ta = els.personalizedEmailTextarea;
-  if (countPersonalizedTokens(ta.value) >= MAX_PERSONALIZED_TOKENS) return;
   // Inserted at wherever the textarea's own cursor/selection currently sits
   // (replacing any selected range) — a native <textarea> doesn't expose a
   // reliable pixel-to-character mapping for "exactly where the pointer was
@@ -367,7 +351,6 @@ function insertPersonalizedToken(label) {
   const newPos = start + label.length;
   ta.focus();
   ta.setSelectionRange(newPos, newPos);
-  updatePersonalizedTokenChipsState();
   savePersonalizedEmailTemplate();
 }
 
@@ -393,7 +376,6 @@ function startTokenDragVisuals(chip, e) {
   const rect = chip.getBoundingClientRect();
   const ghost = chip.cloneNode(true);
   ghost.classList.add("personalized-email-drag-ghost");
-  ghost.classList.remove("disabled");
   ghost.style.width = `${rect.width}px`;
   ghost.style.left = `${rect.left}px`;
   ghost.style.top = `${rect.top}px`;
@@ -411,7 +393,6 @@ function moveTokenDragGhost(e) {
 
 function wirePersonalizedEmailTokenDrag(chip, label) {
   chip.addEventListener("pointerdown", (e) => {
-    if (chip.classList.contains("disabled")) return;
     tokenDragState.token = label;
     tokenDragState.pointerId = e.pointerId;
     tokenDragState.startX = e.clientX;

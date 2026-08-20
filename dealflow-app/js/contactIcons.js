@@ -50,14 +50,20 @@ function isGmailAddress(email) {
 // (optional) — see js/dials.js's "Personalized email" feature: pre-fills the
 // mail app's message body with that dial's own resolved template text,
 // instead of leaving it blank. Omitted everywhere else.
+//
+// body is percent-encoded by hand (encodeURIComponent, "%20" for a space)
+// rather than via URLSearchParams — real, confirmed bug: URLSearchParams
+// encodes a space as "+", which is correct HTML form-encoding but wrong for
+// a mailto: URI (RFC 6068), where mail clients treat "+" as a literal plus
+// sign rather than decoding it back to a space, so every space in the
+// template showed up as a literal "+" in the composed message.
 function buildEmailHref(targetEmail, body) {
+  const bodyParam = body ? `body=${encodeURIComponent(body)}` : "";
   if (isGmailAddress(ownEmail)) {
     const params = new URLSearchParams({ view: "cm", fs: "1", to: targetEmail, authuser: ownEmail });
-    if (body) params.set("body", body);
-    return `https://mail.google.com/mail/?${params.toString()}`;
+    return `https://mail.google.com/mail/?${params.toString()}${bodyParam ? `&${bodyParam}` : ""}`;
   }
-  if (!body) return `mailto:${targetEmail}`;
-  return `mailto:${targetEmail}?${new URLSearchParams({ body }).toString()}`;
+  return `mailto:${targetEmail}${bodyParam ? `?${bodyParam}` : ""}`;
 }
 
 // Small pin icon shown next to a dial/client's location — opens that

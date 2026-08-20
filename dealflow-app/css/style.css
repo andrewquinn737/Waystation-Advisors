@@ -354,7 +354,6 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
   touch-action: none; user-select: none;
 }
 .personalized-email-token:active { cursor: grabbing; }
-.personalized-email-token.disabled { opacity: .4; cursor: not-allowed; }
 /* Floating clone that follows the pointer while dragging a token — same
    shape/z-index as .team-drag-ghost (js/profile.js), the app's existing
    drag-ghost precedent, just without that one's rotate/dim styling since a
