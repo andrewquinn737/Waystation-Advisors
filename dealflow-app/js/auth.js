@@ -60,12 +60,32 @@ export async function requireSession() {
   // supabase/schema.sql), so the RECIPIENT's own timezone has to already be
   // on file for that text to be formatted in it rather than the event's own
   // stored timezone (whoever scheduled it, not necessarily who's reading the
-  // notification). Fire-and-forget, same pattern as subscribeToPush below —
+  // notification). Fire-and-forget, same INTENT as subscribeToPush below —
   // harmless to re-check every page load, and picks up a real device
   // move/DST change automatically next time the app is opened.
+  //
+  // Real, confirmed bug: this used to be a bare, un-awaited statement with
+  // no .then() at all. Supabase's query builder is a lazy "thenable" — the
+  // underlying fetch only actually fires once something calls .then()/await
+  // on it, unlike a plain Promise that starts running the moment it's
+  // created. Written as a bare statement, the update was constructed but
+  // its request never dispatched at all — confirmed directly: every single
+  // profile's timezone was still null (never successfully written, not
+  // once, for anyone), which is exactly why push notifications were always
+  // falling back to format_upcoming_event_message's hardcoded
+  // America/Chicago default regardless of the recipient's real zone. Still
+  // non-blocking (no `await`, so it doesn't hold up page load) — just
+  // actually triggered now, with its error surfaced instead of silently
+  // swallowed.
   const deviceTimezone = defaultTimezone();
   if (resolvedProfile.timezone !== deviceTimezone) {
-    supabase.from("profiles").update({ timezone: deviceTimezone }).eq("id", session.user.id);
+    supabase
+      .from("profiles")
+      .update({ timezone: deviceTimezone })
+      .eq("id", session.user.id)
+      .then(({ error: tzError }) => {
+        if (tzError) console.error("Failed to sync profiles.timezone", tzError);
+      });
     resolvedProfile.timezone = deviceTimezone;
   }
 
