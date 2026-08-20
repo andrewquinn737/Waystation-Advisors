@@ -206,6 +206,22 @@ function fmtPeriodLabel(periodStart, type) {
   return `Week of ${periodStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
+// Lowercase "week of .../month of ..." phrase for embedding mid-sentence
+// (see the Send PDF share text below) — a separate helper from
+// fmtPeriodLabel rather than reusing/reformatting its output, since the two
+// shapes genuinely differ: fmtPeriodLabel's week form already reads "Week
+// of ..." on its own, but its month form is bare ("August 2026", no "Month
+// of" prefix) — trying to patch one string into both grammatical positions
+// would be more fragile than just building this one directly.
+function periodOfPhrase(periodStart, type) {
+  if (type === "month") {
+    return `month of ${periodStart.toLocaleDateString(undefined, { month: "long", year: "numeric" })}`;
+  }
+  const end = new Date(periodStart);
+  end.setDate(end.getDate() + 4);
+  return `week of ${periodStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 // Inclusive start / exclusive end ISO bounds for a period — used by the
 // buyer-centric section's period-scoped RPCs (get_buyer_outreach_chart/
 // get_buyer_contacted_owners). The call-by-account table doesn't need this
@@ -1045,6 +1061,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const { summary, chart, sinceSigned, milestoneClients, contactedOwners, periodLabel } = buyerCentric;
 
     const doc = new jsPDF();
+    // The PDF's own metadata title (shown in the browser/PDF-viewer's tab
+    // or window title) — previously set to the underscored filename string
+    // instead of anything readable. Distinct from the on-page heading a few
+    // lines down, which already reads "Outreach report — {buyer}" with an
+    // em dash; this uses a colon to match how it should read as a title.
+    const pdfTitle = `Outreach report: ${buyerName}`;
+    doc.setProperties({ title: pdfTitle });
     const pageWidth = doc.internal.pageSize.getWidth();
 
     doc.setFont("helvetica", "bold");
@@ -1206,7 +1229,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     drawLogoMark(doc);
 
     const filename = `Outreach_report_${buyerName.replace(/\s+/g, "_")}_${periodLabel.replace(/[\s,]+/g, "_")}.pdf`;
-    return { doc, filename };
+    return { doc, filename, pdfTitle };
   }
 
   // doc.save() used to be called directly here, which downloads straight
@@ -1240,8 +1263,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   els.reportsCreatePdfBtn.addEventListener("click", async () => {
     await ensureBuyerCentricReady();
     if (!buyerCentric) return;
-    const { doc, filename } = await buildReportPdf();
-    doc.setProperties({ title: filename });
+    const { doc, filename } = await buildReportPdf(); // title (pdfTitle) is already set on doc inside buildReportPdf
     const url = URL.createObjectURL(doc.output("blob"));
     const a = document.createElement("a");
     a.href = url;
@@ -1268,12 +1290,16 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   els.reportsSendPdfBtn.addEventListener("click", async () => {
     await ensureBuyerCentricReady();
     if (!buyerCentric) return;
-    const { doc, filename } = await buildReportPdf();
+    const { doc, filename, pdfTitle } = await buildReportPdf();
     const blob = doc.output("blob");
     const file = new File([blob], filename, { type: "application/pdf" });
+    // Pre-filled share text — see periodOfPhrase's own comment for why it's
+    // a separate helper from fmtPeriodLabel rather than reformatting that
+    // one's output.
+    const shareText = `This is our outreach report for the ${periodOfPhrase(selectedPeriodStart, periodType)}.`;
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share({ files: [file], title: filename });
+        await navigator.share({ files: [file], title: pdfTitle, text: shareText });
       } catch {
         // User backed out of the share sheet — not an error.
       }
