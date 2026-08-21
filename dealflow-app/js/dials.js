@@ -2376,6 +2376,17 @@ async function updateDialStatus(newStatus) {
         message: "Dial had never been marked as contacted. Please press one of the circles on the right side of the page to mark a contact.",
       });
     }
+    // Same reasoning as the contact-history guard above, one level further:
+    // a category is a claimed OUTCOME of a call, and an empty notes box
+    // means there's no record of what actually happened on it. Checked
+    // AFTER flushCallNotes() above, so currentDial.call_notes already
+    // reflects whatever's currently sitting in the textarea, not a stale
+    // pre-edit value.
+    if (!(currentDial.call_notes || "").trim()) {
+      return showError(els.dialModalError, {
+        message: "Add call notes before changing the category.",
+      });
+    }
   }
   // A fresh arrival at "Accepted intro call" (switching in from some other
   // category — not just re-saving while already sitting in it) re-shows the
