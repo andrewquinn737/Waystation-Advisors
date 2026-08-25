@@ -85,6 +85,14 @@
         <span class="menu-item-label">Select</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
       </button>
+      <!-- Filters the CURRENTLY SELECTED tab's dials by name, company name,
+           email, or phone number (mobile or company) as you type — see
+           enterSearchMode()/visibleDials() in js/dials.js. Same "reveal a
+           mode bar in place of this menu" pattern as Select above. -->
+      <button type="button" class="page-header-menu-item" id="menuSearchBtn">
+        <span class="menu-item-label">Search</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuStatusBtn" data-status="current">
         <span class="menu-item-label">Current</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg></span>
@@ -144,6 +152,17 @@
       <button type="button" class="select-mode-btn danger" id="selectDeleteBtn">Delete</button>
     </div>
     <div class="select-mode-hint hidden" id="selectMoveHint">Tap a tab above to move the selected dials there.</div>
+
+    <!-- Revealed by "Search" in the triangle menu above (see enterSearchMode
+         in js/dials.js) — reuses .toolbar's existing search-input styling
+         (already used the same way on Clients) rather than introducing new
+         CSS. Filters the currently selected tab's dials by name, company
+         name, email, or phone as you type; the × clears the query and hides
+         this bar again. -->
+    <div class="toolbar hidden" id="dialsSearchBar">
+      <input type="search" id="dialsSearchInput" placeholder="Search this tab..." />
+      <button type="button" class="btn secondary small" id="dialsSearchCloseBtn">&times;</button>
+    </div>
 
     <div id="errorBox" class="error-msg hidden"></div>
     <div id="offlineNotice" class="offline-notice hidden"></div>

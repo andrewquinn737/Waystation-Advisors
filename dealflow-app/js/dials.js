@@ -88,6 +88,13 @@ let selectMode = false;
 let moveMode = false;
 let selectedDialIds = new Set();
 
+// Free-text query from the "Search" triangle-menu option (see
+// enterSearchMode/visibleDials below) — a cross-cutting filter like the
+// Categories status filter (hiddenStatuses), not a per-tab action mode like
+// Select above, so it deliberately survives switching tabs instead of
+// clearing.
+let dialSearchQuery = "";
+
 // ---------------------------------------------------------------------------
 // Persisted Dials view state (selected tab + Categories filter) — saved to
 // localStorage so navigating away to Profile/Clients (a full page load, so
@@ -151,6 +158,10 @@ const els = {
   menuAddNewBtn: document.getElementById("menuAddNewBtn"),
   menuImportBtn: document.getElementById("menuImportBtn"),
   menuSelectBtn: document.getElementById("menuSelectBtn"),
+  menuSearchBtn: document.getElementById("menuSearchBtn"),
+  dialsSearchBar: document.getElementById("dialsSearchBar"),
+  dialsSearchInput: document.getElementById("dialsSearchInput"),
+  dialsSearchCloseBtn: document.getElementById("dialsSearchCloseBtn"),
   menuStatusBtn: document.getElementById("menuStatusBtn"),
   menuCategoriesBtn: document.getElementById("menuCategoriesBtn"),
   categoriesSubmenu: document.getElementById("categoriesSubmenu"),
@@ -1781,6 +1792,10 @@ els.importDialsImportBtn.addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 
 function enterSelectMode() {
+  // Mutually exclusive with search — a filtered, ambiguous-looking list
+  // during a bulk Select/Move/Delete is more confusing than helpful, so
+  // starting one closes the other.
+  exitSearchMode();
   selectMode = true;
   moveMode = false;
   selectedDialIds = new Set();
@@ -1805,6 +1820,40 @@ function toggleDialSelection(id) {
   else selectedDialIds.add(id);
   renderDialsTable();
 }
+
+// ---------------------------------------------------------------------------
+// Search — filters the currently selected tab's dials by name, company
+// name, email, or phone (see visibleDials above). Unlike Select/Move above,
+// this isn't an exclusive "mode" with its own bulk actions — it's just a
+// filter, so it has no outside-click-to-exit behavior; it stays open until
+// the × is pressed or Select mode takes over (see enterSelectMode).
+// ---------------------------------------------------------------------------
+
+function enterSearchMode() {
+  if (selectMode) exitSelectMode();
+  els.dialsSearchBar.classList.remove("hidden");
+  els.dialsSearchInput.focus();
+}
+
+function exitSearchMode() {
+  dialSearchQuery = "";
+  els.dialsSearchInput.value = "";
+  els.dialsSearchBar.classList.add("hidden");
+  renderDialsTable();
+}
+
+els.menuSearchBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closePageHeaderMenu();
+  enterSearchMode();
+});
+
+els.dialsSearchInput.addEventListener("input", () => {
+  dialSearchQuery = els.dialsSearchInput.value;
+  renderDialsTable();
+});
+
+els.dialsSearchCloseBtn.addEventListener("click", exitSearchMode);
 
 els.menuSelectBtn.addEventListener("click", (e) => {
   // Without this, the very same click bubbles up to the document-level
@@ -1951,7 +2000,17 @@ async function loadDials() {
 // AND (see openDialModal/goToDial) to scope prev/next/swipe/arrow-key
 // navigation to only those dials, instead of every dial in the tab.
 function visibleDials() {
-  return dials.filter((d) => !hiddenStatuses.has(d.contact_status || "uncontacted"));
+  const q = dialSearchQuery.trim().toLowerCase();
+  return dials.filter(
+    (d) =>
+      !hiddenStatuses.has(d.contact_status || "uncontacted") &&
+      (!q ||
+        (d.full_name || "").toLowerCase().includes(q) ||
+        (d.company_name || "").toLowerCase().includes(q) ||
+        (d.email || "").toLowerCase().includes(q) ||
+        (d.mobile_phone || "").toLowerCase().includes(q) ||
+        (d.company_phone || "").toLowerCase().includes(q))
+  );
 }
 
 // Updates the small "X prospects displayed" text next to the Dials heading —
@@ -1982,7 +2041,9 @@ function renderDialsTable() {
   updateProspectCount(visible.length);
 
   if (visible.length === 0) {
-    els.dialsTableWrap.innerHTML = `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
+    els.dialsTableWrap.innerHTML = dialSearchQuery.trim()
+      ? `<div class="empty-state">No dials in this list match "${escapeHtml(dialSearchQuery.trim())}".</div>`
+      : `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
     return;
   }
 
