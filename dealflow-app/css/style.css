@@ -1392,6 +1392,26 @@ html.is-mobile-device .fullscreen-modal .fs-body { padding: 16px; max-width: 100
 html.is-mobile-device .modal-backdrop { padding: 24px 12px; }
 html.is-mobile-device .modal { padding: 18px; }
 
+/* The dial detail popup specifically (not every .modal-backdrop — small
+   confirm/info dialogs like delete-confirmation and New list stay genuinely
+   small floating dialogs, even on mobile) — on a phone this backdrop
+   already covers the whole screen edge-to-edge (#dialModalBackdrop is
+   position:fixed;inset:0, and lockPageScroll hides the topnav/bottom tab
+   bar while it's open), so there's no visible page behind it left to dim
+   the way the shared translucent tint is meant to on desktop, where a
+   smaller floating dialog genuinely needs it to read as "on top of" the
+   page around it. Left translucent, a dial whose content is shorter than
+   the screen (buyer dials especially, which hide Website/Industry sector
+   entirely, or any dial with several empty optional fields) leaves that
+   dark-tinted gap plainly visible below the card once its content runs
+   out — confirmed as a real bug, reported as "the bottom of the screen
+   turns white" on an installed iPhone PWA (the card's own light --surface
+   background, dark backdrop tint, and the app's off-white --bg together
+   read as a stray pale/blank patch rather than an obvious color mismatch).
+   Solid var(--surface) instead makes the card and everything around it one
+   continuous color regardless of how short the card is — no gap to see. */
+html.is-mobile-device #dialModalBackdrop { background: var(--surface); }
+
 /* Dials toolbar: tighten the gap under the "Dials" heading slightly. */
 html.is-mobile-device .page-header { margin-bottom: 10px; }
 html.is-mobile-device .dials-toolbar { gap: 8px; margin-bottom: 8px; }
