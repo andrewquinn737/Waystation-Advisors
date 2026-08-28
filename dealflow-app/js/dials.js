@@ -3,7 +3,7 @@ import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
-import { wireAdvancedSettingsPopup, resolvePersonalizedEmailBody, resolvePersonalizedEmailSubject } from "./advancedSettings.js";
+import { wireAdvancedSettingsPopup, resolvePersonalizedEmailBody, resolvePersonalizedEmailSubject, resolvePersonalizedTextingBody } from "./advancedSettings.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
@@ -248,6 +248,15 @@ const els = {
   personalizedEmailTokenSeller: document.getElementById("personalizedEmailTokenSeller"),
   personalizedEmailError: document.getElementById("personalizedEmailError"),
   personalizedEmailEditorClose: document.getElementById("personalizedEmailEditorClose"),
+  personalizedTextingRow: document.getElementById("personalizedTextingRow"),
+  personalizedTextingToggle: document.getElementById("personalizedTextingToggle"),
+  personalizedTextingEditorPopup: document.getElementById("personalizedTextingEditorPopup"),
+  personalizedTextingEditorToggle: document.getElementById("personalizedTextingEditorToggle"),
+  personalizedTextingTextarea: document.getElementById("personalizedTextingTextarea"),
+  personalizedTextingTokenCompany: document.getElementById("personalizedTextingTokenCompany"),
+  personalizedTextingTokenSeller: document.getElementById("personalizedTextingTokenSeller"),
+  personalizedTextingError: document.getElementById("personalizedTextingError"),
+  personalizedTextingEditorClose: document.getElementById("personalizedTextingEditorClose"),
 };
 
 // CSV import and Transfer are both available to team leads too now (see
@@ -2104,6 +2113,7 @@ function renderDialsTable() {
                   linkedin: d.linkedin,
                   personalizedEmailBody: resolvePersonalizedEmailBody(profile, d),
                   personalizedEmailSubject: resolvePersonalizedEmailSubject(profile, d),
+                  personalizedTextingBody: resolvePersonalizedTextingBody(profile, d),
                 })
           }
         </div>`
@@ -2150,7 +2160,7 @@ function buildDialViewHTML(dial) {
   const isBuyer = currentType === "buyer";
   return `
     ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolvePersonalizedEmailBody(profile, dial), resolvePersonalizedEmailSubject(profile, dial))}
-    ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial))}
+    ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial), resolvePersonalizedTextingBody(profile, dial))}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${isBuyer ? "" : rfWebsite("Website", dial.website)}
     ${isBuyer ? "" : rf("Industry sector", dial.industry)}

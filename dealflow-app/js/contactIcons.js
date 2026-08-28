@@ -83,6 +83,20 @@ function buildEmailHref(targetEmail, body, subject) {
   return `mailto:${targetEmail}${query ? `?${query}` : ""}`;
 }
 
+// Builds the href for the "Text" instant-contact icon. Plain `sms:` for
+// everyone — unlike buildEmailHref there's no Gmail-style provider hook for
+// SMS on any platform, so this only ever varies by whether there's a
+// pre-filled message body (see js/dials.js's "Personalized texting" advanced
+// setting, the sms: equivalent of Personalized email). `?body=` is the
+// widely-supported de-facto convention both iOS Messages and Android honor
+// (there's no RFC for sms: the way mailto: has RFC 6068). Same hand-rolled
+// encodeURIComponent as buildEmailHref, not URLSearchParams — the same "+"-
+// for-space bug would otherwise apply here too.
+function buildSmsHref(phone, body) {
+  const bodyParam = body ? `?body=${encodeURIComponent(body)}` : "";
+  return `sms:${phone}${bodyParam}`;
+}
+
 // Small pin icon shown next to a dial/client's location — opens that
 // city/state in Google Maps in a new tab. Returns "" if there's no city/state
 // to map. `extraClass` (optional) adds a modifier class for contexts that
@@ -105,11 +119,12 @@ export function locationPinLink(city, state, extraClass = "") {
 // module needing to know anything about that Dials-only feature. Every
 // existing caller omits it, so output is unchanged for them.
 // `personalizedEmailBody`/`personalizedEmailSubject` (optional, email kind
-// only) — see contactActionIcons' own comment.
-export function rfContact(label, value, kind, extra = "", personalizedEmailBody, personalizedEmailSubject) {
+// only) / `personalizedTextingBody` (optional, phone kind only) — see
+// contactActionIcons' own comment.
+export function rfContact(label, value, kind, extra = "", personalizedEmailBody, personalizedEmailSubject, personalizedTextingBody) {
   const v = value ? String(value) : "";
   const actionsHTML = v
-    ? contactActionIcons(kind === "phone" ? { phone: v, extra } : { email: v, extra, personalizedEmailBody, personalizedEmailSubject })
+    ? contactActionIcons(kind === "phone" ? { phone: v, extra, personalizedTextingBody } : { email: v, extra, personalizedEmailBody, personalizedEmailSubject })
     : "";
   return `
     <div class="readonly-field">
@@ -125,12 +140,14 @@ export function rfContact(label, value, kind, extra = "", personalizedEmailBody,
 // same layout as rfContact but with a fixed "(Mobile)"/"(Company)" suffix
 // instead of a left-hand label, since both numbers share one "Phone numbers"
 // section instead of each getting their own readonly-field. `extra` — see
-// rfContact's comment above.
-function phoneNumberRow(number, kind, extra = "") {
+// rfContact's comment above. `personalizedTextingBody` (optional) — same
+// resolved text for either number (the template doesn't vary by which phone
+// it's sent to), see buildPhoneNumbersHTML's own comment.
+function phoneNumberRow(number, kind, extra = "", personalizedTextingBody) {
   return `
     <div class="rf-value-row" style="margin-bottom: 8px;">
       <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
-      ${contactActionIcons({ phone: number, extra })}
+      ${contactActionIcons({ phone: number, extra, personalizedTextingBody })}
     </div>`;
 }
 
@@ -142,10 +159,16 @@ function phoneNumberRow(number, kind, extra = "") {
 // (optional) — see rfContact's comment on `extra`; called once per present
 // phone kind ("mobile"/"company") so a caller can give each its own extra
 // HTML (js/dials.js uses this for its per-method check circle).
-export function buildPhoneNumbersHTML(entity, extraFor) {
+// `personalizedTextingBody` (optional) — see js/dials.js's "Personalized
+// texting" advanced setting: when the signed-in user has it turned on,
+// this is that dial's own resolved template text, pre-filling the Text
+// icon's message body on BOTH numbers (mobile and company) instead of
+// leaving it blank. Omitted everywhere else, same as
+// personalizedEmailBody/-Subject on rfContact above.
+export function buildPhoneNumbersHTML(entity, extraFor, personalizedTextingBody) {
   const rows = [];
-  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, "Mobile", extraFor ? extraFor("mobile") : ""));
-  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company", extraFor ? extraFor("company") : ""));
+  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, "Mobile", extraFor ? extraFor("mobile") : "", personalizedTextingBody));
+  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company", extraFor ? extraFor("company") : "", personalizedTextingBody));
   return `
     <div class="readonly-field">
       <div class="rf-label">Phone numbers</div>
@@ -167,12 +190,14 @@ export function buildPhoneNumbersHTML(entity, extraFor) {
 // when the signed-in user has it turned on, these are that dial's own
 // resolved template text (placeholders already substituted), pre-filling
 // the mail app's message body and/or subject line instead of leaving them
-// blank. Every other caller (Clients, and Dials' own detail-modal phone
-// rows) omits both, so their output is unchanged.
-export function contactActionIcons({ phone, email, linkedin, personalizedEmailBody, personalizedEmailSubject, extra = "" } = {}) {
+// blank. `personalizedTextingBody` (optional) is the sms: equivalent, from
+// the "Personalized texting" advanced setting — pre-fills the Text icon's
+// message body the same way. Every other caller (Clients, and Dials' own
+// detail-modal phone rows) omits these, so their output is unchanged.
+export function contactActionIcons({ phone, email, linkedin, personalizedEmailBody, personalizedEmailSubject, personalizedTextingBody, extra = "" } = {}) {
   const parts = [];
   if (phone) {
-    parts.push(`<a class="contact-action-btn" href="sms:${escapeHtml(phone)}" title="Text">${CONTACT_ICONS.sms}</a>`);
+    parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildSmsHref(phone, personalizedTextingBody))}" title="Text">${CONTACT_ICONS.sms}</a>`);
     // contact-action-tel: hidden on desktop via CSS (html.is-desktop-device)
     // since a computer can't actually place a phone call through a tel: link.
     parts.push(`<a class="contact-action-btn contact-action-tel" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);

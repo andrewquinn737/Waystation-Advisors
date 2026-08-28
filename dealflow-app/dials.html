@@ -313,10 +313,41 @@
           <span class="advanced-settings-row-label">My email is Gmail</span>
           <span class="toggle-switch" id="useGmailForEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
+        <button type="button" class="advanced-settings-row" id="personalizedTextingRow">
+          <span class="advanced-settings-row-label">Personalized texting</span>
+          <span class="toggle-switch" id="personalizedTextingToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
       </div>
       <p class="help-text">Turn this on if the email listed on your Profile is hosted on Gmail — including a work address that just runs on Gmail behind the scenes. Instant email will then let Gmail pick the right account, instead of your device's default mail app (which doesn't otherwise have a way to be told which account to use).</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Personalized texting template editor — sms: equivalent of the
+       Personalized email editor below (opened by tapping the "Personalized
+       texting" row above, not its switch — same "popup over a popup"
+       pattern). No subject field — sms: has no subject line. When on,
+       tapping the Text instant-contact icon on a dial (see js/dials.js)
+       opens the Messages app with this text as the message body instead of
+       leaving it blank, same (Company name)/(Seller name) token drag-and-
+       drop as the email editor. -->
+  <div class="modal-backdrop hidden" id="personalizedTextingEditorPopup">
+    <div class="modal">
+      <div class="personalized-email-editor-header">
+        <h2>Personalized texting</h2>
+        <span class="toggle-switch" id="personalizedTextingEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+      </div>
+      <p class="help-text">This fills in the message body when you tap the Text icon on a dial.</p>
+      <textarea id="personalizedTextingTextarea" class="personalized-email-textarea" placeholder="Hi (Seller name), I wanted to reach out about (Company name)..."></textarea>
+      <div class="personalized-email-tokens">
+        <button type="button" class="personalized-email-token" id="personalizedTextingTokenCompany">(Company name)</button>
+        <button type="button" class="personalized-email-token" id="personalizedTextingTokenSeller">(Seller name)</button>
+      </div>
+      <div id="personalizedTextingError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="personalizedTextingEditorClose">Done</button>
       </div>
     </div>
   </div>

@@ -8,22 +8,26 @@
 // everything in here is a personal preference, not an admin/team-lead
 // capability.
 //
-// Two rows: Personalized email, an on/off preference
+// Three rows: Personalized email, an on/off preference
 // (profiles.personalized_email_enabled) plus free-text subject/body
 // templates (personalized_email_subject/personalized_email_template) — see
-// resolvePersonalizedEmailBody/resolvePersonalizedEmailSubject below. Its
-// on/off toggle and editor are reachable from every page, but only Dials
-// actually APPLIES it to its own instant-Email icons (see
+// resolvePersonalizedEmailBody/resolvePersonalizedEmailSubject below.
+// Personalized texting is the sms: equivalent — same on/off shape
+// (profiles.personalized_texting_enabled) with a single free-text body
+// template (personalized_texting_template, no subject — sms: has no
+// subject line) — see resolvePersonalizedTextingBody below. Both rows' on/
+// off toggles and editors are reachable from every page, but only Dials
+// actually APPLIES either to its own instant-Email/Text icons (see
 // contactActionIcons calls in js/dials.js) — that scope was explicit
 // ("instead of instant email having the regular function in the dials
-// section"), so Clients'/Profile's own email icons are untouched even
-// though the setting itself is editable from anywhere.
+// section"), so Clients'/Profile's own icons are untouched even though the
+// settings themselves are editable from anywhere.
 //
 // "My email is Gmail" (profiles.email_is_gmail) is a plain standalone
-// toggle with no editor of its own — unlike Personalized email, this one's
-// EFFECT (see setOwnEmailIsGmail's own comment in contactIcons.js) already
-// applies app-wide the moment it's set, regardless of which page it was
-// toggled from.
+// toggle with no editor of its own — unlike the two template rows, this
+// one's EFFECT (see setOwnEmailIsGmail's own comment in contactIcons.js)
+// already applies app-wide the moment it's set, regardless of which page it
+// was toggled from.
 // ---------------------------------------------------------------------------
 
 import { supabase } from "./supabaseClient.js";
@@ -40,9 +44,14 @@ import { setOwnEmailIsGmail } from "./contactIcons.js";
 //     personalizedEmailEditorToggle, personalizedEmailSubjectInput,
 //     personalizedEmailTextarea, personalizedEmailTokenCompany,
 //     personalizedEmailTokenSeller, personalizedEmailError,
-//     personalizedEmailEditorClose — same ids on every page that wires this
-//     (see dials.html/clients.html/profile.html), so each page's own
-//     document.getElementById calls just slot straight in here unchanged.
+//     personalizedEmailEditorClose, personalizedTextingRow,
+//     personalizedTextingToggle, personalizedTextingEditorPopup,
+//     personalizedTextingEditorToggle, personalizedTextingTextarea,
+//     personalizedTextingTokenCompany, personalizedTextingTokenSeller,
+//     personalizedTextingError, personalizedTextingEditorClose — same ids
+//     on every page that wires this (see dials.html/clients.html/
+//     profile.html), so each page's own document.getElementById calls just
+//     slot straight in here unchanged.
 //   - closePageHeaderMenu: closes whatever triangle/settings menu is
 //     currently open before showing the popup (see js/pageHeaderMenu.js).
 export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu }) {
@@ -51,6 +60,7 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     if (closePageHeaderMenu) closePageHeaderMenu();
     renderPersonalizedEmailToggles();
     renderUseGmailForEmailToggle();
+    renderPersonalizedTextingToggles();
     els.advancedSettingsPopup.classList.remove("hidden");
   });
   els.advancedSettingsClose.addEventListener("click", () => els.advancedSettingsPopup.classList.add("hidden"));
@@ -83,6 +93,55 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
   }
   els.personalizedEmailToggle.addEventListener("click", togglePersonalizedEmailEnabled);
   els.personalizedEmailEditorToggle.addEventListener("click", togglePersonalizedEmailEnabled);
+
+  // sms: equivalent of the Personalized email toggle above — same shape,
+  // one fewer field (no subject line).
+  function renderPersonalizedTextingToggles() {
+    const on = profile.personalized_texting_enabled === true;
+    [els.personalizedTextingToggle, els.personalizedTextingEditorToggle].forEach((el) => {
+      el.classList.toggle("on", on);
+      el.setAttribute("aria-checked", String(on));
+    });
+  }
+
+  async function togglePersonalizedTextingEnabled(e) {
+    e.stopPropagation(); // don't also trigger personalizedTextingRow's own click (which opens the editor)
+    const next = !(profile.personalized_texting_enabled === true);
+    profile.personalized_texting_enabled = next;
+    renderPersonalizedTextingToggles();
+    const { error } = await supabase.from("profiles").update({ personalized_texting_enabled: next }).eq("id", profile.id);
+    if (error) {
+      console.error("Failed to update personalized_texting_enabled", error);
+      profile.personalized_texting_enabled = !next;
+      renderPersonalizedTextingToggles();
+    }
+  }
+  els.personalizedTextingToggle.addEventListener("click", togglePersonalizedTextingEnabled);
+  els.personalizedTextingEditorToggle.addEventListener("click", togglePersonalizedTextingEnabled);
+
+  els.personalizedTextingRow.addEventListener("click", () => {
+    els.personalizedTextingTextarea.value = profile.personalized_texting_template || "";
+    renderPersonalizedTextingToggles();
+    els.personalizedTextingError.classList.add("hidden");
+    els.personalizedTextingEditorPopup.classList.remove("hidden");
+  });
+
+  async function savePersonalizedTextingField() {
+    const bodyVal = els.personalizedTextingTextarea.value.trim() || null;
+    if (bodyVal === (profile.personalized_texting_template || null)) return;
+    const { error } = await supabase.from("profiles").update({ personalized_texting_template: bodyVal }).eq("id", profile.id);
+    if (error) return showError(els.personalizedTextingError, error);
+    profile.personalized_texting_template = bodyVal;
+  }
+  els.personalizedTextingTextarea.addEventListener("blur", savePersonalizedTextingField);
+
+  els.personalizedTextingEditorClose.addEventListener("click", async () => {
+    await savePersonalizedTextingField();
+    els.personalizedTextingEditorPopup.classList.add("hidden");
+  });
+  els.personalizedTextingEditorPopup.addEventListener("click", (e) => {
+    if (e.target === els.personalizedTextingEditorPopup) els.personalizedTextingEditorClose.click();
+  });
 
   function renderUseGmailForEmailToggle() {
     const on = profile.email_is_gmail === true;
@@ -149,14 +208,18 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     if (e.target === els.personalizedEmailEditorPopup) els.personalizedEmailEditorClose.click();
   });
 
-  // (Company name)/(Seller name) tokens, drag-and-drop into either the
-  // subject field or the text box — no limit on how many times either can
-  // be inserted. Plain literal-string substrings rather than a hidden token
-  // syntax, since there's no rich-text rendering inside a plain text
-  // field/textarea anyway — what you see IS exactly what gets substituted
-  // later (see resolvePersonalizedEmailBody/resolvePersonalizedEmailSubject
-  // below).
-  function insertPersonalizedToken(label, target) {
+  // (Company name)/(Seller name) tokens, drag-and-drop into whichever field
+  // the drop lands on — no limit on how many times either can be inserted.
+  // Plain literal-string substrings rather than a hidden token syntax,
+  // since there's no rich-text rendering inside a plain text field/textarea
+  // anyway — what you see IS exactly what gets substituted later (see
+  // resolvePersonalizedEmailBody/resolvePersonalizedEmailSubject/
+  // resolvePersonalizedTextingBody below). Shared between the Personalized
+  // email editor (2 possible drop targets: subject + body) and the
+  // Personalized texting editor (1: body only) — `onInserted` is whichever
+  // editor's own save function, since the two editors persist to different
+  // profile columns.
+  function insertPersonalizedToken(label, target, onInserted) {
     // Inserted at wherever the target field's own cursor/selection
     // currently sits (replacing any selected range) — neither a plain text
     // input nor a textarea exposes a reliable pixel-to-character mapping
@@ -175,7 +238,7 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     const newPos = start + label.length;
     target.focus();
     target.setSelectionRange(newPos, newPos);
-    savePersonalizedEmailFields();
+    onInserted();
   }
 
   // Custom pointer-based drag (not native HTML5 drag-and-drop, which has no
@@ -216,7 +279,9 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     tokenDragState.ghost.style.top = `${e.clientY - tokenDragState.offsetY}px`;
   }
 
-  function wirePersonalizedEmailTokenDrag(chip, label) {
+  // `dropTargets` — the fields this chip can land on; `onInserted` — that
+  // editor's own save function (see insertPersonalizedToken above).
+  function wirePersonalizedEmailTokenDrag(chip, label, dropTargets, onInserted) {
     chip.addEventListener("pointerdown", (e) => {
       tokenDragState.token = label;
       tokenDragState.pointerId = e.pointerId;
@@ -257,21 +322,22 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
       tokenDragState.token = null;
       tokenDragState.active = false;
       if (!wasActive) return;
-      // Whichever of the two fields the pointer is actually over at
-      // release — the subject input and the body textarea are checked in
-      // that order, though they never overlap so order doesn't really
-      // matter.
-      const dropTarget = [els.personalizedEmailSubjectInput, els.personalizedEmailTextarea].find((el) => {
+      // Whichever of dropTargets the pointer is actually over at release —
+      // checked in array order, though real drop targets never overlap so
+      // order doesn't matter in practice.
+      const dropTarget = dropTargets.find((el) => {
         const rect = el.getBoundingClientRect();
         return e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
       });
-      if (dropTarget) insertPersonalizedToken(label, dropTarget);
+      if (dropTarget) insertPersonalizedToken(label, dropTarget, onInserted);
     };
     chip.addEventListener("pointerup", endDrag);
     chip.addEventListener("pointercancel", endDrag);
   }
-  wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenCompany, "(Company name)");
-  wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenSeller, "(Seller name)");
+  wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenCompany, "(Company name)", [els.personalizedEmailSubjectInput, els.personalizedEmailTextarea], savePersonalizedEmailFields);
+  wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenSeller, "(Seller name)", [els.personalizedEmailSubjectInput, els.personalizedEmailTextarea], savePersonalizedEmailFields);
+  wirePersonalizedEmailTokenDrag(els.personalizedTextingTokenCompany, "(Company name)", [els.personalizedTextingTextarea], savePersonalizedTextingField);
+  wirePersonalizedEmailTokenDrag(els.personalizedTextingTokenSeller, "(Seller name)", [els.personalizedTextingTextarea], savePersonalizedTextingField);
 }
 
 // (Seller name) resolves to just the FIRST name — everything up to (not
@@ -304,4 +370,13 @@ export function resolvePersonalizedEmailBody(profile, dial) {
 export function resolvePersonalizedEmailSubject(profile, dial) {
   if (!profile.personalized_email_enabled || !profile.personalized_email_subject) return null;
   return substitutePersonalizedTokens(profile.personalized_email_subject, dial);
+}
+
+// sms: equivalent of resolvePersonalizedEmailBody above — applied wherever
+// Dials builds an instant-Text link (see contactActionIcons/rfContact/
+// buildPhoneNumbersHTML in js/contactIcons.js). No subject counterpart —
+// sms: has no subject line.
+export function resolvePersonalizedTextingBody(profile, dial) {
+  if (!profile.personalized_texting_enabled || !profile.personalized_texting_template) return null;
+  return substitutePersonalizedTokens(profile.personalized_texting_template, dial);
 }
