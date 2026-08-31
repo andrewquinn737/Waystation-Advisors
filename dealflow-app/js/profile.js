@@ -1806,7 +1806,7 @@ async function loadUpcomingEvents() {
   const cacheKey = "upcomingEvents_" + ids.join(",") + "|" + extraIds.join(",");
   const { data, error } = await supabase
     .from("client_events")
-    .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, full_name, created_by)")
+    .select("id, event_type, event_date, details, confirmed, client_id, clients!client_events_client_id_fkey!inner(id, full_name, created_by)")
     .gte("event_date", startOfToday.toISOString())
     .in("clients.created_by", ids)
     .order("event_date", { ascending: true });
@@ -1823,7 +1823,7 @@ async function loadUpcomingEvents() {
     if (extraIds.length) {
       const { data: extraData } = await supabase
         .from("client_events")
-        .select("id, event_type, event_date, details, confirmed, client_id, clients!inner(id, full_name, created_by)")
+        .select("id, event_type, event_date, details, confirmed, client_id, clients!client_events_client_id_fkey!inner(id, full_name, created_by)")
         .eq("event_type", "intro_call")
         .gte("event_date", startOfToday.toISOString())
         .in("clients.created_by", extraIds);
