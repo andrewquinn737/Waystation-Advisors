@@ -8,26 +8,37 @@
 // everything in here is a personal preference, not an admin/team-lead
 // capability.
 //
-// Three rows: Personalized email, an on/off preference
+// Four rows: Personalized email, an on/off preference
 // (profiles.personalized_email_enabled) plus free-text subject/body
 // templates (personalized_email_subject/personalized_email_template) — see
 // resolvePersonalizedEmailBody/resolvePersonalizedEmailSubject below.
-// Personalized texting is the sms: equivalent — same on/off shape
-// (profiles.personalized_texting_enabled) with a single free-text body
-// template (personalized_texting_template, no subject — sms: has no
-// subject line) — see resolvePersonalizedTextingBody below. Both rows' on/
-// off toggles and editors are reachable from every page, but only Dials
-// actually APPLIES either to its own instant-Email/Text icons (see
-// contactActionIcons calls in js/dials.js) — that scope was explicit
-// ("instead of instant email having the regular function in the dials
-// section"), so Clients'/Profile's own icons are untouched even though the
-// settings themselves are editable from anywhere.
+// About us email is the same shape (about_us_email_enabled/-_subject/-
+// _template, see resolveAboutUsEmailBody/-Subject) with its own default
+// script pre-filled at the database column level (so it's a working intro
+// email from the moment someone turns it on, not just an empty box like
+// the other templates start as) — it applies to the exact same Email icon
+// as Personalized email, so the two are mutually exclusive (see
+// togglePersonalizedEmailEnabled/toggleAboutUsEmailEnabled: turning one on
+// silently turns the other off, both client-side and via a DB CHECK
+// constraint as a backstop) rather than one silently winning if both were
+// ever on at once. Personalized texting is the sms: equivalent of
+// Personalized email — same on/off shape (profiles.personalized_texting_
+// enabled) with a single free-text body template (personalized_texting_
+// template, no subject — sms: has no subject line) — see
+// resolvePersonalizedTextingBody below; it has no About-us-style
+// counterpart. All three template rows' on/off toggles and editors are
+// reachable from every page, but only Dials actually APPLIES any of them to
+// its own instant-Email/Text icons (see contactActionIcons calls in
+// js/dials.js) — that scope was explicit ("instead of instant email having
+// the regular function in the dials section"), so Clients'/Profile's own
+// icons are untouched even though the settings themselves are editable
+// from anywhere.
 //
 // "My email is Gmail" (profiles.email_is_gmail) is a plain standalone
-// toggle with no editor of its own — unlike the two template rows, this
-// one's EFFECT (see setOwnEmailIsGmail's own comment in contactIcons.js)
-// already applies app-wide the moment it's set, regardless of which page it
-// was toggled from.
+// toggle with no editor of its own — unlike the template rows, this one's
+// EFFECT (see setOwnEmailIsGmail's own comment in contactIcons.js) already
+// applies app-wide the moment it's set, regardless of which page it was
+// toggled from.
 // ---------------------------------------------------------------------------
 
 import { supabase } from "./supabaseClient.js";
@@ -44,7 +55,11 @@ import { setOwnEmailIsGmail } from "./contactIcons.js";
 //     personalizedEmailEditorToggle, personalizedEmailSubjectInput,
 //     personalizedEmailTextarea, personalizedEmailTokenCompany,
 //     personalizedEmailTokenSeller, personalizedEmailError,
-//     personalizedEmailEditorClose, personalizedTextingRow,
+//     personalizedEmailEditorClose, aboutUsEmailRow, aboutUsEmailToggle,
+//     aboutUsEmailEditorPopup, aboutUsEmailEditorToggle,
+//     aboutUsEmailSubjectInput, aboutUsEmailTextarea, aboutUsEmailTokenCompany,
+//     aboutUsEmailTokenSeller, aboutUsEmailTokenYourName, aboutUsEmailError,
+//     aboutUsEmailEditorClose, personalizedTextingRow,
 //     personalizedTextingToggle, personalizedTextingEditorPopup,
 //     personalizedTextingEditorToggle, personalizedTextingTextarea,
 //     personalizedTextingTokenCompany, personalizedTextingTokenSeller,
@@ -59,6 +74,7 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     e.stopPropagation();
     if (closePageHeaderMenu) closePageHeaderMenu();
     renderPersonalizedEmailToggles();
+    renderAboutUsEmailToggles();
     renderUseGmailForEmailToggle();
     renderPersonalizedTextingToggles();
     els.advancedSettingsPopup.classList.remove("hidden");
@@ -82,17 +98,101 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
   async function togglePersonalizedEmailEnabled(e) {
     e.stopPropagation(); // don't also trigger personalizedEmailRow's own click (which opens the editor)
     const next = !(profile.personalized_email_enabled === true);
+    const prevPersonalized = profile.personalized_email_enabled;
+    const prevAboutUs = profile.about_us_email_enabled;
+    const updates = { personalized_email_enabled: next };
+    // Mutually exclusive with About us email — both apply to the same
+    // instant-Email icon, so turning this on turns that off (see
+    // toggleAboutUsEmailEnabled's mirror of this), backstopped by a DB
+    // CHECK constraint in case any other path ever tried to set both.
+    if (next && profile.about_us_email_enabled === true) {
+      updates.about_us_email_enabled = false;
+      profile.about_us_email_enabled = false;
+    }
     profile.personalized_email_enabled = next;
     renderPersonalizedEmailToggles();
-    const { error } = await supabase.from("profiles").update({ personalized_email_enabled: next }).eq("id", profile.id);
+    renderAboutUsEmailToggles();
+    const { error } = await supabase.from("profiles").update(updates).eq("id", profile.id);
     if (error) {
       console.error("Failed to update personalized_email_enabled", error);
-      profile.personalized_email_enabled = !next;
+      profile.personalized_email_enabled = prevPersonalized;
+      profile.about_us_email_enabled = prevAboutUs;
       renderPersonalizedEmailToggles();
+      renderAboutUsEmailToggles();
     }
   }
   els.personalizedEmailToggle.addEventListener("click", togglePersonalizedEmailEnabled);
   els.personalizedEmailEditorToggle.addEventListener("click", togglePersonalizedEmailEnabled);
+
+  // Same on/off shape as Personalized email above, with its own editor
+  // (subject + body, same as Personalized email — see #aboutUsEmailEditorPopup
+  // in dials.html) and a working default script already saved for every
+  // profile (see the about_us_email_template column default in the
+  // migration, not hardcoded here) rather than starting empty.
+  function renderAboutUsEmailToggles() {
+    const on = profile.about_us_email_enabled === true;
+    [els.aboutUsEmailToggle, els.aboutUsEmailEditorToggle].forEach((el) => {
+      el.classList.toggle("on", on);
+      el.setAttribute("aria-checked", String(on));
+    });
+  }
+
+  async function toggleAboutUsEmailEnabled(e) {
+    e.stopPropagation(); // don't also trigger aboutUsEmailRow's own click (which opens the editor)
+    const next = !(profile.about_us_email_enabled === true);
+    const prevAboutUs = profile.about_us_email_enabled;
+    const prevPersonalized = profile.personalized_email_enabled;
+    const updates = { about_us_email_enabled: next };
+    // Mirror of togglePersonalizedEmailEnabled's own mutual-exclusion check.
+    if (next && profile.personalized_email_enabled === true) {
+      updates.personalized_email_enabled = false;
+      profile.personalized_email_enabled = false;
+    }
+    profile.about_us_email_enabled = next;
+    renderAboutUsEmailToggles();
+    renderPersonalizedEmailToggles();
+    const { error } = await supabase.from("profiles").update(updates).eq("id", profile.id);
+    if (error) {
+      console.error("Failed to update about_us_email_enabled", error);
+      profile.about_us_email_enabled = prevAboutUs;
+      profile.personalized_email_enabled = prevPersonalized;
+      renderAboutUsEmailToggles();
+      renderPersonalizedEmailToggles();
+    }
+  }
+  els.aboutUsEmailToggle.addEventListener("click", toggleAboutUsEmailEnabled);
+  els.aboutUsEmailEditorToggle.addEventListener("click", toggleAboutUsEmailEnabled);
+
+  els.aboutUsEmailRow.addEventListener("click", () => {
+    els.aboutUsEmailSubjectInput.value = profile.about_us_email_subject || "";
+    els.aboutUsEmailTextarea.value = profile.about_us_email_template || "";
+    renderAboutUsEmailToggles();
+    els.aboutUsEmailError.classList.add("hidden");
+    els.aboutUsEmailEditorPopup.classList.remove("hidden");
+  });
+
+  async function saveAboutUsEmailFields() {
+    const subjectVal = els.aboutUsEmailSubjectInput.value.trim() || null;
+    const bodyVal = els.aboutUsEmailTextarea.value.trim() || null;
+    if (subjectVal === (profile.about_us_email_subject || null) && bodyVal === (profile.about_us_email_template || null)) return;
+    const { error } = await supabase
+      .from("profiles")
+      .update({ about_us_email_subject: subjectVal, about_us_email_template: bodyVal })
+      .eq("id", profile.id);
+    if (error) return showError(els.aboutUsEmailError, error);
+    profile.about_us_email_subject = subjectVal;
+    profile.about_us_email_template = bodyVal;
+  }
+  els.aboutUsEmailSubjectInput.addEventListener("blur", saveAboutUsEmailFields);
+  els.aboutUsEmailTextarea.addEventListener("blur", saveAboutUsEmailFields);
+
+  els.aboutUsEmailEditorClose.addEventListener("click", async () => {
+    await saveAboutUsEmailFields();
+    els.aboutUsEmailEditorPopup.classList.add("hidden");
+  });
+  els.aboutUsEmailEditorPopup.addEventListener("click", (e) => {
+    if (e.target === els.aboutUsEmailEditorPopup) els.aboutUsEmailEditorClose.click();
+  });
 
   // sms: equivalent of the Personalized email toggle above — same shape,
   // one fewer field (no subject line).
@@ -338,6 +438,14 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
   wirePersonalizedEmailTokenDrag(els.personalizedEmailTokenSeller, "(Seller name)", [els.personalizedEmailSubjectInput, els.personalizedEmailTextarea], savePersonalizedEmailFields);
   wirePersonalizedEmailTokenDrag(els.personalizedTextingTokenCompany, "(Company name)", [els.personalizedTextingTextarea], savePersonalizedTextingField);
   wirePersonalizedEmailTokenDrag(els.personalizedTextingTokenSeller, "(Seller name)", [els.personalizedTextingTextarea], savePersonalizedTextingField);
+  // (Your name) is About us email's own third token — resolves to the
+  // signed-in user's own full name (see substitutePersonalizedTokens below),
+  // for signing off the default script's "Thanks, (Your name)" — the other
+  // two editors have no drag chip for it, though the substitution itself is
+  // shared/harmless if anyone typed it manually into those.
+  wirePersonalizedEmailTokenDrag(els.aboutUsEmailTokenCompany, "(Company name)", [els.aboutUsEmailSubjectInput, els.aboutUsEmailTextarea], saveAboutUsEmailFields);
+  wirePersonalizedEmailTokenDrag(els.aboutUsEmailTokenSeller, "(Seller name)", [els.aboutUsEmailSubjectInput, els.aboutUsEmailTextarea], saveAboutUsEmailFields);
+  wirePersonalizedEmailTokenDrag(els.aboutUsEmailTokenYourName, "(Your name)", [els.aboutUsEmailSubjectInput, els.aboutUsEmailTextarea], saveAboutUsEmailFields);
 }
 
 // (Seller name) resolves to just the FIRST name — everything up to (not
@@ -346,8 +454,19 @@ function firstNameOf(fullName) {
   return (fullName || "").trim().split(" ")[0];
 }
 
-function substitutePersonalizedTokens(text, dial) {
-  return text.split("(Company name)").join(dial.company_name || "").split("(Seller name)").join(firstNameOf(dial.full_name));
+// (Your name) resolves to the SENDER's (the signed-in profile's) own full
+// name, unlike (Company name)/(Seller name) which come off the dial being
+// contacted — profile is optional (personalized email/texting don't pass
+// it, since neither has a drag chip for this token) and just resolves to
+// empty text rather than throwing if omitted.
+function substitutePersonalizedTokens(text, dial, profile) {
+  return text
+    .split("(Company name)")
+    .join(dial.company_name || "")
+    .split("(Seller name)")
+    .join(firstNameOf(dial.full_name))
+    .split("(Your name)")
+    .join((profile && profile.full_name) || "");
 }
 
 // Applied wherever Dials builds an instant-Email link (see
@@ -360,7 +479,7 @@ function substitutePersonalizedTokens(text, dial) {
 // in a sent email.
 export function resolvePersonalizedEmailBody(profile, dial) {
   if (!profile.personalized_email_enabled || !profile.personalized_email_template) return null;
-  return substitutePersonalizedTokens(profile.personalized_email_template, dial);
+  return substitutePersonalizedTokens(profile.personalized_email_template, dial, profile);
 }
 
 // Subject line is independent of the on/off toggle for the body — it's its
@@ -369,7 +488,7 @@ export function resolvePersonalizedEmailBody(profile, dial) {
 // resolvePersonalizedEmailBody just for the other field.
 export function resolvePersonalizedEmailSubject(profile, dial) {
   if (!profile.personalized_email_enabled || !profile.personalized_email_subject) return null;
-  return substitutePersonalizedTokens(profile.personalized_email_subject, dial);
+  return substitutePersonalizedTokens(profile.personalized_email_subject, dial, profile);
 }
 
 // sms: equivalent of resolvePersonalizedEmailBody above — applied wherever
@@ -379,4 +498,19 @@ export function resolvePersonalizedEmailSubject(profile, dial) {
 export function resolvePersonalizedTextingBody(profile, dial) {
   if (!profile.personalized_texting_enabled || !profile.personalized_texting_template) return null;
   return substitutePersonalizedTokens(profile.personalized_texting_template, dial);
+}
+
+// About us email — same shape as resolvePersonalizedEmailBody/-Subject
+// above, mutually exclusive with it (see toggleAboutUsEmailEnabled), so at
+// most one of the two ever returns non-null for a given profile. Callers
+// just OR the two together (see js/dials.js) rather than needing to check
+// which one is actually enabled themselves.
+export function resolveAboutUsEmailBody(profile, dial) {
+  if (!profile.about_us_email_enabled || !profile.about_us_email_template) return null;
+  return substitutePersonalizedTokens(profile.about_us_email_template, dial, profile);
+}
+
+export function resolveAboutUsEmailSubject(profile, dial) {
+  if (!profile.about_us_email_enabled || !profile.about_us_email_subject) return null;
+  return substitutePersonalizedTokens(profile.about_us_email_subject, dial, profile);
 }

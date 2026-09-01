@@ -3,7 +3,14 @@ import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
-import { wireAdvancedSettingsPopup, resolvePersonalizedEmailBody, resolvePersonalizedEmailSubject, resolvePersonalizedTextingBody } from "./advancedSettings.js";
+import {
+  wireAdvancedSettingsPopup,
+  resolvePersonalizedEmailBody,
+  resolvePersonalizedEmailSubject,
+  resolvePersonalizedTextingBody,
+  resolveAboutUsEmailBody,
+  resolveAboutUsEmailSubject,
+} from "./advancedSettings.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
@@ -248,6 +255,17 @@ const els = {
   personalizedEmailTokenSeller: document.getElementById("personalizedEmailTokenSeller"),
   personalizedEmailError: document.getElementById("personalizedEmailError"),
   personalizedEmailEditorClose: document.getElementById("personalizedEmailEditorClose"),
+  aboutUsEmailRow: document.getElementById("aboutUsEmailRow"),
+  aboutUsEmailToggle: document.getElementById("aboutUsEmailToggle"),
+  aboutUsEmailEditorPopup: document.getElementById("aboutUsEmailEditorPopup"),
+  aboutUsEmailEditorToggle: document.getElementById("aboutUsEmailEditorToggle"),
+  aboutUsEmailSubjectInput: document.getElementById("aboutUsEmailSubjectInput"),
+  aboutUsEmailTextarea: document.getElementById("aboutUsEmailTextarea"),
+  aboutUsEmailTokenCompany: document.getElementById("aboutUsEmailTokenCompany"),
+  aboutUsEmailTokenSeller: document.getElementById("aboutUsEmailTokenSeller"),
+  aboutUsEmailTokenYourName: document.getElementById("aboutUsEmailTokenYourName"),
+  aboutUsEmailError: document.getElementById("aboutUsEmailError"),
+  aboutUsEmailEditorClose: document.getElementById("aboutUsEmailEditorClose"),
   personalizedTextingRow: document.getElementById("personalizedTextingRow"),
   personalizedTextingToggle: document.getElementById("personalizedTextingToggle"),
   personalizedTextingEditorPopup: document.getElementById("personalizedTextingEditorPopup"),
@@ -2111,8 +2129,8 @@ function renderDialsTable() {
                   phone: d.mobile_phone || d.company_phone,
                   email: d.email,
                   linkedin: d.linkedin,
-                  personalizedEmailBody: resolvePersonalizedEmailBody(profile, d),
-                  personalizedEmailSubject: resolvePersonalizedEmailSubject(profile, d),
+                  personalizedEmailBody: resolveEmailBody(d),
+                  personalizedEmailSubject: resolveEmailSubject(d),
                   personalizedTextingBody: resolvePersonalizedTextingBody(profile, d),
                 })
           }
@@ -2150,6 +2168,19 @@ function renderDialsTable() {
 // Dial detail / create popup
 // ---------------------------------------------------------------------------
 
+// Personalized email and About us email are mutually exclusive (see
+// toggleAboutUsEmailEnabled/togglePersonalizedEmailEnabled in
+// js/advancedSettings.js — enforced both client-side and by a DB CHECK
+// constraint), so at most one of each pair ever returns non-null — a plain
+// OR picks whichever is actually on without needing to check which one
+// first.
+function resolveEmailBody(dial) {
+  return resolvePersonalizedEmailBody(profile, dial) || resolveAboutUsEmailBody(profile, dial);
+}
+function resolveEmailSubject(dial) {
+  return resolvePersonalizedEmailSubject(profile, dial) || resolveAboutUsEmailSubject(profile, dial);
+}
+
 // Company name / Industry sector / Website are seller-only fields on a dial
 // (currentType — the active Sellers/Buyers toggle, see js/dealSide.js) — for
 // buyer dials, hiding these boxes entirely (view, edit form, and validation
@@ -2159,7 +2190,7 @@ function renderDialsTable() {
 function buildDialViewHTML(dial) {
   const isBuyer = currentType === "buyer";
   return `
-    ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolvePersonalizedEmailBody(profile, dial), resolvePersonalizedEmailSubject(profile, dial))}
+    ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolveEmailBody(dial), resolveEmailSubject(dial))}
     ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial), resolvePersonalizedTextingBody(profile, dial))}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${isBuyer ? "" : rfWebsite("Website", dial.website)}

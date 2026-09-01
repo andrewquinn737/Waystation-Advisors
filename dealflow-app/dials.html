@@ -309,6 +309,16 @@
           <span class="advanced-settings-row-label">Personalized email</span>
           <span class="toggle-switch" id="personalizedEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
+        <!-- Same instant-Email icon as Personalized email above, so the two
+             are mutually exclusive — turning one on turns the other off
+             (see toggleAboutUsEmailEnabled/togglePersonalizedEmailEnabled
+             in js/advancedSettings.js). Comes with a real default script
+             already filled in (see #aboutUsEmailEditorPopup below), not an
+             empty box like the other templates start as. -->
+        <button type="button" class="advanced-settings-row" id="aboutUsEmailRow">
+          <span class="advanced-settings-row-label">About us email</span>
+          <span class="toggle-switch" id="aboutUsEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
         <button type="button" class="advanced-settings-row" id="useGmailForEmailRow">
           <span class="advanced-settings-row-label">My email is Gmail</span>
           <span class="toggle-switch" id="useGmailForEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
@@ -321,6 +331,35 @@
       <p class="help-text">Turn this on if the email listed on your Profile is hosted on Gmail — including a work address that just runs on Gmail behind the scenes. Instant email will then let Gmail pick the right account, instead of your device's default mail app (which doesn't otherwise have a way to be told which account to use).</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- About us email template editor — opened by tapping the "About us
+       email" row above (not its switch). Same shape as the Personalized
+       email editor below (subject + body, same token drag-and-drop), plus
+       a third (Your name) token for signing off with the SENDER's own name
+       rather than the dial's. Ships with a real default script already
+       saved (see the about_us_email_template column default in supabase),
+       so turning this on works immediately without typing anything. -->
+  <div class="modal-backdrop hidden" id="aboutUsEmailEditorPopup">
+    <div class="modal">
+      <div class="personalized-email-editor-header">
+        <h2>About us email</h2>
+        <span class="toggle-switch" id="aboutUsEmailEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+      </div>
+      <p class="help-text">This fills in the mail app's subject and message body when you tap the Email icon on a dial. Mutually exclusive with Personalized email — turning this on turns that off.</p>
+      <label for="aboutUsEmailSubjectInput">Subject (optional)</label>
+      <input type="text" id="aboutUsEmailSubjectInput" placeholder="About us" />
+      <textarea id="aboutUsEmailTextarea" class="personalized-email-textarea" placeholder="Hey (Seller name), here is a little information about our company..."></textarea>
+      <div class="personalized-email-tokens">
+        <button type="button" class="personalized-email-token" id="aboutUsEmailTokenCompany">(Company name)</button>
+        <button type="button" class="personalized-email-token" id="aboutUsEmailTokenSeller">(Seller name)</button>
+        <button type="button" class="personalized-email-token" id="aboutUsEmailTokenYourName">(Your name)</button>
+      </div>
+      <div id="aboutUsEmailError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="aboutUsEmailEditorClose">Done</button>
       </div>
     </div>
   </div>
