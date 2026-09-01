@@ -72,16 +72,24 @@
   /* Mobile bottom tab bar (see .bottom-tabbar below) — a floating pill whose
      colors need their own theme-aware variables since they're deliberately
      NOT the same as --surface/--border (it floats over the page content
-     rather than sitting flush with it). White in light mode (its own
-     box-shadow below is what separates it from the equally-white page
-     behind it, same as any floating white toolbar) — --tabbar-icon/-active-
-     icon reuse --text-muted/--accent (the exact same "active nav link"
-     blue as .topnav-bar's own a.active on desktop) since white icons on a
-     gray pill (the old values) would be invisible against white. */
-  --tabbar-bg: rgba(255, 255, 255, .92);
+     rather than sitting flush with it). White (and more translucent than a
+     regular popup, per its own backdrop-filter:blur below) in light mode,
+     its own box-shadow doing the separating from the equally-white page
+     behind it. The active tab is deliberately monochrome, not a color
+     accent (gold/blue read as too loud for a tab bar that's always
+     visible) — solid --text-colored icon (near-black in light mode,
+     reusing --text so dark mode gets an appropriate near-white
+     automatically instead of staying pinned to literal black) with a
+     --border-colored outline ring (same "lighter gray" reasoning — --border
+     is already tuned per-theme for a subtle line, here just drawn as a
+     circle instead of a divider). --tabbar-icon (inactive) still reuses
+     --text-muted. */
+  --tabbar-bg: rgba(255, 255, 255, .78);
   --tabbar-icon: var(--text-muted);
-  --tabbar-active-bg: var(--gold-soft);
-  --tabbar-active-icon: var(--accent);
+  --tabbar-active-bg: transparent;
+  --tabbar-active-icon: var(--text);
+  --tabbar-active-border: var(--border);
+  --tabbar-press-bg: rgba(0, 0, 0, .06);
 }
 
 /* Full dark-mode support: every tab's background and every popup/modal
@@ -133,13 +141,18 @@
     --status-sold-border: #1e3c49;
     --status-sold-dot: #6fc0ea;
 
-    /* Dark charcoal pill (not the same gray used in light mode) with the
-       accent blue used for the active tab, instead of a plain white
-       highlight — matches every other "active" state in dark mode. */
-    --tabbar-bg: rgba(28, 28, 30, 0.9);
+    /* Dark charcoal pill (not the same gray used in light mode), a little
+       more translucent than before per the same "make the bar more
+       transparent" request. Active tab kept monochrome here too — --text/
+       --border already flip to near-white/dark-gray in this block above,
+       so reusing them (rather than the old accent-blue highlight) keeps
+       both themes consistent instead of only fixing light mode. */
+    --tabbar-bg: rgba(28, 28, 30, 0.78);
     --tabbar-icon: #a3adba;
-    --tabbar-active-bg: rgba(109, 141, 255, 0.22);
-    --tabbar-active-icon: #6d8dff;
+    --tabbar-active-bg: transparent;
+    --tabbar-active-icon: var(--text);
+    --tabbar-active-border: var(--border);
+    --tabbar-press-bg: rgba(255, 255, 255, .1);
   }
 }
 
@@ -194,8 +207,23 @@ a:hover { text-decoration: underline; }
   font-family: inherit;
 }
 .bottom-tabbar a svg { display: block; }
-.bottom-tabbar a.active { color: var(--tabbar-active-icon); background: var(--tabbar-active-bg); }
-.bottom-tabbar a:active, .bottom-tabbar button:active { background: var(--tabbar-active-bg); }
+/* Selected tab: a solid --text-colored icon (filled, not just outlined —
+   the stroke paths already draw a clean outline on their own, adding fill
+   on top is what reads as "filled in" for a simple closed shape like the
+   person/phone icons) inside a --border-colored ring, no background tint —
+   see --tabbar-active-bg/-icon/-border above for why (was gold/blue). */
+.bottom-tabbar a.active {
+  color: var(--tabbar-active-icon);
+  background: var(--tabbar-active-bg);
+  border: 1.5px solid var(--tabbar-active-border);
+}
+.bottom-tabbar a.active svg { fill: currentColor; }
+/* Tap-press feedback (any tab, not just the selected one) is intentionally
+   its own separate token from --tabbar-active-bg above — that one went
+   transparent as part of removing the selected-tab color fill, and reusing
+   it here would have silently removed the "something happened" flash on
+   every tap along with it. */
+.bottom-tabbar a:active, .bottom-tabbar button:active { background: var(--tabbar-press-bg); }
 .role-badge {
   font-size: 11px;
   text-transform: uppercase;
