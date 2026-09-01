@@ -72,11 +72,16 @@
   /* Mobile bottom tab bar (see .bottom-tabbar below) — a floating pill whose
      colors need their own theme-aware variables since they're deliberately
      NOT the same as --surface/--border (it floats over the page content
-     rather than sitting flush with it). */
-  --tabbar-bg: rgba(107, 114, 128, 0.85);
-  --tabbar-icon: rgba(255, 255, 255, .8);
-  --tabbar-active-bg: rgba(255, 255, 255, .18);
-  --tabbar-active-icon: #fff;
+     rather than sitting flush with it). White in light mode (its own
+     box-shadow below is what separates it from the equally-white page
+     behind it, same as any floating white toolbar) — --tabbar-icon/-active-
+     icon reuse --text-muted/--accent (the exact same "active nav link"
+     blue as .topnav-bar's own a.active on desktop) since white icons on a
+     gray pill (the old values) would be invisible against white. */
+  --tabbar-bg: rgba(255, 255, 255, .92);
+  --tabbar-icon: var(--text-muted);
+  --tabbar-active-bg: var(--gold-soft);
+  --tabbar-active-icon: var(--accent);
 }
 
 /* Full dark-mode support: every tab's background and every popup/modal
