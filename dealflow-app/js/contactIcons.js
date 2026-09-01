@@ -39,18 +39,34 @@ export const CONTACT_ICONS = {
 // equivalent on any platform, so those are unchanged.
 // ---------------------------------------------------------------------------
 let ownEmail = null;
-let ownEmailIsGmail = false;
+// Three states, not a boolean — null means the user has never touched the
+// "My email is Gmail" toggle (auto-detect from the address applies, see
+// isGmailAddress below); true/false is their own explicit override once
+// they have, and wins either direction. Confirmed as a real bug: coercing
+// this to a plain boolean (via !!flag) made "explicitly off" indistinguishable
+// from "never set", so a user with a genuine gmail.com/googlemail.com
+// address had no way to turn OFF the Gmail-compose routing at all — the
+// auto-detect regex kept firing regardless of the toggle, since the old
+// isGmailAddress() only ever OR'd the flag in (could force Gmail on for a
+// non-Gmail-looking address, but could never force it off for one that
+// genuinely is Gmail-looking).
+let ownEmailIsGmail = null;
 
 export function setOwnEmail(email) {
   ownEmail = email || null;
 }
 
 export function setOwnEmailIsGmail(flag) {
-  ownEmailIsGmail = !!flag;
+  ownEmailIsGmail = flag === true || flag === false ? flag : null;
 }
 
+// Explicit override (true or false) always wins over the address itself;
+// only when the user has never set the toggle (null) does this fall back
+// to guessing from the address.
 function isGmailAddress(email) {
-  return ownEmailIsGmail || /@(gmail\.com|googlemail\.com)$/i.test(email || "");
+  if (ownEmailIsGmail === true) return true;
+  if (ownEmailIsGmail === false) return false;
+  return /@(gmail\.com|googlemail\.com)$/i.test(email || "");
 }
 
 // Builds the href for the "Email" instant-contact icon. Plain `mailto:` for
