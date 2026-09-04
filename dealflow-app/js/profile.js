@@ -2094,7 +2094,7 @@ function wireWeeklySurvey() {
 // profile's own role); the other two are visible to every role.
 // ---------------------------------------------------------------------------
 const APP_LINKS = [
-  { key: "share_app", label: "Share app", url: "https://drive.google.com/file/d/10qawN0VVOel8dwf1zm0EXYEqTSKAHzOG/view?usp=sharing" },
+  { key: "share_app", label: "Share app", url: "https://drive.google.com/file/d/1M6B0m5K-OWsCGWhr-cx1RPZi-QdBQI_N/view?usp=share_link" },
   { key: "outreach_training", label: "Outreach training", url: "https://drive.google.com/drive/folders/19dHkISovDPv-i0IRUswl5hO-qrv8ZBM3?usp=drive_link" },
   {
     key: "leadership_training",
