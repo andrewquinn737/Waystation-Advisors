@@ -658,7 +658,7 @@ function buildGroupDefs() {
 
 async function loadTeams() {
   const [{ data: profiles, error: profErr }, { data: teamsData, error: teamsErr }, { data: tempPwData }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name, role, phone, email, team_id, avatar_url").order("full_name", { ascending: true }),
+    supabase.from("profiles").select("id, full_name, role, phone, email, team_id, avatar_url, calendly_link").order("full_name", { ascending: true }),
     supabase.from("teams").select("*").order("sort_order", { ascending: true }),
     // Non-admins are simply denied by RLS here and get back an empty array
     // (or an error we can safely ignore) rather than blocking the rest of
@@ -977,11 +977,19 @@ function toggleMemberDetail(card, member) {
   }
   const iconsSlot = card.querySelector(".contact-actions");
   if (iconsSlot) iconsSlot.remove();
+  // Calendly link only for a team lead or the main admin (see mainAdminId
+  // above) — the only two roles an intro call can actually route to (same
+  // gate already used for the signed-in user's own profile header, see
+  // showsCalendly above) — so interns can see the schedule they'd actually
+  // be booking into, without cluttering every other member's card with an
+  // empty row.
+  const showsCalendly = member.role === "team_lead" || member.id === mainAdminId;
   wrap.insertAdjacentHTML(
     "beforeend",
     `<div class="team-member-detail">
       ${memberDetailRow("Phone number", member.phone, "phone")}
       ${memberDetailRow("Email", member.email, "email")}
+      ${showsCalendly ? memberDetailRow("Calendly", member.calendly_link, "calendly") : ""}
     </div>`
   );
   wireTapCopy(wrap);
@@ -1011,8 +1019,18 @@ function wireTapCopy(container) {
   });
 }
 
+// `kind` "phone"/"email" get the usual instant-contact icons (see
+// contactActionIcons); "calendly" isn't a contact method — it gets a single
+// open-in-a-new-tab link instead, reusing the same "open" icon already used
+// for each row in the Links popup (see LINK_ACTION_ICONS below) rather than
+// inventing a new one just for this.
 function memberDetailRow(label, value, kind) {
   const v = value ? String(value) : "";
+  const actionHTML = !v
+    ? ""
+    : kind === "calendly"
+    ? `<div class="contact-actions"><a class="contact-action-btn" href="${escapeHtml(v)}" target="_blank" rel="noopener" title="Open Calendly">${LINK_ACTION_ICONS.open}</a></div>`
+    : contactActionIcons(kind === "phone" ? { phone: v } : { email: v });
   return `
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
@@ -1021,7 +1039,7 @@ function memberDetailRow(label, value, kind) {
           <div class="rf-value ${v ? "copyable" : "empty"}" ${v ? `data-copy="${escapeHtml(v)}"` : ""}>${v ? escapeHtml(v) : "Not provided"}</div>
           <span class="copy-toast hidden">Copied</span>
         </div>
-        ${v ? contactActionIcons(kind === "phone" ? { phone: v } : { email: v }) : ""}
+        ${actionHTML}
       </div>
     </div>`;
 }
