@@ -1031,10 +1031,17 @@ function memberDetailRow(label, value, kind) {
     : kind === "calendly"
     ? `<div class="contact-actions"><a class="contact-action-btn" href="${escapeHtml(v)}" target="_blank" rel="noopener" title="Open Calendly">${LINK_ACTION_ICONS.open}</a></div>`
     : contactActionIcons(kind === "phone" ? { phone: v } : { email: v });
+  // .rf-value-row's shared align-items:center (see css/style.css) is fine
+  // for phone/email, which never wrap — a Calendly URL is long enough that
+  // it regularly does, which left the open-icon vertically centered against
+  // the whole wrapped block instead of level with the value's first line.
+  // Scoped to just this row (not the shared class, which every other
+  // readonly-field's phone/email row in the app also uses) via flex-start.
+  const outerRowStyle = kind === "calendly" ? ' style="align-items:flex-start;"' : "";
   return `
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
-      <div class="rf-value-row">
+      <div class="rf-value-row"${outerRowStyle}>
         <div class="rf-value-row" style="gap:8px;">
           <div class="rf-value ${v ? "copyable" : "empty"}" ${v ? `data-copy="${escapeHtml(v)}"` : ""}>${v ? escapeHtml(v) : "Not provided"}</div>
           <span class="copy-toast hidden">Copied</span>
