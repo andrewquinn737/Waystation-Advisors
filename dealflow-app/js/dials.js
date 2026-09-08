@@ -209,6 +209,7 @@ const els = {
   newListModal: document.getElementById("newListModal"),
   newListError: document.getElementById("newListError"),
   newListNameInput: document.getElementById("newListNameInput"),
+  newListBuyerRow: document.getElementById("newListBuyerRow"),
   newListBuyerSelect: document.getElementById("newListBuyerSelect"),
   newListCreateBtn: document.getElementById("newListCreateBtn"),
   newListCancelBtn: document.getElementById("newListCancelBtn"),
@@ -229,6 +230,7 @@ const els = {
   importDialsFileInput: document.getElementById("importDialsFileInput"),
   importDialsChooseBtn: document.getElementById("importDialsChooseBtn"),
   importDialsFileName: document.getElementById("importDialsFileName"),
+  importDialsBuyerRow: document.getElementById("importDialsBuyerRow"),
   importDialsBuyerSelect: document.getElementById("importDialsBuyerSelect"),
   importDialsImportBtn: document.getElementById("importDialsImportBtn"),
   importDialsCancelBtn: document.getElementById("importDialsCancelBtn"),
@@ -284,7 +286,16 @@ const els = {
 // scoping to the target-account list it shows).
 if (isAdmin || isTeamLead) els.menuImportBtn.classList.remove("hidden");
 if (isAdmin || isTeamLead) els.dialTabTransferBtn.classList.remove("hidden");
-if (isAdmin || isTeamLead) els.dialTabClientBtn.classList.remove("hidden");
+// Unlike Transfer above (which reassigns account ownership — applies to any
+// tab type), "Client" reassigns which buyer a tab is attached to, a
+// seller-tab-only concept (see #newListBuyerRow's comment in dials.html) —
+// so this also depends on currentType, not just role, and needs
+// re-evaluating whenever the Sellers/Buyers toggle flips (see
+// wireDealSideToggle's callback further down), not just once at load.
+function updateDialTabClientBtnVisibility() {
+  els.dialTabClientBtn.classList.toggle("hidden", !(isAdmin || isTeamLead) || currentType !== "seller");
+}
+updateDialTabClientBtnVisibility();
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
 // Manual "+ new tab" creation — same admin/team-lead-only scope as CSV
 // import above (interns can't create tabs at all; enforced server-side too,
@@ -1553,7 +1564,12 @@ els.addTabBtn.addEventListener("click", () => {
   els.newListNameInput.value = "";
   els.newListModal.classList.remove("hidden");
   els.newListNameInput.focus();
-  populateBuyerSelect(els.newListBuyerSelect);
+  // Buyer attachment is a seller-tab-only concept — see #newListBuyerRow's
+  // own comment in dials.html — so a buyer-side tab never even shows the
+  // picker, let alone populates it.
+  const isBuyerTab = currentType === "buyer";
+  els.newListBuyerRow.classList.toggle("hidden", isBuyerTab);
+  if (!isBuyerTab) populateBuyerSelect(els.newListBuyerSelect);
 });
 
 els.newListCancelBtn.addEventListener("click", () => els.newListModal.classList.add("hidden"));
@@ -1568,7 +1584,17 @@ async function createNewList() {
   const sortOrder = filteredLists().length;
   const { data, error } = await supabase
     .from("dial_lists")
-    .insert({ name, dial_type: currentType, status: currentStatus, sort_order: sortOrder, buyer_id: els.newListBuyerSelect.value || null })
+    .insert({
+      name,
+      dial_type: currentType,
+      status: currentStatus,
+      sort_order: sortOrder,
+      // The picker doesn't exist for a buyer-side tab at all (hidden, see
+      // els.addTabBtn's click handler) — reading its value regardless would
+      // just be whatever a PRIOR seller-tab creation left selected in the
+      // still-live DOM element, not a real choice made for this tab.
+      buyer_id: currentType === "seller" ? els.newListBuyerSelect.value || null : null,
+    })
     .select()
     .single();
   if (error) {
@@ -1642,6 +1668,7 @@ if (isAdmin || isTeamLead) {
   els.dealSideToggleBtn.classList.remove("hidden");
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
     currentType = getDealSide();
+    updateDialTabClientBtnVisibility();
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");
     // Force renderTabs() to pick a fresh default tab for the new side
@@ -1674,7 +1701,11 @@ function openImportDialsModal() {
   els.importDialsFileInput.value = "";
   selectedImportFiles = [];
   els.importDialsModal.classList.remove("hidden");
-  populateBuyerSelect(els.importDialsBuyerSelect);
+  // Same seller-tab-only buyer attachment as els.addTabBtn's click handler
+  // above.
+  const isBuyerTab = currentType === "buyer";
+  els.importDialsBuyerRow.classList.toggle("hidden", isBuyerTab);
+  if (!isBuyerTab) populateBuyerSelect(els.importDialsBuyerSelect);
 }
 
 els.menuImportBtn.addEventListener("click", () => {
@@ -1759,7 +1790,14 @@ els.importDialsImportBtn.addEventListener("click", async () => {
       const tabName = file.name.replace(/\.csv$/i, "").trim() || "Imported";
       const { data: newList, error: listErr } = await supabase
         .from("dial_lists")
-        .insert({ name: tabName, dial_type: currentType, status: "current", sort_order: sortOrder, buyer_id: els.importDialsBuyerSelect.value || null })
+        .insert({
+          name: tabName,
+          dial_type: currentType,
+          status: "current",
+          sort_order: sortOrder,
+          // Same reasoning as createNewList's own buyer_id — see there.
+          buyer_id: currentType === "seller" ? els.importDialsBuyerSelect.value || null : null,
+        })
         .select()
         .single();
       if (listErr) throw listErr;

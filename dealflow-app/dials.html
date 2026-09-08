@@ -422,17 +422,24 @@
   </div>
 
   <!-- New-list dialog (in-app, replacing window.prompt). Buyer is required
-       (see js/dials.js loadContractSignedBuyers()) — every seller-side tab
-       is sourced on behalf of a specific buyer with a signed contract, or
-       explicitly "Not assigned to buyer". -->
+       on a SELLER-side tab (see js/dials.js loadContractSignedBuyers()) —
+       every seller-side tab is sourced on behalf of a specific buyer with a
+       signed contract, or explicitly "Not assigned to buyer". Buyer-side
+       tabs have no such attachment at all — that's a seller-tab-only
+       concept (which buyer this batch of seller prospects is being sourced
+       for), not something a tab of buyer prospects itself needs — so
+       #newListBuyerRow is hidden entirely (and never populated) when
+       creating one; see els.addTabBtn's click handler in js/dials.js. -->
   <div class="modal-backdrop hidden" id="newListModal">
     <div class="modal">
       <h2>New list</h2>
       <div id="newListError" class="error-msg hidden"></div>
       <label for="newListNameInput">List name</label>
       <input id="newListNameInput" placeholder="e.g. Q3 outreach" />
-      <label for="newListBuyerSelect">Buyer</label>
-      <select id="newListBuyerSelect"></select>
+      <div id="newListBuyerRow">
+        <label for="newListBuyerSelect">Buyer</label>
+        <select id="newListBuyerSelect"></select>
+      </div>
       <div class="form-actions">
         <button type="button" class="btn" id="newListCreateBtn">Create</button>
         <button type="button" class="btn secondary" id="newListCancelBtn">Cancel</button>
@@ -444,8 +451,9 @@
        Each CSV's filename (minus extension) becomes the name of its own new
        tab under Current — up to 10 files at once; one dial is created per
        row, with columns matched by header name to the closest dial field.
-       Buyer is required (applied to every tab created this way), same as
-       New list above. #importDialsDropzone additionally accepts a native
+       Buyer is required for a seller-side import (same as New list above) —
+       hidden entirely for a buyer-side one, same as #newListBuyerRow.
+       #importDialsDropzone additionally accepts a native
        drag-and-drop of files from the Finder/desktop file system on top of
        the existing Choose-CSV button — see wireImportDropzone in
        js/dials.js; the drop hint text itself is desktop-only (see
@@ -463,8 +471,12 @@
         <div class="import-dials-drop-hint">or drag CSV files here</div>
       </div>
       <div id="importDialsFileName" class="help-text"></div>
-      <label for="importDialsBuyerSelect">Buyer</label>
-      <select id="importDialsBuyerSelect"></select>
+      <!-- Same seller-tab-only concept as #newListBuyerRow — hidden entirely
+           for a buyer-side import, see openImportDialsModal in js/dials.js. -->
+      <div id="importDialsBuyerRow">
+        <label for="importDialsBuyerSelect">Buyer</label>
+        <select id="importDialsBuyerSelect"></select>
+      </div>
       <div class="form-actions">
         <button type="button" class="btn" id="importDialsImportBtn" disabled>Import</button>
         <button type="button" class="btn secondary" id="importDialsCancelBtn">Cancel</button>
