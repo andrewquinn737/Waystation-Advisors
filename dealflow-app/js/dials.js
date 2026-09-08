@@ -2181,31 +2181,36 @@ function resolveEmailSubject(dial) {
   return resolvePersonalizedEmailSubject(profile, dial) || resolveAboutUsEmailSubject(profile, dial);
 }
 
-// Company name / Industry sector / Website are seller-only fields on a dial
-// (currentType — the active Sellers/Buyers toggle, see js/dealSide.js) — for
-// buyer dials, hiding these boxes entirely (view, edit form, and validation
-// below) means a client created from a buyer dial never picks up stray
-// company data that doesn't apply to buyers (see clientForm.js's buyer
-// branch, which has no company fields at all).
+// Company name / Industry sector / Website used to be seller-only boxes on
+// a dial (currentType — the active Sellers/Buyers toggle, see
+// js/dealSide.js) — buyer dials now show the exact same fields as seller
+// dials (a buyer can have its own company/firm name and industry worth
+// recording too), so buildDialViewHTML/buildDialEditHTML below no longer
+// branch on isBuyer at all. The one deliberate exception is company name's
+// REQUIRED-ness: still enforced for sellers, still optional for buyers —
+// see getMissingDialClientFields further down, which is unchanged.
+// createClientFromDial's own transfer-to-client step also still excludes
+// company_name/industry for buyer-sourced clients (clientForm.js's buyer
+// client form has no fields to show them in afterward) — that's a separate,
+// narrower scope than this dial-level change.
 function buildDialViewHTML(dial) {
-  const isBuyer = currentType === "buyer";
   return `
     ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolveEmailBody(dial), resolveEmailSubject(dial))}
     ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial), resolvePersonalizedTextingBody(profile, dial))}
     ${rfWebsite("LinkedIn", dial.linkedin)}
-    ${isBuyer ? "" : rfWebsite("Website", dial.website)}
-    ${isBuyer ? "" : rf("Industry sector", dial.industry)}
+    ${rfWebsite("Website", dial.website)}
+    ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
     ${buildCallNotesLiveHTML(dial)}
   `;
 }
 
 function buildDialEditHTML(dial) {
-  const isBuyer = currentType === "buyer";
   return `
     <label for="d_full_name">Full name</label>
     <input id="d_full_name" value="${escapeHtml(dial.full_name)}" />
-    ${isBuyer ? "" : `<label for="d_company_name">Company name</label><input id="d_company_name" value="${escapeHtml(dial.company_name)}" />`}
+    <label for="d_company_name">Company name</label>
+    <input id="d_company_name" value="${escapeHtml(dial.company_name)}" />
     <div class="form-row">
       <div><label for="d_city">City</label><input id="d_city" value="${escapeHtml(dial.city)}" /></div>
       <div>
@@ -2224,8 +2229,10 @@ function buildDialEditHTML(dial) {
     </div>
     <label for="d_linkedin">LinkedIn</label>
     <input id="d_linkedin" value="${escapeHtml(dial.linkedin)}" />
-    ${isBuyer ? "" : `<label for="d_website">Website</label><input id="d_website" value="${escapeHtml(dial.website)}" />`}
-    ${isBuyer ? "" : `<label for="d_industry">Industry sector</label><input id="d_industry" value="${escapeHtml(dial.industry)}" />`}
+    <label for="d_website">Website</label>
+    <input id="d_website" value="${escapeHtml(dial.website)}" />
+    <label for="d_industry">Industry sector</label>
+    <input id="d_industry" value="${escapeHtml(dial.industry)}" />
     <label for="d_summary">Summary</label>
     <textarea id="d_summary">${escapeHtml(dial.summary || "")}</textarea>
   `;
@@ -2236,7 +2243,6 @@ function collectDialFormData() {
   // directly in display mode (autosaves on blur, see wireCallNotesAutosave)
   // and is not part of the edit form, so leaving it out of this object means
   // saving other fields never touches/overwrites it.
-  const isBuyer = currentType === "buyer";
   const data = {
     full_name: document.getElementById("d_full_name").value.trim() || null,
     city: document.getElementById("d_city").value.trim() || null,
@@ -2246,12 +2252,12 @@ function collectDialFormData() {
     company_phone: document.getElementById("d_company_phone").value.trim() || null,
     linkedin: document.getElementById("d_linkedin").value.trim() || null,
     summary: document.getElementById("d_summary").value.trim() || null,
-    // Company name / Industry / Website boxes don't exist in the edit form
-    // at all for buyer dials (see buildDialEditHTML) — explicitly null them
-    // out rather than reading nonexistent DOM elements.
-    industry: isBuyer ? null : document.getElementById("d_industry").value.trim() || null,
-    company_name: isBuyer ? null : document.getElementById("d_company_name").value.trim() || null,
-    website: isBuyer ? null : document.getElementById("d_website").value.trim() || null,
+    // Company name / Industry / Website boxes are now on every dial's edit
+    // form regardless of Sellers/Buyers (see buildDialEditHTML above), so
+    // these just read straight off the DOM the same as every other field.
+    industry: document.getElementById("d_industry").value.trim() || null,
+    company_name: document.getElementById("d_company_name").value.trim() || null,
+    website: document.getElementById("d_website").value.trim() || null,
   };
   return data;
 }
@@ -2676,9 +2682,10 @@ els.dialModalBackdrop.addEventListener("touchend", (e) => {
 
 // Only checks fields that actually exist on a dial — "looking_for" (from the
 // full client form) is intentionally not required here, since a dial has no
-// such field. Company name / Industry sector are seller-only boxes (see
-// buildDialEditHTML) — never required for a buyer dial, since they're never
-// even shown/collected for one.
+// such field. Company name / Industry sector are shown on every dial's edit
+// form now (see buildDialEditHTML), but deliberately stay required for
+// sellers only, optional for buyers — a buyer's own company name is nice to
+// have on file, not something to block scheduling an intro call over.
 function getMissingDialClientFields(dial) {
   const missing = [];
   const labels = [];
@@ -2756,10 +2763,12 @@ async function createClientFromDial(dial) {
   // client_type must match whichever side (Sellers/Buyers toggle) this
   // dial actually belongs to — defaultClient()'s own default is "seller",
   // which used to apply even from a buyer dial since nothing here ever
-  // overrode it. Company name / Industry never transfer for a buyer dial
-  // since they're never collected on one in the first place (see
-  // buildDialEditHTML/getMissingDialClientFields above) — clean, since
-  // clientForm.js's buyer branch has no company fields at all.
+  // overrode it. Company name / Industry still don't transfer for a buyer
+  // dial even though both are now collected on one (see buildDialEditHTML)
+  // — deliberately scoped narrower than that: clientForm.js's buyer branch
+  // has no fields to show them in afterward, so transferring them here
+  // would just be writing data nowhere in the app could ever display or
+  // edit again post-conversion.
   const isBuyer = currentType === "buyer";
   const data = defaultClient(profile, {
     client_type: currentType,
