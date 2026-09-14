@@ -75,3 +75,28 @@ export async function withNetworkRetry(fn) {
   await new Promise((resolve) => setTimeout(resolve, 1000));
   return fn();
 }
+
+// A different, more severe version of the same PWA-resume class of bug
+// withNetworkRetry guards against above: that one only helps once a call
+// actually SETTLES with a network-shaped error. Real, confirmed symptom on
+// iOS: a request made right as the app resumes from being backgrounded can
+// instead just hang forever — neither resolving nor rejecting — because the
+// OS suspended the underlying network session while backgrounded and never
+// cleanly errors it out on resume. Nothing downstream of an unsettled
+// `await` ever runs, which is exactly why force-quitting and reopening (the
+// only thing that tears down and rebuilds that stuck session) was the only
+// fix — the app wasn't crashed or stuck rendering, it was stuck waiting on
+// a promise that was never going to settle on its own.
+//
+// Races `promise` against a timeout and rejects with an Error whose message
+// isNetworkError() recognizes ("Load failed") — not a new phrase, the exact
+// one it already checks for — so a caller that already has network-error
+// handling (requireSession()'s cached-profile fallback, for one) treats a
+// timeout exactly like a dropped connection with no extra plumbing, which
+// from the user's perspective it is.
+export function withTimeout(promise, ms = 10000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Load failed (timed out)")), ms)),
+  ]);
+}

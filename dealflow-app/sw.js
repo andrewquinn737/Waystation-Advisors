@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v10";
+const CACHE = "waystation-shell-v11";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/finance.html", "/css/style.css",
@@ -43,8 +43,23 @@ self.addEventListener("fetch", (event) => {
   // network-first. That's exactly what let real users keep running an old
   // cached copy of dials.js for hours after a fix had already shipped and
   // was confirmed live server-side — this closes that gap for good.
+  //
+  // The 8s timeout race guards against a different, more severe failure
+  // mode than a normal offline/error response (already handled by .catch
+  // below): a request made right as an iOS PWA resumes from being
+  // backgrounded can hang forever instead of erroring out, because the OS
+  // suspended the underlying network session while backgrounded and never
+  // cleanly fails it on resume. Without a timeout, that leaves this
+  // fetch() — and every page load it's blocking — stuck waiting on a
+  // promise that was never going to settle, which matches real reports of
+  // the app "not loading" until force-quit and reopened (the only thing
+  // that tears down and rebuilds the stuck connection). A timeout makes
+  // this fall through to the exact same cache fallback a real network
+  // failure already takes below, instead of hanging indefinitely.
+  const networkFetch = fetch(req, { cache: "no-store" });
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000));
   event.respondWith(
-    fetch(req, { cache: "no-store" })
+    Promise.race([networkFetch, timeout])
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((cache) => cache.put(req, copy));

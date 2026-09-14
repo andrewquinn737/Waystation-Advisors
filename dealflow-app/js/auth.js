@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient.js";
 import { setOwnEmail, setOwnEmailIsGmail } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
-import { cacheGet, cacheSet, isNetworkError } from "./offlineCache.js";
+import { cacheGet, cacheSet, isNetworkError, withTimeout } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
 
 function hidePageLoadingOverlay() {
@@ -17,19 +17,50 @@ function hidePageLoadingOverlay() {
  * profile.role, not whole-page access.)
  */
 export async function requireSession() {
-  const { data: { session } } = await supabase.auth.getSession();
+  // Both awaits below are wrapped in withTimeout — see its own comment in
+  // offlineCache.js. Without this, a request that hangs (rather than
+  // failing outright) right as the app resumes from being backgrounded left
+  // requireSession() never returning at all: no error, no redirect, just
+  // the loading skeleton forever, matching real reports of the app "not
+  // loading" until force-quit and reopened (the only thing that tears down
+  // the stuck connection). getSession() gets one retry before giving up —
+  // same one-retry philosophy as withNetworkRetry elsewhere in this file —
+  // since a timeout here is far more likely to be this exact glitch than an
+  // actually-expired session.
+  let session;
+  try {
+    ({ data: { session } } = await withTimeout(supabase.auth.getSession()));
+  } catch {
+    try {
+      ({ data: { session } } = await withTimeout(supabase.auth.getSession()));
+    } catch {
+      window.location.href = "login.html";
+      return null;
+    }
+  }
   if (!session) {
     window.location.href = "login.html";
     return null;
   }
 
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select(
-      "id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, email_is_gmail, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
-    )
-    .eq("id", session.user.id)
-    .single();
+  let profile, error;
+  try {
+    ({ data: profile, error } = await withTimeout(
+      supabase
+        .from("profiles")
+        .select(
+          "id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, email_is_gmail, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
+        )
+        .eq("id", session.user.id)
+        .single()
+    ));
+  } catch (timeoutErr) {
+    // Falls straight into the exact same cached-profile fallback a real
+    // network error already takes below — isNetworkError() recognizes
+    // withTimeout's own error message.
+    profile = null;
+    error = timeoutErr;
+  }
 
   // A plain network hiccup fetching the profile used to be treated exactly
   // like "not logged in" and forced a redirect straight to login.html, even
