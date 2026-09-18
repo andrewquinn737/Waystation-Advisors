@@ -183,7 +183,10 @@ function phoneNumberRow(number, kind, extra = "", personalizedTextingBody) {
 // personalizedEmailBody/-Subject on rfContact above.
 export function buildPhoneNumbersHTML(entity, extraFor, personalizedTextingBody) {
   const rows = [];
-  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, "Mobile", extraFor ? extraFor("mobile") : "", personalizedTextingBody));
+  // mobile_phone_unsure (dials only — see rowsToDials in js/dials.js): a
+  // CSV listed the same number as both mobile and company, so it's saved
+  // once here but not confirmed as either. Clients never have the flag.
+  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, entity.mobile_phone_unsure ? "Unsure" : "Mobile", extraFor ? extraFor("mobile") : "", personalizedTextingBody));
   if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company", extraFor ? extraFor("company") : "", personalizedTextingBody));
   return `
     <div class="readonly-field">

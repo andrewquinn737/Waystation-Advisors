@@ -584,6 +584,37 @@ function buildHeaderFieldMap(headerRow) {
   return map;
 }
 
+// The edit form's State field is a dropdown of full state names (STATES in
+// clientForm.js), so a stored value that isn't exactly one of those shows as
+// blank there — which is what happened to most imported dials, since CSVs
+// almost always carry the 2-letter postal abbreviation ("TX"), not "Texas".
+const STATE_ABBREVIATIONS = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado",
+  CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho",
+  IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana",
+  ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota",
+  MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada",
+  NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
+  ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
+  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas",
+  UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia",
+  WI: "Wisconsin", WY: "Wyoming",
+};
+
+// Converts a CSV's State cell to the exact dropdown value: a 2-letter
+// abbreviation in any casing ("TX", "tx"), or a full name in any casing
+// ("texas"), both come out as the canonical STATES entry. Anything else
+// (a foreign province, "DC", free text) is left exactly as written rather
+// than guessed at, so no data is lost.
+function normalizeStateValue(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return v;
+  const byAbbreviation = STATE_ABBREVIATIONS[v.toUpperCase()];
+  if (byAbbreviation) return byAbbreviation;
+  const byName = STATES.find((s) => s.toLowerCase() === v.toLowerCase());
+  return byName || v;
+}
+
 // Turns parsed CSV rows (including the header row at index 0) into an array
 // of dials-table-ready insert objects for `listId`. Blank rows (every cell
 // empty) are skipped.
@@ -649,6 +680,22 @@ function rowsToDials(rows, listId) {
       }
       delete d.first_name;
       delete d.last_name;
+      if (d.state) d.state = normalizeStateValue(d.state);
+      // A sheet that lists the same number under both mobile and company
+      // can't tell us which one it really is, so it's saved once, under
+      // mobile only, and flagged so the detail view labels it "(Unsure)"
+      // instead of "(Mobile)" — see mobile_phone_unsure and
+      // buildPhoneNumbersHTML. Compared by digits only, so "(801) 555-1234"
+      // and "801-555-1234" count as the same number. Set explicitly on
+      // EVERY row (true or false), never left off: supabase-js's bulk
+      // insert() sends one shared column list for the whole batch, so a row
+      // missing the key would go in as an explicit NULL and trip the
+      // column's NOT NULL constraint (same reason contact_status is always
+      // set above).
+      const mobileDigits = (d.mobile_phone || "").replace(/\D/g, "");
+      const companyDigits = (d.company_phone || "").replace(/\D/g, "");
+      d.mobile_phone_unsure = Boolean(mobileDigits) && mobileDigits === companyDigits;
+      if (d.mobile_phone_unsure) delete d.company_phone;
       return d;
     });
 }
@@ -2466,6 +2513,10 @@ async function handleCreateDialSave() {
 
 async function handleEditDialSave() {
   const data = collectDialFormData();
+  // An imported number flagged "(Unsure)" (see rowsToDials) was never
+  // confirmed as a mobile — changing the mobile number here is the user
+  // stating what it is, so it goes back to the normal "(Mobile)" label.
+  if ((data.mobile_phone || null) !== (currentDial.mobile_phone || null)) data.mobile_phone_unsure = false;
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
