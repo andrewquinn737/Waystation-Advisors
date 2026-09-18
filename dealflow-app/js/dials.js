@@ -985,7 +985,10 @@ function wireCallNotesAutosave() {
 // ---------------------------------------------------------------------------
 
 async function loadLists() {
-  const { data, error } = await supabase.from("dial_lists").select("*").order("sort_order", { ascending: true });
+  // Admins can also read trashed tabs (see the "Deleted tabs" popup on the
+  // Profile page), so this filters them out explicitly rather than relying
+  // on RLS alone.
+  const { data, error } = await supabase.from("dial_lists").select("*").is("deleted_at", null).order("sort_order", { ascending: true });
   if (error) {
     if (!isNetworkError(error)) return showError(els.errorBox, error);
     const cached = cacheGet("dial_lists");
@@ -1135,9 +1138,10 @@ els.dialTabDeleteBtn.addEventListener("click", () => {
     "confirmDeleteTabYesBtn",
     "confirmDeleteTabNoBtn",
     async () => {
-      // dials.list_id is "on delete cascade" (see supabase/schema.sql), so
-      // deleting the list also deletes every dial inside it.
-      const { error } = await supabase.from("dial_lists").delete().eq("id", tabId);
+      // Soft delete: the tab and its dials move to the admin-only "Deleted
+      // tabs" popup on the Profile page (see js/deletedTabs.js), where they
+      // can be restored or permanently deleted.
+      const { error } = await supabase.rpc("trash_dial_list", { p_list_id: tabId });
       if (error) return showError(els.errorBox, error);
       archiveMenuTabId = null;
       currentListId = null;

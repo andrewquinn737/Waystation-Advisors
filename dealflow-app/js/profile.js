@@ -10,6 +10,7 @@ import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotic
 import { getMainAdmin } from "./mainAdmin.js";
 import { wireReportsPopup } from "./reports.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
+import { wireDeletedTabsPopup } from "./deletedTabs.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -2026,7 +2027,9 @@ async function openWeeklySurveyModal() {
     // popup can't use this same live-query approach for past periods.
     supabase
       .from("dials")
-      .select("id", { count: "exact", head: true })
+      // inner-joined only to exclude dials sitting in a trashed tab
+      .select("id, dial_lists!inner(deleted_at)", { count: "exact", head: true })
+      .is("dial_lists.deleted_at", null)
       .eq("created_by", profile.id)
       .in("contact_status", ["not_interested", "callback_interested", "intro_call_scheduled"])
       .gte("called_today_date", dateStart)
@@ -2320,6 +2323,15 @@ wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profil
 // full settings UI so the preference is editable from anywhere, and "My
 // email is Gmail" (which applies app-wide) works correctly here too.
 wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu });
+
+// "Deleted tabs" (soft-deleted dial tabs — restore / reassign / permanently
+// delete) is admin-only; its menu button starts hidden in profile.html. See
+// js/deletedTabs.js.
+if (isAdminSync) {
+  const menuDeletedTabsBtn = document.getElementById("menuDeletedTabsBtn");
+  menuDeletedTabsBtn.classList.remove("hidden");
+  wireDeletedTabsPopup({ menuBtn: menuDeletedTabsBtn, closePageHeaderMenu, escapeHtml });
+}
 
 // Submit weekly survey (intern) vs. View Reports (team lead/admin) — only
 // one of the two ever shows, based on role. Reports popup wiring lives in

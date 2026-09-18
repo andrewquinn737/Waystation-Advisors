@@ -80,6 +80,13 @@
         <span class="menu-item-label">Links</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></span>
       </button>
+      <!-- Admin-only (unhidden by JS): opens deletedTabsModal below — every
+           dial tab that's been deleted, restorable or permanently deletable.
+           See js/deletedTabs.js. -->
+      <button type="button" class="page-header-menu-item hidden" id="menuDeletedTabsBtn">
+        <span class="menu-item-label">Deleted tabs</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuCallsViewBtn" data-view="outreach">
         <span class="menu-item-label">Outreach calls</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
@@ -506,6 +513,62 @@
   <div class="teams-add-menu hidden" id="sendFallbackMenu">
     <button type="button" class="page-header-menu-item" id="sendFallbackTextBtn">Text message</button>
     <button type="button" class="page-header-menu-item" id="sendFallbackEmailBtn">Email</button>
+  </div>
+
+  <!-- "Deleted tabs" popup (admin-only — see js/deletedTabs.js). List view: one
+       row per deleted tab (buyer attachment + last owner under its title),
+       with a Select mode for Restore / Reassign / permanent Delete. Tapping a
+       row swaps to the detail view: every dial in that tab, plus Back. -->
+  <div class="fullscreen-modal hidden" id="deletedTabsModal">
+    <div class="fs-header">
+      <div class="fs-header-main" id="deletedTabsHeaderMain">
+        <h2 id="deletedTabsTitle">Deleted tabs</h2>
+        <div class="dial-modal-subtitle hidden" id="deletedTabsSubtitle"></div>
+      </div>
+      <div class="fs-header-actions">
+        <button type="button" class="select-mode-btn deleted-tabs-header-btn" id="deletedTabsBackBtn" hidden>Back</button>
+        <button type="button" class="select-mode-btn deleted-tabs-header-btn" id="deletedTabsSelectBtn">Select</button>
+        <button class="fs-close" id="deletedTabsCloseBtn">✕</button>
+      </div>
+    </div>
+    <div class="fs-body">
+      <div id="deletedTabsErrorBox" class="error-msg hidden"></div>
+      <div class="select-mode-bar deleted-tabs-select-bar hidden" id="deletedTabsSelectBar">
+        <button type="button" class="select-mode-btn" id="deletedTabsExitSelectBtn">Cancel</button>
+        <button type="button" class="select-mode-btn" id="deletedTabsSelectAllBtn">Select all</button>
+        <button type="button" class="select-mode-btn" id="deletedTabsRestoreBtn" disabled>Restore</button>
+        <button type="button" class="select-mode-btn" id="deletedTabsReassignBtn" disabled>Reassign</button>
+        <button type="button" class="select-mode-btn danger" id="deletedTabsPurgeBtn" disabled>Delete</button>
+      </div>
+      <div class="select-mode-hint hidden" id="deletedTabsSelectHint"></div>
+      <div id="deletedTabsWrap"></div>
+    </div>
+  </div>
+
+  <!-- Reassign: restores the selected tabs (and their dials) under a different account. -->
+  <div class="modal-backdrop hidden" id="deletedTabsReassignModal">
+    <div class="modal">
+      <h2>Reassign to account</h2>
+      <p class="help-text" id="deletedTabsReassignHelp"></p>
+      <label for="deletedTabsReassignSelect">Account</label>
+      <select id="deletedTabsReassignSelect"></select>
+      <div class="form-actions">
+        <button type="button" class="btn" id="deletedTabsReassignYesBtn">Restore</button>
+        <button type="button" class="btn secondary" id="deletedTabsReassignNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Permanent delete confirmation. -->
+  <div class="modal-backdrop hidden" id="deletedTabsPurgeModal">
+    <div class="modal">
+      <h2 id="deletedTabsPurgeTitle">Permanently delete?</h2>
+      <p class="help-text" id="deletedTabsPurgeHelp"></p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="deletedTabsPurgeYesBtn">Delete forever</button>
+        <button type="button" class="btn secondary" id="deletedTabsPurgeNoBtn">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <div class="fullscreen-modal hidden" id="teamsModal">

@@ -1691,3 +1691,23 @@ html.is-mobile-device .team-member-card { touch-action: none; }
   html.is-mobile-device .accordion-body { padding: 12px; }
 }
 
+
+/* ---- Deleted tabs popup (Profile, admin-only — see js/deletedTabs.js) ----
+   Rows reuse .mobile-card's look on both mobile and desktop (there's no
+   separate table view here, same as the Teams popup). */
+.deleted-tabs-header-btn { flex: none; padding: 7px 14px; }
+.deleted-tabs-header-btn[hidden] { display: none; }
+/* Five buttons don't fit one row on a phone, so two tidy rows instead of a
+   lone wrapped button: Cancel + Select all on top, the three actions below. */
+.deleted-tabs-select-bar { flex-wrap: wrap; }
+.deleted-tabs-select-bar .select-mode-btn { flex: 1 1 calc(33.333% - 4px); }
+#deletedTabsExitSelectBtn, #deletedTabsSelectAllBtn { flex-basis: calc(50% - 3px); }
+.select-mode-btn:disabled { opacity: .45; cursor: default; }
+@media (hover: hover) { .select-mode-btn:disabled:hover { background: var(--surface); } }
+.deleted-tab-row { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .deleted-tab-row:hover { background: var(--bg); } }
+.deleted-tab-row .mc-main { flex: 1; }
+.deleted-tab-row .mc-sub.faint { font-size: 11.5px; opacity: .85; }
+/* Confirm/picker popups open on top of the fullscreen popup (same z-index
+   fix as the Reports popup's own child popups above). */
+#deletedTabsReassignModal, #deletedTabsPurgeModal { z-index: 200; }
