@@ -130,12 +130,14 @@ const SELLER_PROGRESS_STEPS = [
   { type: "due_diligence", label: "Due diligence" },
   { type: "close", label: "Close" },
 ];
-// Buyer order: a longer, 9-step process — Intro call, Negotiations, Contract
-// signed, Client approval, Client meeting, LOI, Secured financing, Due
-// diligence, Close.
+// Buyer order: a longer, 8-step process — Intro call, Contract signed,
+// Client approval, Client meeting, LOI, Secured financing, Due diligence,
+// Close. (Negotiations was removed as a step — see EVENT_TYPE_LABELS below
+// for why it's still a recognized event_type: existing logged Negotiations
+// events stay visible on the Timeline, just no longer a Progress-tab step
+// or a loggable option going forward.)
 const BUYER_PROGRESS_STEPS = [
   { type: "intro_call", label: "Intro call" },
-  { type: "negotiations", label: "Negotiations" },
   { type: "contract_signed", label: "Contract signed" },
   { type: "client_approval", label: "Client approval" },
   { type: "client_meeting", label: "Client meeting" },
@@ -157,6 +159,9 @@ function progressStepsFor(clientType) {
 // Timelines/Progress at once. Every other milestone (Intro call, NDA +
 // financials, Negotiations, Contract signed, Secured financing) only ever
 // happens on one side and is logged normally, no counterpart involved.
+// ("Negotiations" isn't in the current list on either side (removed as a
+// Progress-tab step) but is included here as it's still a valid, one-side
+// event_type on any pre-existing logged event.)
 const SHARED_EVENT_TYPES = new Set(["client_approval", "client_meeting", "loi", "due_diligence", "close"]);
 
 // "general_meeting" and "task" are Timeline-only — they're logged the same
@@ -171,6 +176,12 @@ const EVENT_TYPE_LABELS = {
   created: "Client created",
   general_meeting: "Meeting",
   task: "Task",
+  // Not a current step on either side's Progress-tab list (removed — see
+  // BUYER_PROGRESS_STEPS above) and no longer loggable via the Timeline's
+  // "+" menu, but kept here so any already-logged Negotiations event still
+  // shows a real label on the Timeline instead of falling back to the raw
+  // "negotiations" event_type string (see buildTimelineHTML's `|| e.event_type`).
+  negotiations: "Negotiations",
   ...Object.fromEntries(ALL_PROGRESS_STEPS.map((s) => [s.type, s.label])),
 };
 
@@ -226,14 +237,16 @@ const SELLER_CONTRACT_SUBTYPES = SELLER_PROGRESS_STEPS.filter((s) => s.type !== 
 }));
 // Negotiations and Client approval used to sit here — reclassified below as
 // Contract advancement instead, since that's what they actually are (they
-// were never real meetings, same as Contract signed/LOI/etc).
+// were never real meetings, same as Contract signed/LOI/etc). Negotiations
+// has since been removed as a step/loggable option entirely — see
+// BUYER_PROGRESS_STEPS above.
 const BUYER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
   { value: "intro_call", label: "Intro call" },
   { value: "client_meeting", label: "Client meeting" },
 ];
 const BUYER_CONTRACT_SUBTYPES = BUYER_PROGRESS_STEPS.filter((s) =>
-  ["negotiations", "contract_signed", "client_approval", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
+  ["contract_signed", "client_approval", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
 ).map((s) => ({ value: s.type, label: s.label }));
 function meetingSubtypesFor(clientType) {
   return clientType === "buyer" ? BUYER_MEETING_SUBTYPES : SELLER_MEETING_SUBTYPES;
