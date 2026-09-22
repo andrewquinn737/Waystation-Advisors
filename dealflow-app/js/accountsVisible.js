@@ -254,12 +254,26 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
       row.addEventListener("click", (e) => {
         e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
         const id = row.dataset.id;
-        // Narrowing down from "all" for the first time starts from the full
-        // set of accounts (everything stays visible except the one just
-        // unchecked), rather than jumping straight to "only this one".
-        if (s.visibleAccountIds === null) s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
-        if (s.visibleAccountIds.has(id)) s.visibleAccountIds.delete(id);
-        else s.visibleAccountIds.add(id);
+        // The first individual pick after "Select all" jumps straight to
+        // "only this account" instead of starting from the full set and
+        // excluding just the one clicked. The old behavior looked right in
+        // isolation but was backwards in practice: every row starts
+        // (correctly) shown as checked under "Select all", so a user's
+        // very first click on the ONE account they actually wanted to see
+        // — say, to check their individual numbers — un-checked and
+        // EXCLUDED that account instead, dropping it out of the sum
+        // (numbers went DOWN when "selecting" someone, and back UP when
+        // clicking again to "unselect" them, since that re-added them to
+        // the rest of the team). Once a selection already exists (not
+        // null), clicking still toggles membership normally — add if
+        // absent, remove if present — same as any ordinary checklist.
+        if (s.visibleAccountIds === null) {
+          s.visibleAccountIds = new Set([id]);
+        } else if (s.visibleAccountIds.has(id)) {
+          s.visibleAccountIds.delete(id);
+        } else {
+          s.visibleAccountIds.add(id);
+        }
         persist(storageKey, initKey);
         render();
         onChange();
@@ -274,9 +288,15 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
         e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
         const groupKey = groupBtn.dataset.group;
         const members = allAccounts.filter((a) => groupKeyFor(a) === groupKey);
-        if (s.visibleAccountIds === null) s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
-        const fullyVisible = members.every((a) => s.visibleAccountIds.has(a.id));
-        members.forEach((a) => (fullyVisible ? s.visibleAccountIds.delete(a.id) : s.visibleAccountIds.add(a.id)));
+        // Same fix as the individual-row handler above: the first group
+        // pick after "Select all" jumps straight to "only this group"
+        // instead of starting from everyone and excluding the group.
+        if (s.visibleAccountIds === null) {
+          s.visibleAccountIds = new Set(members.map((a) => a.id));
+        } else {
+          const fullyVisible = members.every((a) => s.visibleAccountIds.has(a.id));
+          members.forEach((a) => (fullyVisible ? s.visibleAccountIds.delete(a.id) : s.visibleAccountIds.add(a.id)));
+        }
         persist(storageKey, initKey);
         render();
         onChange();
