@@ -127,6 +127,7 @@ export function skeletonTopnavHtml() {
         <span class="skeleton-bar" style="width:46px; height:14px;"></span>
         <span class="skeleton-bar" style="width:46px; height:14px;"></span>
         <span class="skeleton-bar" style="width:46px; height:14px;"></span>
+        <span class="skeleton-bar" style="width:46px; height:14px;"></span>
       </div>
       <div class="who">
         <span class="skeleton-bar" style="width:90px; height:13px;"></span>
@@ -191,6 +192,17 @@ export function skeletonClientsPage() {
     ${skeletonPageHeaderHtml()}
     ${skeletonToolbarHtml()}
     ${skeletonListHtml({ rows: 6, columnWidths: ["55%", "60%", "45%", "40%"] })}
+  `;
+}
+
+// Messages' own shape: same page-header, no tabs/toolbar row — just straight
+// into the thread list (see .message-thread-row in css/style.css).
+export function skeletonMessagesPage() {
+  return `
+    ${skeletonPageHeaderHtml()}
+    <div style="margin-top:16px;">
+      ${skeletonListHtml({ rows: 7, columnWidths: ["70%", "85%", "40%"] })}
+    </div>
   `;
 }
 

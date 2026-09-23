@@ -1692,6 +1692,96 @@ html.is-mobile-device .team-member-card { touch-action: none; }
 }
 
 
+/* ---- Messages page (see js/messages.js) ---- */
+
+/* Compose FAB — bottom-right, same corner every native mail app's compose
+   button lives in. Sits above the mobile bottom tab bar (z-index higher
+   than .bottom-tabbar's) and is nudged up on mobile so it never overlaps it. */
+.compose-fab {
+  position: fixed; right: 20px; bottom: 24px; z-index: 60;
+  width: 52px; height: 52px; border-radius: 999px; border: none;
+  background: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+@media (hover: hover) { .compose-fab:hover { filter: brightness(1.06); } }
+/* .bottom-tabbar floats at bottom:14px with roughly a 56px pill height (see
+   its own rule above) — clearing that plus a small gap, same reasoning as
+   any other floating control stacked above it on mobile. */
+html.is-mobile-device .compose-fab { bottom: 84px; }
+
+.mailbox-option.active { background: var(--gold-soft); color: var(--accent); }
+
+/* Thread list row — .mobile-card's shell (used on every page's list for
+   this reason) plus a left accent bar when unread, same idea as an unread
+   bold row in any mail client. */
+.message-thread-row { cursor: pointer; align-items: flex-start; -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .message-thread-row:hover { background: var(--bg); } }
+.message-thread-row.unread { border-left: 3px solid var(--accent); }
+.message-unread-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 999px;
+  background: var(--accent); margin-right: 6px; vertical-align: middle;
+}
+.message-client-badge {
+  display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+  background: var(--gold-soft); color: var(--accent); font-size: 11px; font-weight: 700; vertical-align: middle;
+}
+.mc-sub.faint { color: var(--text-muted); opacity: .85; }
+
+/* Thread detail — a plain vertical list of message "bubbles", oldest first,
+   own-sent messages tinted to read as distinct from the other party's
+   (same green/neutral shape as a texting app, not literal chat bubbles). */
+.thread-detail { max-width: 720px; margin: 0 auto; }
+.thread-detail-subject { font-size: 19px; margin: 0 0 16px; }
+.thread-message {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; margin-bottom: 12px;
+}
+.thread-message.outbound { background: var(--gold-soft); border-color: var(--gold); }
+.thread-message-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.thread-message-from { font-weight: 700; font-size: 14px; }
+.thread-message-date { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+.thread-message-to { font-size: 12px; color: var(--text-muted); margin: 2px 0 10px; }
+.thread-message-text { font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+/* sandbox="" (no allow-scripts, no allow-same-origin) is what makes it safe
+   to render arbitrary inbound HTML mail here at all — scripts in the source
+   never run and it can't reach this page's own origin/cookies/DOM. Height
+   is fixed-then-grown from inside (see js/messages.js's onload resize) since
+   an iframe has no intrinsic content height of its own. */
+.thread-message-html { width: 100%; min-height: 80px; border: none; background: #fff; border-radius: 6px; }
+.thread-message-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.thread-attachment-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12.5px; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+@media (hover: hover) { .thread-attachment-chip:hover { background: var(--gold-soft); } }
+.thread-reply-box { margin-top: 8px; }
+
+/* Compose modal */
+.compose-row { display: flex; align-items: center; gap: 10px; }
+.compose-row label { flex-shrink: 0; width: 52px; margin: 8px 0; }
+.compose-row input, .compose-row select { flex: 1; margin: 8px 0; }
+.compose-toolbar { display: flex; align-items: center; gap: 4px; margin: 14px 0 0; flex-wrap: wrap; }
+.compose-toolbar button, .compose-toolbar-attach {
+  padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
+  font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit;
+}
+@media (hover: hover) { .compose-toolbar button:hover, .compose-toolbar-attach:hover { background: var(--gold-soft); } }
+.compose-toolbar-attach { display: inline-flex; align-items: center; }
+.compose-body {
+  min-height: 220px; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px;
+  font-size: 14px; line-height: 1.5; margin-top: 6px; background: var(--surface);
+}
+.compose-body:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.compose-attachments-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.compose-attachment-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg); font-size: 12.5px; font-weight: 600;
+}
+.compose-attachment-chip button {
+  border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px;
+}
+
 /* ---- Deleted tabs popup (Profile, admin-only — see js/deletedTabs.js) ----
    Rows reuse .mobile-card's look on both mobile and desktop (there's no
    separate table view here, same as the Teams popup). */
