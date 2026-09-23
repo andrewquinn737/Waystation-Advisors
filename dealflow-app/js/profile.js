@@ -652,9 +652,22 @@ function groupKeyForMember(m) {
 function buildGroupDefs() {
   return [
     { key: ADMINS_KEY, label: "Admins", locked: true },
-    ...customTeams.map((t) => ({ key: t.id, label: t.name, locked: false })),
+    // A custom team can itself be "locked" (teams.is_locked — currently just
+    // "Independent Leads", see supabase migrations) — permanent, can't be
+    // deleted or renamed, and (separately, see memberCardHTML/
+    // applyAutoPromotion below) can never have a team lead. Reuses the same
+    // `locked` flag Admins/Unassigned already use for "no trash icon, no
+    // rename" so it looks and behaves identically to them.
+    ...customTeams.map((t) => ({ key: t.id, label: t.name, locked: !!t.is_locked })),
     { key: UNASSIGNED_KEY, label: "Unassigned interns", locked: true },
   ];
+}
+
+// Locked custom teams (see buildGroupDefs above) never have a team lead —
+// used by memberCardHTML (hide the "Team lead" position option) and
+// setMemberAsTeamLead (reject the promotion server-side-mirrored check).
+function isLockedTeam(groupKey) {
+  return customTeams.some((t) => t.id === groupKey && t.is_locked);
 }
 
 async function loadTeams() {
@@ -854,13 +867,18 @@ function renderTeams() {
 function memberCardHTML(m) {
   const isMemberAdmin = m.role === "admin";
   const positionLabel = memberPositionLabel(m);
+  // "Team lead" is omitted entirely for anyone currently in a locked team
+  // (e.g. Independent Leads) — matches the server-side
+  // enforce_locked_team_no_lead trigger, which would just silently coerce
+  // the promotion back to intern anyway, so there's no point offering it.
+  const canBeTeamLead = !isLockedTeam(groupKeyForMember(m));
   const positionHTML = isAdmin
     ? `
     <div class="mc-sub-wrap">
       <span class="mc-sub position-toggle" data-member-id="${m.id}">${escapeHtml(positionLabel)}</span>
       <div class="position-menu hidden" data-member-id="${m.id}">
         <button type="button" class="position-option" data-role="intern">Intern</button>
-        <button type="button" class="position-option" data-role="team_lead">Team lead</button>
+        ${canBeTeamLead ? `<button type="button" class="position-option" data-role="team_lead">Team lead</button>` : ""}
         <button type="button" class="position-option" data-role="admin">Admin</button>
       </div>
     </div>`
@@ -1123,6 +1141,10 @@ async function setMemberAsTeamLead(memberId) {
     showError(els.teamsErrorBox, new Error("Only accounts inside a team box can be made team lead."));
     return;
   }
+  if (isLockedTeam(groupKey)) {
+    showError(els.teamsErrorBox, new Error("This team can't have a team lead."));
+    return;
+  }
   const boxmates = teamMembersByGroup[groupKey] || [];
   const existingLead = boxmates.find((m) => m.id !== memberId && m.role === "team_lead");
   if (existingLead) {
@@ -1162,6 +1184,7 @@ async function demoteTeamLeadInPlace(memberId) {
 async function applyAutoPromotion(excludeMemberId) {
   let changed = false;
   for (const team of customTeams) {
+    if (team.is_locked) continue; // e.g. Independent Leads — never auto-promotes
     const members = teamMembersByGroup[team.id] || [];
     if (members.length === 1) {
       const only = members[0];
@@ -1182,7 +1205,13 @@ async function applyAutoPromotion(excludeMemberId) {
 // over is highlighted as the drop target.
 // ---------------------------------------------------------------------------
 const LONG_PRESS_MS = 350;
-const DRAG_CANCEL_PX = 10;
+// How far the pointer can drift during the long-press hold before it's
+// treated as a scroll/tap instead of a drag-start. 10px was tight enough
+// that ordinary hand tremor during the 350ms hold (especially on a phone)
+// would silently cancel the long-press before it ever fired — the #1 way
+// this gesture "just didn't work" without any visible error. Widened to
+// 18px; still well short of DRAG_MIN_MOVE_PX-scale intentional movement.
+const DRAG_CANCEL_PX = 18;
 
 const memberDragState = {
   active: false,
@@ -1243,22 +1272,54 @@ function moveMemberDragGhost(e) {
   // it visually looks like it's going. No overlap at all -> no drop target,
   // which snaps the card back to its original box on release.
   const ghostRect = memberDragState.ghost.getBoundingClientRect();
+  const ghostCenterX = (ghostRect.left + ghostRect.right) / 2;
+  const ghostCenterY = (ghostRect.top + ghostRect.bottom) / 2;
   let best = null;
   let bestArea = 0;
+  let nearest = null;
+  let nearestDist = Infinity;
   els.teamsWrap.querySelectorAll(".accordion-section.team-group").forEach((sec) => {
-    const area = rectOverlapArea(ghostRect, sec.getBoundingClientRect());
+    const rect = sec.getBoundingClientRect();
+    const area = rectOverlapArea(ghostRect, rect);
     if (area > bestArea) {
       bestArea = area;
       best = sec;
     }
+    // Fallback candidate for when the ghost doesn't land squarely on any
+    // section at all (a fast drag, or a drop right in the ~12px gap
+    // between two accordion boxes — see .accordion-section's margin-bottom)
+    // — distance from the ghost's center to the section's nearest edge, 0
+    // if the center is already inside it.
+    const dx = Math.max(rect.left - ghostCenterX, 0, ghostCenterX - rect.right);
+    const dy = Math.max(rect.top - ghostCenterY, 0, ghostCenterY - rect.bottom);
+    const dist = Math.hypot(dx, dy);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = sec;
+    }
   });
-  if (best) best.classList.add("drag-over");
-  memberDragState.dropTarget = best ? best.dataset.group : null;
+  // No section directly overlapped (best stayed null) but something's close
+  // by (within ~40px, generous enough for the inter-section gap but not so
+  // wide it grabs a target from across the popup) — use that instead of
+  // silently dropping the gesture. This is the fix for drops that landed in
+  // the gap between boxes visually looking right but doing nothing.
+  const target = best || (nearest && nearestDist <= 40 ? nearest : null);
+  if (target) target.classList.add("drag-over");
+  memberDragState.dropTarget = target ? target.dataset.group : null;
 }
 
 function endMemberDrag(card) {
-  if (memberDragState.pointerId != null && card.releasePointerCapture && card.hasPointerCapture && card.hasPointerCapture(memberDragState.pointerId)) {
-    card.releasePointerCapture(memberDragState.pointerId);
+  // Defensive: if anything forced a re-render mid-drag (unlikely in normal
+  // use, but this used to throw and leave the gesture visibly "stuck" —
+  // ghost still on screen, card unresponsive — if `card` had been detached
+  // from the DOM in the meantime), a stale pointer-capture release should
+  // never itself crash the cleanup that's supposed to unstick things.
+  try {
+    if (memberDragState.pointerId != null && card.releasePointerCapture && card.hasPointerCapture && card.hasPointerCapture(memberDragState.pointerId)) {
+      card.releasePointerCapture(memberDragState.pointerId);
+    }
+  } catch {
+    // ignore — already released, or the element's gone
   }
   if (memberDragState.ghost) {
     memberDragState.ghost.remove();
