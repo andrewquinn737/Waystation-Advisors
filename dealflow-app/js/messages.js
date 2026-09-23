@@ -55,8 +55,12 @@ const els = {
   selectModeBar: document.getElementById("selectModeBar"),
   selectBackBtn: document.getElementById("selectBackBtn"),
   selectAllBtn: document.getElementById("selectAllBtn"),
-  selectMarkReadBtn: document.getElementById("selectMarkReadBtn"),
   selectMarkUnreadBtn: document.getElementById("selectMarkUnreadBtn"),
+  selectDeleteBtn: document.getElementById("selectDeleteBtn"),
+  confirmDeleteThreadsModal: document.getElementById("confirmDeleteThreadsModal"),
+  confirmDeleteThreadsTitle: document.getElementById("confirmDeleteThreadsTitle"),
+  confirmDeleteThreadsYesBtn: document.getElementById("confirmDeleteThreadsYesBtn"),
+  confirmDeleteThreadsNoBtn: document.getElementById("confirmDeleteThreadsNoBtn"),
   errorBox: document.getElementById("errorBox"),
   wrap: document.getElementById("messagesWrap"),
   composeFabBtn: document.getElementById("composeFabBtn"),
@@ -212,8 +216,27 @@ async function setSelectedThreadsReadState(isRead) {
   exitThreadSelectMode();
   loadThreadList();
 }
-els.selectMarkReadBtn.addEventListener("click", () => setSelectedThreadsReadState(true));
 els.selectMarkUnreadBtn.addEventListener("click", () => setSelectedThreadsReadState(false));
+
+els.selectDeleteBtn.addEventListener("click", () => {
+  const count = selectedThreadIds.size;
+  if (!count) return;
+  els.confirmDeleteThreadsTitle.textContent = `Delete ${count} conversation${count === 1 ? "" : "s"}?`;
+  els.confirmDeleteThreadsModal.classList.remove("hidden");
+});
+els.confirmDeleteThreadsNoBtn.addEventListener("click", () => els.confirmDeleteThreadsModal.classList.add("hidden"));
+els.confirmDeleteThreadsYesBtn.addEventListener("click", async () => {
+  els.confirmDeleteThreadsModal.classList.add("hidden");
+  // Only deletes the local copy (email_messages/-attachments — RLS allows
+  // this only for the mailbox's owner or an admin, same as who can reply/
+  // compose). The actual email still exists in the mailbox; it just never
+  // comes back, since email-sync's per-mailbox UID watermark only ever
+  // looks for UIDs newer than the last one it already saw.
+  const { error } = await supabase.from("email_messages").delete().in("thread_id", [...selectedThreadIds]);
+  if (error) return showError(els.errorBox, error);
+  exitThreadSelectMode();
+  loadThreadList();
+});
 
 // ---------------------------------------------------------------------------
 // Thread list

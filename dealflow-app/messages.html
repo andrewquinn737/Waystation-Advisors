@@ -107,13 +107,32 @@
 
     <!-- Thread-list select mode bar (see menuSelectBtn above) — same shell/
          behavior as Dials' own select-mode-bar (js/dials.js's enterSelectMode).
-         Mark read/unread are the two bulk actions; tapping a row toggles its
-         selection instead of opening it while this is showing. -->
+         "Unread" (short for "Mark unread" — the full label overflowed the
+         pill button's edges on narrower screens, same 4-buttons-in-a-row
+         squeeze Dials' own bar avoids by using short labels) and Delete are
+         the two bulk actions; tapping a row toggles its selection instead of
+         opening it while this is showing. -->
     <div class="select-mode-bar hidden" id="selectModeBar">
       <button type="button" class="select-mode-btn" id="selectBackBtn">Back</button>
       <button type="button" class="select-mode-btn" id="selectAllBtn">Select all</button>
-      <button type="button" class="select-mode-btn" id="selectMarkReadBtn">Mark read</button>
-      <button type="button" class="select-mode-btn" id="selectMarkUnreadBtn">Mark unread</button>
+      <button type="button" class="select-mode-btn" id="selectMarkUnreadBtn">Unread</button>
+      <button type="button" class="select-mode-btn danger" id="selectDeleteBtn">Delete</button>
+    </div>
+
+    <!-- Bulk-delete confirmation for Select mode's Delete button. Deletes the
+         selected threads' messages entirely (see js/messages.js) — since
+         email-sync's incremental per-mailbox UID watermark never revisits an
+         already-seen UID, a deleted message doesn't come back on the next
+         sync even though the real email still exists in the mailbox itself. -->
+    <div class="modal-backdrop hidden" id="confirmDeleteThreadsModal">
+      <div class="modal">
+        <h2 id="confirmDeleteThreadsTitle">Delete these conversations?</h2>
+        <p class="help-text">This removes them from Messages. It doesn't delete the actual emails from the mailbox, and they won't be re-synced.</p>
+        <div class="form-actions">
+          <button type="button" class="btn danger" id="confirmDeleteThreadsYesBtn">Delete</button>
+          <button type="button" class="btn secondary" id="confirmDeleteThreadsNoBtn">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <div id="errorBox" class="error-msg hidden"></div>
