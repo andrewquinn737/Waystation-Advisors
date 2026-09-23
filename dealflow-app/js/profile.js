@@ -374,7 +374,7 @@ await renderProfileHeader();
 // handleAvatarFileSelected) for exactly as long as edit mode is on.
 // ---------------------------------------------------------------------------
 let profileEditMode = false;
-let profileEditInputs = null; // { nameInput, phoneInput, emailInput } while editing
+let profileEditInputs = null; // { nameInput, phoneInput, emailInput, email2Input, email3Input } while editing
 
 function openAvatarPicker() {
   if (!profileEditMode) return;
@@ -401,13 +401,33 @@ function enterProfileEditMode() {
   els.profilePhone.classList.remove("hidden");
   els.profilePhone.replaceWith(phoneInput);
 
+  // Up to 3 emails: the primary (profiles.email — the only one shown
+  // outside edit mode, on Profile itself and under Teams) plus two
+  // additional ones (profiles.email_2/email_3) that only ever exist here in
+  // edit mode — there's no separate display element for them to replace
+  // like phone/email above, so they're inserted fresh right after the
+  // primary email field and removed again on exit.
   const emailInput = document.createElement("input");
   emailInput.type = "email";
   emailInput.className = "profile-edit-input";
   emailInput.value = profile.email || "";
-  emailInput.placeholder = "Email";
+  emailInput.placeholder = "Primary email";
   els.profileEmail.classList.remove("hidden");
   els.profileEmail.replaceWith(emailInput);
+
+  const email2Input = document.createElement("input");
+  email2Input.type = "email";
+  email2Input.className = "profile-edit-input";
+  email2Input.value = profile.email_2 || "";
+  email2Input.placeholder = "Additional email";
+  emailInput.insertAdjacentElement("afterend", email2Input);
+
+  const email3Input = document.createElement("input");
+  email3Input.type = "email";
+  email3Input.className = "profile-edit-input";
+  email3Input.value = profile.email_3 || "";
+  email3Input.placeholder = "Additional email";
+  email2Input.insertAdjacentElement("afterend", email3Input);
 
   // Calendly link is only ever editable for your own account (edit mode is
   // always self — see requireSession()'s Edit-button gating) when you're the
@@ -449,7 +469,7 @@ function enterProfileEditMode() {
     calendlyInput.addEventListener("input", syncCalendlyPreferenceVisibility);
   }
 
-  profileEditInputs = { nameInput, phoneInput, emailInput, calendlyInput, canEditCalendly };
+  profileEditInputs = { nameInput, phoneInput, emailInput, email2Input, email3Input, calendlyInput, canEditCalendly };
   nameInput.focus();
   nameInput.select();
 }
@@ -458,12 +478,14 @@ async function exitProfileEditMode() {
   if (!profileEditMode) return;
   profileEditMode = false;
   els.avatarInitials.classList.remove("editable");
-  const { nameInput, phoneInput, emailInput, calendlyInput, canEditCalendly } = profileEditInputs;
+  const { nameInput, phoneInput, emailInput, email2Input, email3Input, calendlyInput, canEditCalendly } = profileEditInputs;
   profileEditInputs = null;
 
   const newName = nameInput.value.trim() || profile.full_name;
   const newPhone = phoneInput.value.trim();
   const newEmail = emailInput.value.trim();
+  const newEmail2 = email2Input.value.trim();
+  const newEmail3 = email3Input.value.trim();
   const newCalendlyLink = calendlyInput ? calendlyInput.value.trim() : null;
   // Re-derived from the final link value rather than reusing a flag
   // captured back when edit mode was entered — the preference section may
@@ -474,6 +496,8 @@ async function exitProfileEditMode() {
   nameInput.replaceWith(els.profileName);
   phoneInput.replaceWith(els.profilePhone);
   emailInput.replaceWith(els.profileEmail);
+  email2Input.remove();
+  email3Input.remove();
   if (calendlyInput) calendlyInput.replaceWith(els.calendlyLinkText);
   els.calendlyPreferenceSection.classList.add("hidden");
 
@@ -481,10 +505,18 @@ async function exitProfileEditMode() {
     newName !== profile.full_name ||
     newPhone !== (profile.phone || "") ||
     newEmail !== (profile.email || "") ||
+    newEmail2 !== (profile.email_2 || "") ||
+    newEmail3 !== (profile.email_3 || "") ||
     (calendlyInput && newCalendlyLink !== (profile.calendly_link || "")) ||
     newUseOwnCalendlyLink !== profile.use_own_calendly_link;
   if (changed) {
-    const updatePayload = { full_name: newName, phone: newPhone || null, email: newEmail || null };
+    const updatePayload = {
+      full_name: newName,
+      phone: newPhone || null,
+      email: newEmail || null,
+      email_2: newEmail2 || null,
+      email_3: newEmail3 || null,
+    };
     if (calendlyInput) updatePayload.calendly_link = newCalendlyLink || null;
     if (showCalendlyPreference) updatePayload.use_own_calendly_link = newUseOwnCalendlyLink;
     const { error } = await supabase.from("profiles").update(updatePayload).eq("id", profile.id);
@@ -494,6 +526,8 @@ async function exitProfileEditMode() {
       profile.full_name = newName;
       profile.phone = newPhone;
       profile.email = newEmail;
+      profile.email_2 = newEmail2;
+      profile.email_3 = newEmail3;
       if (calendlyInput) profile.calendly_link = newCalendlyLink;
       if (showCalendlyPreference) profile.use_own_calendly_link = newUseOwnCalendlyLink;
     }

@@ -828,6 +828,10 @@ tr.skeleton-row, .skeleton-card { cursor: default; }
    z-index of 100, so they rendered invisibly underneath it. counterpartModal
    has the same "opens while the client modal is already open" shape, so
    it's included too even though it wasn't reported broken. */
+/* quickSendModal (js/quickSend.js) has the exact same shape too — the
+   email icon it opens from can sit inside the client/dial detail modal
+   itself (Timeline/readonly-field rows), not just a plain list row. */
+#quickSendModal,
 #eventReportModal, #editEventModal, #counterpartModal, #transferOwnershipModal, #confirmConvertModal, #intendedBuyerModal,
 /* reportsAccountsVisiblePopup, reportsSelectBuyerPopup, and
    reportsSelectPeriodPopup (see js/reports.js) are modal-backdrop popups
@@ -1709,7 +1713,19 @@ html.is-mobile-device .team-member-card { touch-action: none; }
    any other floating control stacked above it on mobile. */
 html.is-mobile-device .compose-fab { bottom: 84px; }
 
-.mailbox-option.active { background: var(--gold-soft); color: var(--accent); }
+/* The Mailboxes popup reuses wireAccountsVisiblePopup wholesale (see
+   js/messages.js) — its "Select all" row otherwise gets the same bordered/
+   tinted-background treatment every other Accounts visible popup's own
+   select-all row has (see .accounts-visible-row.select-all). Scoped to just
+   this popup: no special color/highlight, a plain divider line under it
+   instead, matching spec ("outlined in white or a white line between it and
+   the other options" — a subtle border-bottom in --border reads as that
+   divider in both light and dark mode, where a literal white line wouldn't
+   in light mode). */
+#mailboxesPopup .accounts-visible-row.select-all {
+  font-weight: 700; border: none; border-radius: 0; background: none;
+  border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 8px;
+}
 
 /* Thread list row — .mobile-card's shell (used on every page's list for
    this reason) plus a left accent bar when unread, same idea as an unread
@@ -1730,6 +1746,11 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
 /* Thread detail — a plain vertical list of message "bubbles", oldest first,
    own-sent messages tinted to read as distinct from the other party's
    (same green/neutral shape as a texting app, not literal chat bubbles). */
+/* No max-height/overflow here on purpose — the whole page scrolls with the
+   thread's real length (like everywhere else in this app) instead of the
+   message list scrolling inside a fixed-height box, so Back/Reply
+   (.thread-detail-actions) always end up sitting right after the last
+   message rather than pinned separately. */
 .thread-detail { max-width: 720px; margin: 0 auto; }
 .thread-detail-subject { font-size: 19px; margin: 0 0 16px; }
 .thread-message {
@@ -1742,6 +1763,14 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
 .thread-message-date { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
 .thread-message-to { font-size: 12px; color: var(--text-muted); margin: 2px 0 10px; }
 .thread-message-text { font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+/* A participant's name/address, in either the message header or the "To"
+   line — clicking jumps to their matched Client/Dial record (see
+   openParticipantRecord in js/messages.js). Every name is rendered
+   clickable up front; a name with no matching record just does nothing on
+   click rather than being pre-checked and conditionally styled, since that
+   would mean a live lookup for every participant of every message shown. */
+.thread-participant-name { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+@media (hover: hover) { .thread-participant-name:hover { color: var(--accent); } }
 /* sandbox="" (no allow-scripts, no allow-same-origin) is what makes it safe
    to render arbitrary inbound HTML mail here at all — scripts in the source
    never run and it can't reach this page's own origin/cookies/DOM. Height
@@ -1755,7 +1784,10 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
   text-decoration: none; cursor: pointer;
 }
 @media (hover: hover) { .thread-attachment-chip:hover { background: var(--gold-soft); } }
-.thread-reply-box { margin-top: 8px; }
+/* Back + Reply sit together at the bottom of the (unscrolled — see
+   .thread-detail below) message list, same shape (.btn.secondary), Back
+   directly to Reply's left. */
+.thread-detail-actions { display: flex; gap: 10px; margin-top: 16px; }
 
 /* Compose modal */
 .compose-row { display: flex; align-items: center; gap: 10px; }
@@ -1765,6 +1797,17 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
 .compose-toolbar button, .compose-toolbar-attach {
   padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);
   font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit;
+  box-sizing: border-box; line-height: 1;
+  /* The actual misalignment: the global `label { margin: 12px 0 4px }` rule
+     (styled for a real form label sitting above its input) was leaking
+     into compose-toolbar-attach — the only <label> among these buttons —
+     giving it 12px top / 4px bottom margin the <button>s don't have.
+     align-items:center on the row centers each child's MARGIN box, so that
+     lopsided margin alone was enough to visibly push it down relative to
+     its zero-margin button siblings. Confirmed via computed styles (both
+     ended up the exact same 27px content height either way — this was
+     never a height/line-height mismatch at all). */
+  margin: 0;
 }
 @media (hover: hover) { .compose-toolbar button:hover, .compose-toolbar-attach:hover { background: var(--gold-soft); } }
 .compose-toolbar-attach { display: inline-flex; align-items: center; }

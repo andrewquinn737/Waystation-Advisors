@@ -3,6 +3,7 @@
 // compact list/card rows (contactActionIcons).
 
 import { escapeHtml } from "./clientForm.js";
+import { openQuickSend } from "./quickSend.js";
 
 export const CONTACT_ICONS = {
   sms: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
@@ -60,6 +61,37 @@ export function setOwnEmailIsGmail(flag) {
   ownEmailIsGmail = flag === true || flag === false ? flag : null;
 }
 
+// ---------------------------------------------------------------------------
+// Where the "Email" instant-contact icon sends you, by role (set once at
+// page load — see setOwnRole()/setTeamLeadMailbox() call sites in
+// js/clients.js and js/dials.js):
+//   - team_lead/admin: navigates straight to Messages' own compose, prefilled
+//     (see buildEmailHref below) — they have connected mailbox(es) to send
+//     real email through the app with.
+//   - intern with a resolved team-lead mailbox: opens the small "quick send"
+//     modal (js/quickSend.js), prefilled the same way, and sends through
+//     THEIR team lead's primary connected mailbox (email-send's own
+//     authorization allows this specific case — see its own comment).
+//     Doesn't navigate away from Clients/Dials at all.
+//   - intern with no team-lead mailbox to send through: unchanged legacy
+//     behavior — a plain mailto:/Gmail-compose link opening the device's own
+//     mail app, same as before Messages existed.
+// ---------------------------------------------------------------------------
+let ownRole = null;
+let teamLeadMailbox = null; // { accountId, email } | null
+
+export function setOwnRole(role) {
+  ownRole = role || null;
+}
+
+export function setTeamLeadMailbox(mailbox) {
+  teamLeadMailbox = mailbox && mailbox.accountId ? mailbox : null;
+}
+
+function canUseMessages() {
+  return ownRole === "team_lead" || ownRole === "admin";
+}
+
 // Explicit override (true or false) always wins over the address itself;
 // only when the user has never set the toggle (null) does this fall back
 // to guessing from the address.
@@ -97,6 +129,47 @@ function buildEmailHref(targetEmail, body, subject) {
   const subjectParam = subject ? `subject=${encodeURIComponent(subject)}` : "";
   const query = [subjectParam, bodyParam].filter(Boolean).join("&");
   return `mailto:${targetEmail}${query ? `?${query}` : ""}`;
+}
+
+// Full markup for the "Email" instant-contact icon — an <a> for the two
+// cases that are just a plain navigation (Messages compose, or the legacy
+// mailto:/Gmail link), a <button> with data-* attributes for the one case
+// that isn't (an intern's quick-send modal, wired by wireQuickSendButtons
+// below rather than a click handler baked in here, matching how every
+// other icon in this file stays a plain, dependency-free string builder).
+function emailActionHTML(targetEmail, body, subject) {
+  if (canUseMessages()) {
+    const params = new URLSearchParams({ compose: "1", to: targetEmail });
+    if (subject) params.set("subject", subject);
+    if (body) params.set("body", body);
+    return `<a class="contact-action-btn" href="messages.html?${params.toString()}" title="Email">${CONTACT_ICONS.mailto}</a>`;
+  }
+  if (ownRole === "intern" && teamLeadMailbox) {
+    return `<button type="button" class="contact-action-btn quick-send-email-btn" data-account-id="${escapeHtml(teamLeadMailbox.accountId)}" data-to="${escapeHtml(
+      targetEmail
+    )}" data-subject="${escapeHtml(subject || "")}" data-body="${escapeHtml(body || "")}" title="Email">${CONTACT_ICONS.mailto}</button>`;
+  }
+  return `<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(targetEmail, body, subject))}" title="Email">${CONTACT_ICONS.mailto}</a>`;
+}
+
+// Wires click handling for any quick-send-email-btn inside `container` —
+// opens the shared quick-send modal (js/quickSend.js) prefilled from the
+// button's own data-* attributes. Call this after every render pass that
+// might contain email icons, same as stopContactActionPropagation below
+// (which itself still covers these buttons too, since it targets the same
+// .contact-action-btn class).
+export function wireQuickSendButtons(container) {
+  container.querySelectorAll(".quick-send-email-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openQuickSend({
+        accountId: btn.dataset.accountId,
+        to: btn.dataset.to,
+        subject: btn.dataset.subject,
+        body: btn.dataset.body,
+      });
+    });
+  });
 }
 
 // Builds the href for the "Text" instant-contact icon. Plain `sms:` for
@@ -223,7 +296,7 @@ export function contactActionIcons({ phone, email, linkedin, personalizedEmailBo
   }
   if (email) {
     parts.push(
-      `<a class="contact-action-btn" href="${escapeHtml(buildEmailHref(email, personalizedEmailBody, personalizedEmailSubject))}" title="Email">${CONTACT_ICONS.mailto}</a>`
+      emailActionHTML(email, personalizedEmailBody, personalizedEmailSubject)
     );
   }
   if (!phone && !email && linkedin) {

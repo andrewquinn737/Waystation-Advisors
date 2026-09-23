@@ -2,7 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import {
   wireAdvancedSettingsPopup,
   resolvePersonalizedEmailBody,
@@ -2246,7 +2246,10 @@ function renderDialsTable() {
       openDialModal(idx);
     });
   });
-  if (!selectMode) stopContactActionPropagation(els.dialsTableWrap);
+  if (!selectMode) {
+    stopContactActionPropagation(els.dialsTableWrap);
+    wireQuickSendButtons(els.dialsTableWrap);
+  }
 
   if (selectMode) {
     els.selectAllBtn.classList.toggle("active", visible.every((d) => selectedDialIds.has(d.id)));
@@ -2467,6 +2470,7 @@ function renderDialModal() {
   const fieldsHTML = dialMode === "edit" || isCreate ? buildDialEditHTML(dial) : buildDialViewHTML(dial);
   els.dialModalBody.innerHTML = fieldsHTML;
   stopContactActionPropagation(els.dialModalBody);
+  wireQuickSendButtons(els.dialModalBody);
   if (isViewingExisting) wireContactCheckCircles();
 
   if (dialMode === "edit" || isCreate) {
@@ -3157,3 +3161,39 @@ if (isAdmin || isTeamLead) {
 }
 
 await loadLists();
+
+// ---------------------------------------------------------------------------
+// Deep-link support: ?dial=<id> opens straight into that dial's detail popup
+// — used by Messages' "click a participant's name" feature (see
+// js/messages.js) to jump from an email straight to the matching dial.
+// Unlike clients.html's own ?client= deep link, this has to first figure out
+// which tab/side/current-vs-archived that dial actually lives under (a dial
+// has no client_type of its own — dial_lists.dial_type is what decides
+// seller/buyer), switch the page over to it, then reload before opening.
+// Doesn't sync the Sellers/Buyers toggle's own displayed label if it has to
+// flip sides — a minor cosmetic mismatch until next touched, not worth the
+// extra plumbing for what should be a rare cross-side link.
+// ---------------------------------------------------------------------------
+const dialsDeepLinkParams = new URLSearchParams(window.location.search);
+const deepLinkDialId = dialsDeepLinkParams.get("dial");
+if (deepLinkDialId) {
+  const { data: targetDial } = await supabase.from("dials").select("*").eq("id", deepLinkDialId).maybeSingle();
+  if (targetDial?.list_id) {
+    const { data: targetList } = await supabase.from("dial_lists").select("id, dial_type, status").eq("id", targetDial.list_id).maybeSingle();
+    if (targetList) {
+      currentType = targetList.dial_type;
+      currentStatus = targetList.status === "archived" ? "archived" : "current";
+      currentListId = targetList.id;
+      await loadLists();
+      await loadDials();
+      currentDialSet = [targetDial];
+      currentDialIndex = 0;
+      currentDial = targetDial;
+      dialMode = "view";
+      els.dialModalBackdrop.classList.remove("hidden");
+      lockPageScroll();
+      renderDialModal();
+    }
+  }
+  window.history.replaceState({}, "", "dials.html");
+}

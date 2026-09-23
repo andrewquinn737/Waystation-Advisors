@@ -57,27 +57,63 @@
       </button>
     </div>
 
-    <!-- Mailbox picker dropdown (opened by pageMenuToggle above). -->
+    <!-- Triangle dropdown: "Mailboxes" (opens mailboxesPopup below to
+         multi-select which connected mailbox(es) to view), "Sync now", and
+         "Select" (thread-list select mode — see selectModeBar below). All
+         three only ever shown for team leads/admins (see js/messages.js) —
+         an intern has no mailbox concept, nothing to sync on demand, and no
+         bulk actions here. -->
     <div class="page-header-menu hidden" id="pageHeaderMenu" style="right:auto; left:16px;">
-      <div id="mailboxMenuList"></div>
-    </div>
-
-    <!-- Settings gear menu. "Manage mailboxes" (jumps to Profile's own
-         popup for adding/removing up to 3 accounts) is always here; "Sync
-         now" too. Refresh/manage are the only two items for an intern. -->
-    <div class="page-header-menu hidden" id="settingsMenu">
+      <button type="button" class="page-header-menu-item" id="menuMailboxesBtn">
+        <span class="menu-item-label">Mailboxes</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg></span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuSyncNowBtn">
         <span class="menu-item-label">Sync now</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span>
       </button>
-      <button type="button" class="page-header-menu-item hidden" id="menuManageMailboxesBtn">
-        <span class="menu-item-label">Manage mailboxes</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg></span>
+      <button type="button" class="page-header-menu-item" id="menuSelectBtn">
+        <span class="menu-item-label">Select</span>
+        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
       </button>
+    </div>
+
+    <!-- "Mailboxes" popup — a plain wireAccountsVisiblePopup instance (same
+         module Profile/Clients/Dials use for "Accounts visible"), just fed
+         one synthetic "account" per connected mailbox (id = email_accounts
+         row id, not a profile id) instead of one per person — see
+         loadMailboxAccounts() in js/messages.js. Its own storageKey keeps
+         this selection independent of every other page's Accounts visible. -->
+    <div class="modal-backdrop hidden" id="mailboxesPopup">
+      <div class="modal">
+        <h2>Mailboxes</h2>
+        <p class="help-text">Choose which mailbox(es) to view.</p>
+        <div id="mailboxesPopupBody"></div>
+        <div class="form-actions">
+          <button type="button" class="btn secondary" id="mailboxesPopupClose">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings gear menu — just Notifications now ("Manage mailboxes" was
+         a stub that did nothing and has been removed; "Sync now" moved up
+         to the triangle menu above). -->
+    <div class="page-header-menu hidden" id="settingsMenu">
       <button type="button" class="page-header-menu-item" id="menuNotificationsBtn">
         <span class="menu-item-label" id="notificationsLabel">Notifications: On</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line class="notif-slash" x1="3" y1="21" x2="21" y2="3"/></svg></span>
       </button>
+    </div>
+
+    <!-- Thread-list select mode bar (see menuSelectBtn above) — same shell/
+         behavior as Dials' own select-mode-bar (js/dials.js's enterSelectMode).
+         Mark read/unread are the two bulk actions; tapping a row toggles its
+         selection instead of opening it while this is showing. -->
+    <div class="select-mode-bar hidden" id="selectModeBar">
+      <button type="button" class="select-mode-btn" id="selectBackBtn">Back</button>
+      <button type="button" class="select-mode-btn" id="selectAllBtn">Select all</button>
+      <button type="button" class="select-mode-btn" id="selectMarkReadBtn">Mark read</button>
+      <button type="button" class="select-mode-btn" id="selectMarkUnreadBtn">Mark unread</button>
     </div>
 
     <div id="errorBox" class="error-msg hidden"></div>

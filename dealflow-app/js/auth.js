@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { setOwnEmail, setOwnEmailIsGmail } from "./contactIcons.js";
+import { setOwnEmail, setOwnEmailIsGmail, setOwnRole, setTeamLeadMailbox } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError, withTimeout } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
@@ -49,7 +49,7 @@ export async function requireSession() {
       supabase
         .from("profiles")
         .select(
-          "id, full_name, role, phone, email, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, email_is_gmail, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
+          "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, email_is_gmail, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
         )
         .eq("id", session.user.id)
         .single()
@@ -130,6 +130,34 @@ export async function requireSession() {
   // doesn't end in gmail.com/googlemail.com.
   setOwnEmail(resolvedProfile.email);
   setOwnEmailIsGmail(resolvedProfile.email_is_gmail);
+
+  // Also decides what the "Email" icon does, by role (see contactIcons.js's
+  // own comment on setOwnRole/setTeamLeadMailbox for the 3-way split). Only
+  // an intern needs the extra round trip: find their team lead, then that
+  // team lead's primary connected mailbox (an email_accounts row whose
+  // address matches the team lead's own primary profiles.email — falling
+  // back to any connected mailbox of theirs if the primary one specifically
+  // isn't connected). Wrapped in try/catch — a network hiccup here should
+  // never block sign-in, just silently leave the legacy mailto: fallback in
+  // place, same as if the intern had no team lead at all.
+  setOwnRole(resolvedProfile.role);
+  if (resolvedProfile.role === "intern" && resolvedProfile.team_id) {
+    try {
+      const { data: teamLead } = await supabase
+        .from("profiles")
+        .select("id, email")
+        .eq("team_id", resolvedProfile.team_id)
+        .eq("role", "team_lead")
+        .maybeSingle();
+      if (teamLead) {
+        const { data: mailboxes } = await supabase.from("email_accounts").select("id, email_address").eq("owner_id", teamLead.id);
+        const primary = (mailboxes || []).find((m) => m.email_address?.toLowerCase() === (teamLead.email || "").toLowerCase()) || (mailboxes || [])[0];
+        if (primary) setTeamLeadMailbox({ accountId: primary.id, email: primary.email_address });
+      }
+    } catch (e) {
+      console.error("Could not resolve team lead mailbox", e);
+    }
+  }
 
   renderNav(resolvedProfile);
 

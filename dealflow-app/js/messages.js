@@ -5,23 +5,25 @@
 // Visible to everyone (interns included), but scoped very differently by
 // role — same "team leads/admins see broadly, interns see only their own"
 // shape as the rest of the app (Accounts visible on Profile/Clients/Dials):
-//   - Team lead: the mailbox picker (triangle) lists their own connected
-//     accounts (up to 3) + "All mailboxes". Can read, reply, and compose.
-//   - Admin: same, but the picker lists EVERY connected mailbox across every
+//   - Team lead: the Mailboxes popup (triangle menu) lists their own
+//     connected accounts (up to 3). Can read, reply, and compose.
+//   - Admin: same, but the popup lists EVERY connected mailbox across every
 //     team lead (RLS already scopes email_accounts/email_messages this way
-//     — this file just renders whatever comes back).
-//   - Intern: no mailbox picker, no compose/reply — a read-only feed of
-//     whatever messages are matched (by address) to clients THEY own (or,
-//     for a team lead viewing an intern's own scope — not applicable here,
-//     interns only ever see their own). Enforced server-side by
-//     email_messages' own RLS; this file just doesn't render controls an
-//     intern's requests would be rejected for anyway.
+//     — this file just renders whatever comes back), each one suffixed with
+//     its owner's name.
+//   - Intern: no triangle menu at all, no compose/reply — a read-only feed
+//     of whatever messages are matched (by address) to clients THEY own,
+//     enforced by email_messages' own RLS, not just hidden UI. (Their own
+//     email quick-action icon on Clients/Dials sends through their team
+//     lead's mailbox instead — see js/quickSend.js — this page never
+//     enters into that flow at all.)
 
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireNotificationsToggle } from "./notifications.js";
+import { wireAccountsVisiblePopup, getVisibleAccountIds } from "./accountsVisible.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -31,17 +33,30 @@ const isAdmin = profile?.role === "admin";
 const isTeamLead = profile?.role === "team_lead";
 const canManageMail = isAdmin || isTeamLead;
 
+// Independent from the shared app-wide "Accounts visible" key used
+// elsewhere — this page's mailbox selection has nothing to do with which
+// ACCOUNTS' dials/clients are visible on other pages.
+const MAILBOX_STORAGE_KEY = "waystation_messages_mailboxes";
+
 const els = {
   pageMenuToggle: document.getElementById("pageMenuToggle"),
   pageHeaderMenu: document.getElementById("pageHeaderMenu"),
-  mailboxMenuList: document.getElementById("mailboxMenuList"),
+  menuMailboxesBtn: document.getElementById("menuMailboxesBtn"),
   messagesTitle: document.getElementById("messagesTitle"),
   pageSettingsBtn: document.getElementById("pageSettingsBtn"),
   settingsMenu: document.getElementById("settingsMenu"),
   menuSyncNowBtn: document.getElementById("menuSyncNowBtn"),
-  menuManageMailboxesBtn: document.getElementById("menuManageMailboxesBtn"),
+  menuSelectBtn: document.getElementById("menuSelectBtn"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
+  mailboxesPopup: document.getElementById("mailboxesPopup"),
+  mailboxesPopupBody: document.getElementById("mailboxesPopupBody"),
+  mailboxesPopupClose: document.getElementById("mailboxesPopupClose"),
+  selectModeBar: document.getElementById("selectModeBar"),
+  selectBackBtn: document.getElementById("selectBackBtn"),
+  selectAllBtn: document.getElementById("selectAllBtn"),
+  selectMarkReadBtn: document.getElementById("selectMarkReadBtn"),
+  selectMarkUnreadBtn: document.getElementById("selectMarkUnreadBtn"),
   errorBox: document.getElementById("errorBox"),
   wrap: document.getElementById("messagesWrap"),
   composeFabBtn: document.getElementById("composeFabBtn"),
@@ -67,79 +82,85 @@ function escapeHtml(str) {
 }
 
 let accounts = []; // every mailbox the signed-in account can see (RLS-scoped)
-let selectedAccountId = null; // null = "All mailboxes"
+let accountOwnerNames = {}; // owner_id -> full_name, admin-only
 let detailThreadId = null; // null = list view
 let pendingCompose = null; // { attachments: [{filename, contentType, base64}] }
+let threadListSelectMode = false;
+let selectedThreadIds = new Set();
+let currentThreadRows = []; // the list currently rendered, for Select all / bulk actions
 
 // ---------------------------------------------------------------------------
-// Mailbox picker (triangle) + settings gear
+// Mailboxes (triangle menu → Mailboxes popup) + settings gear
 // ---------------------------------------------------------------------------
 
 async function loadAccounts() {
   if (!canManageMail) return;
-  const { data, error } = await supabase.from("email_accounts").select("*").order("owner_id").order("label");
+  const { data, error } = await supabase.from("email_accounts").select("*").order("owner_id").order("email_address");
   if (error) return showError(els.errorBox, error);
   accounts = data || [];
+  if (isAdmin) {
+    const ids = [...new Set(accounts.map((a) => a.owner_id))];
+    if (ids.length) {
+      const { data: owners } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+      accountOwnerNames = Object.fromEntries((owners || []).map((p) => [p.id, p.full_name]));
+    }
+  }
 }
 
-function renderMailboxMenu() {
-  const rows = [
-    `<button type="button" class="page-header-menu-item mailbox-option ${selectedAccountId === null ? "active" : ""}" data-account-id="">
-      <span class="menu-item-label">All mailboxes</span>
-    </button>`,
-    ...accounts.map((a) => {
-      const ownerLabel = isAdmin && a.owner_id !== profile.id ? ` — ${escapeHtml(ownerNameFor(a.owner_id))}` : "";
-      return `<button type="button" class="page-header-menu-item mailbox-option ${selectedAccountId === a.id ? "active" : ""}" data-account-id="${a.id}">
-        <span class="menu-item-label">${escapeHtml(a.label)}${ownerLabel}</span>
-      </button>`;
-    }),
-  ];
-  els.mailboxMenuList.innerHTML = rows.join("");
-  els.mailboxMenuList.querySelectorAll(".mailbox-option").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedAccountId = btn.dataset.accountId || null;
-      closePageHeaderMenu();
-      updateTitle();
-      exitDetail();
-      loadThreadList();
-    });
-  });
-}
-
-let accountOwnerNames = {}; // owner_id -> full_name, admin-only (see loadOwnerNames)
-function ownerNameFor(ownerId) {
-  return accountOwnerNames[ownerId] || "Unknown";
-}
-async function loadOwnerNames() {
-  if (!isAdmin) return;
-  const ids = [...new Set(accounts.map((a) => a.owner_id))];
-  if (!ids.length) return;
-  const { data } = await supabase.from("profiles").select("id, full_name").in("id", ids);
-  accountOwnerNames = Object.fromEntries((data || []).map((p) => [p.id, p.full_name]));
+// The label shown for one mailbox — its actual email address (per spec:
+// "instead of having names have the emails listed"), with the owning
+// account's name in parentheses for an admin viewing someone else's box.
+function mailboxLabel(a) {
+  const ownerSuffix = isAdmin ? ` (${accountOwnerNames[a.owner_id] || "Unknown"})` : "";
+  return `${a.email_address}${ownerSuffix}`;
 }
 
 function updateTitle() {
-  if (selectedAccountId === null) {
+  const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
+  if (!visible || visible.size !== 1) {
     els.messagesTitle.textContent = "Messages";
-  } else {
-    const acct = accounts.find((a) => a.id === selectedAccountId);
-    els.messagesTitle.textContent = acct ? acct.label : "Messages";
+    return;
   }
+  const acct = accounts.find((a) => visible.has(a.id));
+  els.messagesTitle.textContent = acct ? acct.email_address : "Messages";
 }
 
 if (canManageMail) {
   els.pageMenuToggle.classList.remove("hidden");
-  els.menuManageMailboxesBtn.classList.remove("hidden");
   els.composeFabBtn.classList.remove("hidden");
 }
 
-wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu });
+wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.mailboxesPopup });
 wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 
+if (canManageMail) {
+  wireAccountsVisiblePopup({
+    menuBtn: els.menuMailboxesBtn,
+    popupEl: els.mailboxesPopup,
+    bodyEl: els.mailboxesPopupBody,
+    closeBtn: els.mailboxesPopupClose,
+    closePageHeaderMenu,
+    myProfileId: profile.id,
+    storageKey: MAILBOX_STORAGE_KEY,
+    // One synthetic "account" row per connected MAILBOX, not per person —
+    // id is the email_accounts row's own id, so the shared popup's
+    // selection Set ends up holding mailbox ids, which is exactly what
+    // accountIdsForQuery() below needs.
+    getAllAccounts: async () => accounts.map((a) => ({ id: a.id, full_name: mailboxLabel(a) })),
+    onChange: () => {
+      updateTitle();
+      exitDetail();
+      loadThreadList();
+    },
+    escapeHtml,
+  });
+}
+
 els.menuSyncNowBtn.addEventListener("click", async () => {
   closePageHeaderMenu();
-  els.menuSyncNowBtn.querySelector(".menu-item-label").textContent = "Syncing…";
+  const label = els.menuSyncNowBtn.querySelector(".menu-item-label");
+  label.textContent = "Syncing…";
   const {
     data: { session: authSession },
   } = await supabase.auth.getSession();
@@ -147,14 +168,52 @@ els.menuSyncNowBtn.addEventListener("click", async () => {
     body: {},
     headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
   });
-  els.menuSyncNowBtn.querySelector(".menu-item-label").textContent = "Sync now";
+  label.textContent = "Sync now";
   if (error) return showError(els.errorBox, error);
   if (detailThreadId) openThread(detailThreadId);
   else loadThreadList();
 });
-els.menuManageMailboxesBtn.addEventListener("click", () => {
-  window.location.href = "profile.html#manage-mailboxes";
+
+// ---------------------------------------------------------------------------
+// Thread list select mode — same shape as Dials' own (see enterSelectMode/
+// exitSelectMode in js/dials.js): a header-menu button toggles it, a bar
+// replaces the normal controls, tapping a row selects instead of opening it.
+// ---------------------------------------------------------------------------
+
+function enterThreadSelectMode() {
+  threadListSelectMode = true;
+  selectedThreadIds = new Set();
+  closePageHeaderMenu();
+  els.selectModeBar.classList.remove("hidden");
+  renderThreadList();
+}
+function exitThreadSelectMode() {
+  threadListSelectMode = false;
+  selectedThreadIds = new Set();
+  els.selectModeBar.classList.add("hidden");
+  renderThreadList();
+}
+els.menuSelectBtn.addEventListener("click", enterThreadSelectMode);
+els.selectBackBtn.addEventListener("click", exitThreadSelectMode);
+els.selectAllBtn.addEventListener("click", () => {
+  if (selectedThreadIds.size === currentThreadRows.length) selectedThreadIds = new Set();
+  else selectedThreadIds = new Set(currentThreadRows.map((t) => t.latest.thread_id));
+  renderThreadList();
 });
+
+async function setSelectedThreadsReadState(isRead) {
+  if (!selectedThreadIds.size) return;
+  const { error } = await supabase
+    .from("email_messages")
+    .update({ is_read: isRead })
+    .in("thread_id", [...selectedThreadIds])
+    .eq("direction", "inbound");
+  if (error) return showError(els.errorBox, error);
+  exitThreadSelectMode();
+  loadThreadList();
+}
+els.selectMarkReadBtn.addEventListener("click", () => setSelectedThreadsReadState(true));
+els.selectMarkUnreadBtn.addEventListener("click", () => setSelectedThreadsReadState(false));
 
 // ---------------------------------------------------------------------------
 // Thread list
@@ -163,9 +222,10 @@ els.menuManageMailboxesBtn.addEventListener("click", () => {
 const PAGE_SIZE = 300; // messages fetched to derive the thread list from
 
 function accountIdsForQuery() {
-  if (selectedAccountId) return [selectedAccountId];
-  if (canManageMail) return accounts.map((a) => a.id);
-  return null; // intern: no account filter — RLS alone scopes this to their own clients' messages
+  if (!canManageMail) return null; // intern: RLS alone scopes this to their own clients' messages
+  const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
+  if (!visible) return accounts.map((a) => a.id); // "select all" (default) — every mailbox this user can see
+  return accounts.filter((a) => visible.has(a.id)).map((a) => a.id);
 }
 
 async function loadThreadList() {
@@ -180,7 +240,7 @@ async function loadThreadList() {
   const ids = accountIdsForQuery();
   if (ids) {
     if (!ids.length) {
-      els.wrap.innerHTML = `<div class="empty-state">No mailboxes connected yet.${canManageMail ? " Add one from Manage mailboxes." : ""}</div>`;
+      els.wrap.innerHTML = `<div class="empty-state">No mailboxes connected yet.</div>`;
       return;
     }
     query = query.in("account_id", ids);
@@ -207,7 +267,12 @@ async function loadThreadList() {
     if (m.direction === "inbound" && !m.is_read) t.unread = true;
   }
 
-  const rows = [...threads.values()];
+  currentThreadRows = [...threads.values()];
+  renderThreadList();
+}
+
+function renderThreadList() {
+  const rows = currentThreadRows;
   if (!rows.length) {
     els.wrap.innerHTML = `<div class="empty-state">No messages yet.</div>`;
     return;
@@ -241,13 +306,26 @@ async function loadThreadList() {
         <div class="mc-sub">${escapeHtml(t.latest.subject || "(no subject)")}</div>
         <div class="mc-sub faint">${escapeHtml(t.latest.snippet || "")}</div>
       </div>
-      <div class="mc-sub faint" style="flex-shrink:0;">${escapeHtml(formatDate(t.latest.sent_at))}</div>
+      ${
+        threadListSelectMode
+          ? `<div class="select-circle ${selectedThreadIds.has(t.latest.thread_id) ? "selected" : ""}"></div>`
+          : `<div class="mc-sub faint" style="flex-shrink:0;">${escapeHtml(formatDate(t.latest.sent_at))}</div>`
+      }
     </div>`
     )
     .join("")}</div>`;
 
   els.wrap.querySelectorAll(".message-thread-row").forEach((row) => {
-    row.addEventListener("click", () => openThread(row.dataset.threadId));
+    row.addEventListener("click", () => {
+      const id = row.dataset.threadId;
+      if (threadListSelectMode) {
+        if (selectedThreadIds.has(id)) selectedThreadIds.delete(id);
+        else selectedThreadIds.add(id);
+        renderThreadList();
+        return;
+      }
+      openThread(id);
+    });
   });
 }
 
@@ -257,6 +335,25 @@ async function loadThreadList() {
 
 function exitDetail() {
   detailThreadId = null;
+}
+
+// Clicking a participant's name jumps straight to the Client or Dial record
+// their address is attached to (clients checked first, then dials — see
+// dials.html's own ?dial= deep link, added alongside clients.html's
+// existing ?client= one). A brief live lookup rather than something baked
+// into the message row at sync time, since most participants won't match
+// anything at all and this only ever needs to run once, on click.
+async function openParticipantRecord(address) {
+  if (!address) return;
+  const { data: client } = await supabase.from("clients").select("id").ilike("email", address).limit(1).maybeSingle();
+  if (client) {
+    window.location.href = `clients.html?client=${encodeURIComponent(client.id)}&tab=timeline`;
+    return;
+  }
+  const { data: dial } = await supabase.from("dials").select("id").ilike("email", address).limit(1).maybeSingle();
+  if (dial) {
+    window.location.href = `dials.html?dial=${encodeURIComponent(dial.id)}`;
+  }
 }
 
 async function openThread(threadId) {
@@ -290,16 +387,12 @@ async function openThread(threadId) {
 
   els.wrap.innerHTML = `
     <div class="thread-detail">
-      <button type="button" class="select-mode-btn" id="threadBackBtn" style="margin-bottom:12px;">Back</button>
       <h2 class="thread-detail-subject">${escapeHtml(msgs.find((m) => m.subject)?.subject || "(no subject)")}</h2>
       ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [])).join("")}
-      ${
-        canReply
-          ? `<div class="thread-reply-box">
-              <button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>
-            </div>`
-          : ""
-      }
+      <div class="thread-detail-actions">
+        <button type="button" class="btn secondary" id="threadBackBtn">Back</button>
+        ${canReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>` : ""}
+      </div>
     </div>
   `;
 
@@ -358,6 +451,11 @@ async function openThread(threadId) {
     });
   });
 
+  // Participant name → their Client/Dial record (see openParticipantRecord).
+  els.wrap.querySelectorAll("[data-participant-address]").forEach((el) => {
+    el.addEventListener("click", () => openParticipantRecord(el.dataset.participantAddress));
+  });
+
   // Mark inbound unread messages in this thread as read.
   const unreadIds = msgs.filter((m) => m.direction === "inbound" && !m.is_read).map((m) => m.id);
   if (unreadIds.length) {
@@ -368,17 +466,19 @@ async function openThread(threadId) {
 function threadMessageHTML(m, atts) {
   const date = new Date(m.sent_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const fromLabel = m.direction === "outbound" ? `${m.from_name || m.from_address} (you)` : m.from_name || m.from_address;
-  const toLabel = (m.to_addresses || []).map((a) => a.name || a.address).join(", ");
-  // allow-same-origin without allow-scripts: still fully blocks any script
-  // in the email HTML from running (that's what actually matters for
-  // safety), but lets this page measure the iframe's own contentDocument to
-  // resize it to its real content height (see the load listener in
-  // openThread below) — a fully opaque sandbox=\"\" origin blocks that
-  // measurement too, not just script execution, which is why that stricter
-  // setting left every HTML message stuck at min-height regardless of how
-  // short or long it actually was.
+  const fromClickable = m.direction === "outbound" ? "" : ` data-participant-address="${escapeHtml(m.from_address)}"`;
+  const toEntries = m.to_addresses || [];
+  const toLabel = toEntries
+    .map((a) => `<span class="thread-participant-name"${m.direction === "outbound" ? ` data-participant-address="${escapeHtml(a.address)}"` : ""}>${escapeHtml(a.name || a.address)}</span>`)
+    .join(", ");
   const bodyHTML = m.body_html
-    ? `<iframe class="thread-message-html" sandbox="allow-same-origin" srcdoc="${escapeHtml(m.body_html)}"></iframe>`
+    ? // allow-same-origin without allow-scripts: still fully blocks any script
+      // in the email HTML from running (that's what actually matters for
+      // safety), but lets this page measure the iframe's own contentDocument
+      // to resize it to its real content height (see the load listener
+      // above) — a fully opaque sandbox="" origin blocks that measurement
+      // too, not just script execution.
+      `<iframe class="thread-message-html" sandbox="allow-same-origin" srcdoc="${escapeHtml(m.body_html)}"></iframe>`
     : `<div class="thread-message-text">${escapeHtml(m.body_text || "").replace(/\n/g, "<br>")}</div>`;
   const attsHTML = atts.length
     ? `<div class="thread-message-attachments">${atts
@@ -391,10 +491,10 @@ function threadMessageHTML(m, atts) {
   return `
     <div class="thread-message ${m.direction}">
       <div class="thread-message-header">
-        <span class="thread-message-from">${escapeHtml(fromLabel)}</span>
+        <span class="thread-message-from thread-participant-name"${fromClickable}>${escapeHtml(fromLabel)}</span>
         <span class="thread-message-date">${escapeHtml(date)}</span>
       </div>
-      <div class="thread-message-to">To: ${escapeHtml(toLabel)}</div>
+      <div class="thread-message-to">To: ${toLabel}</div>
       ${bodyHTML}
       ${attsHTML}
     </div>`;
@@ -448,20 +548,21 @@ function renderComposeAttachments() {
   });
 }
 
-function openCompose({ mode, accountId, to, subject, inReplyTo, threadId }) {
+function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }) {
   pendingCompose = { mode, inReplyTo, threadId, attachments: [] };
   els.composeError.classList.add("hidden");
   els.composeTitle.textContent = mode === "reply" ? "Reply" : "New message";
   els.composeToInput.value = (to || []).join(", ");
   els.composeCcInput.value = "";
   els.composeSubjectInput.value = subject || "";
-  els.composeBody.innerHTML = "";
+  els.composeBody.innerHTML = body ? escapeHtml(body).replace(/\n/g, "<br>") : "";
   renderComposeAttachments();
 
   const usable = accounts.filter((a) => isAdmin || a.owner_id === profile.id);
-  els.composeFromSelect.innerHTML = usable.map((a) => `<option value="${a.id}">${escapeHtml(a.label)} (${escapeHtml(a.email_address)})</option>`).join("");
-  if (accountId) els.composeFromSelect.value = accountId;
-  else if (selectedAccountId) els.composeFromSelect.value = selectedAccountId;
+  els.composeFromSelect.innerHTML = usable.map((a) => `<option value="${a.id}">${escapeHtml(mailboxLabel(a))}</option>`).join("");
+  const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
+  const defaultAccountId = accountId || (visible && visible.size === 1 ? [...visible][0] : usable[0]?.id);
+  if (defaultAccountId) els.composeFromSelect.value = defaultAccountId;
   els.composeFromRow.classList.toggle("hidden", mode === "reply");
 
   els.composeModal.classList.remove("hidden");
@@ -526,7 +627,21 @@ els.composeSendBtn.addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 
 await loadAccounts();
-await loadOwnerNames();
-renderMailboxMenu();
 updateTitle();
 await loadThreadList();
+
+// Deep link from the Clients/Dials email quick-action icon (team lead/admin
+// only — see contactIcons.js's emailActionHTML): ?compose=1&to=&subject=&body=
+// opens straight into a new-message compose, prefilled.
+if (canManageMail) {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("compose") === "1") {
+    openCompose({
+      mode: "new",
+      to: params.get("to") ? [params.get("to")] : [],
+      subject: params.get("subject") || "",
+      body: params.get("body") || "",
+    });
+    window.history.replaceState({}, "", "messages.html");
+  }
+}

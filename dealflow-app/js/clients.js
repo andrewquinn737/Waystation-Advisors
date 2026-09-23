@@ -9,7 +9,7 @@ import {
   collectFormData,
   getMissingFields,
 } from "./clientForm.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
@@ -616,6 +616,7 @@ function renderTable() {
     row.addEventListener("click", () => openDetailModal(clients.find((c) => c.id === row.dataset.id)));
   });
   stopContactActionPropagation(els.tableWrap);
+  wireQuickSendButtons(els.tableWrap);
 }
 
 els.search.addEventListener("input", renderTable);
@@ -2209,6 +2210,7 @@ function renderModalBody() {
   } else if (currentSubTab === "profile") {
     wireCategoryDropdown();
     stopContactActionPropagation(els.clientModalBody);
+  wireQuickSendButtons(els.clientModalBody);
   }
 }
 
