@@ -1844,3 +1844,9 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
 /* Confirm/picker popups open on top of the fullscreen popup (same z-index
    fix as the Reports popup's own child popups above). */
 #deletedTabsReassignModal, #deletedTabsPurgeModal { z-index: 200; }
+
+/* Spinning sync icon shown right of the Messages title while a sync runs
+   (see runSync in js/messages.js). */
+.sync-spinner { flex-shrink: 0; color: var(--text-muted); margin-left: 8px; animation: sync-spin 1s linear infinite; }
+.sync-spinner.hidden { display: none; }
+@keyframes sync-spin { to { transform: rotate(360deg); } }

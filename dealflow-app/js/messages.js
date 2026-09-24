@@ -46,6 +46,7 @@ const els = {
   pageSettingsBtn: document.getElementById("pageSettingsBtn"),
   settingsMenu: document.getElementById("settingsMenu"),
   menuSyncNowBtn: document.getElementById("menuSyncNowBtn"),
+  syncSpinner: document.getElementById("syncSpinner"),
   menuSelectBtn: document.getElementById("menuSelectBtn"),
   menuFolderBtn: document.getElementById("menuFolderBtn"),
   menuFolderLabel: document.getElementById("menuFolderLabel"),
@@ -165,21 +166,51 @@ if (canManageMail) {
   });
 }
 
+// Runs email-sync for the mailboxes this account can see, with the spinning
+// icon next to the title for as long as it takes. One sync at a time — a
+// second call while one is running (e.g. tapping Sync now during the
+// automatic one on page open) just waits on the same run instead of
+// stacking a duplicate. Resolves to true on success, false on failure.
+let syncInFlight = null;
+function runSync() {
+  if (syncInFlight) return syncInFlight;
+  els.syncSpinner.classList.remove("hidden");
+  syncInFlight = (async () => {
+    try {
+      const {
+        data: { session: authSession },
+      } = await supabase.auth.getSession();
+      const { data, error } = await supabase.functions.invoke("email-sync", {
+        body: {},
+        headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e };
+    } finally {
+      els.syncSpinner.classList.add("hidden");
+      syncInFlight = null;
+    }
+  })();
+  return syncInFlight;
+}
+
+// Only refreshes what's on screen if it's safe to: the list view, and not
+// mid-Select — re-rendering under someone's selection (or an open thread they
+// might be reading) would yank it away for no reason.
+function refreshAfterSync() {
+  if (detailThreadId || threadListSelectMode) return;
+  loadThreadList();
+}
+
 els.menuSyncNowBtn.addEventListener("click", async () => {
   closePageHeaderMenu();
-  const label = els.menuSyncNowBtn.querySelector(".menu-item-label");
-  label.textContent = "Syncing…";
-  const {
-    data: { session: authSession },
-  } = await supabase.auth.getSession();
-  const { error } = await supabase.functions.invoke("email-sync", {
-    body: {},
-    headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
-  });
-  label.textContent = "Sync now";
-  if (error) return showError(els.errorBox, error);
+  const result = await runSync();
+  if (!result.ok) return showError(els.errorBox, result.error);
   if (detailThreadId) openThread(detailThreadId);
-  else loadThreadList();
+  else if (!threadListSelectMode) loadThreadList();
 });
 
 // ---------------------------------------------------------------------------
@@ -674,6 +705,20 @@ els.composeSendBtn.addEventListener("click", async () => {
 await loadAccounts();
 updateTitle();
 await loadThreadList();
+
+// Auto-sync on opening the Messages tab (team leads/admins only — an intern
+// has no mailboxes of their own, and email-sync rejects them anyway). Runs
+// in the background after the list has already rendered from what's stored,
+// so the page is usable immediately; the spinner by the title shows it's
+// working, and the list refreshes itself when it finishes. A failure here is
+// deliberately quiet (the 2-minute background sync keeps running regardless,
+// and a manual "Sync now" still reports errors).
+if (canManageMail && accounts.length) {
+  runSync().then((result) => {
+    if (result.ok) refreshAfterSync();
+    else console.error("Auto-sync failed", result.error);
+  });
+}
 
 // Deep link from the Clients/Dials email quick-action icon (team lead/admin
 // only — see contactIcons.js's emailActionHTML): ?compose=1&to=&subject=&body=
