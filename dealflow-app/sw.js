@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v13";
+const CACHE = "waystation-shell-v14";
 const SHELL = [
   "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
   "/dials.html", "/messages.html", "/finance.html", "/css/style.css",
@@ -86,7 +86,9 @@ self.addEventListener("push", (event) => {
       body: payload.body,
       icon: "/icons/icon-192.png",
       badge: "/icons/icon-192.png",
-      data: { url: "/profile.html" },
+      // send-push sets payload.url (new-email pings open Messages);
+      // anything without one keeps opening Profile as before.
+      data: { url: payload.url || "/profile.html" },
     })
   );
 });
