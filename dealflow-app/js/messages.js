@@ -509,14 +509,37 @@ async function openThread(threadId) {
     });
   });
 
-  // Wire attachment download links (signed URLs, generated on demand rather
-  // than stored — the bucket is private, see supabase migrations).
+  // Attachment chips: download the file (the bucket is private, so it's
+  // fetched with the signed-in session rather than linked). This used to
+  // createSignedUrl() and then window.open() the result — but that open
+  // happens after an await, outside the tap's own user gesture, so Safari/
+  // iOS and installed (PWA) mode silently blocked the pop-up and nothing
+  // ever appeared. Downloading the bytes and saving them through an <a
+  // download> click works in every browser, and stays inside the app.
   els.wrap.querySelectorAll("[data-attachment-path]").forEach((link) => {
     link.addEventListener("click", async (e) => {
       e.preventDefault();
-      const { data, error: signErr } = await supabase.storage.from("email-attachments").createSignedUrl(link.dataset.attachmentPath, 60);
-      if (signErr || !data?.signedUrl) return showError(els.errorBox, signErr || new Error("Could not open that attachment."));
-      window.open(data.signedUrl, "_blank", "noopener");
+      if (link.dataset.busy) return;
+      link.dataset.busy = "1";
+      const original = link.textContent;
+      link.textContent = "Opening…";
+      try {
+        const { data: blob, error: dlErr } = await supabase.storage.from("email-attachments").download(link.dataset.attachmentPath);
+        if (dlErr || !blob) throw dlErr || new Error("Could not open that attachment.");
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = link.dataset.attachmentName || "attachment";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (err) {
+        showError(els.errorBox, err);
+      } finally {
+        link.textContent = original;
+        delete link.dataset.busy;
+      }
     });
   });
 
@@ -530,6 +553,19 @@ async function openThread(threadId) {
   if (unreadIds.length) {
     await supabase.from("email_messages").update({ is_read: true }).in("id", unreadIds);
   }
+}
+
+// Mail servers' delivery reports (and some senders) attach parts with no
+// filename, which get stored as just "attachment" — give those a name and
+// extension that matches what they are so the saved file opens properly.
+function attachmentDisplayName(a) {
+  if (a.filename && a.filename !== "attachment") return a.filename;
+  const type = (a.content_type || "").toLowerCase();
+  if (type === "message/rfc822") return "original-message.eml";
+  if (type === "text/rfc822-headers") return "message-headers.txt";
+  if (type === "message/delivery-status") return "delivery-status.txt";
+  if (type.startsWith("text/")) return "attachment.txt";
+  return "attachment";
 }
 
 function threadMessageHTML(m, atts) {
@@ -553,7 +589,7 @@ function threadMessageHTML(m, atts) {
     ? `<div class="thread-message-attachments">${atts
         .map(
           (a) =>
-            `<a href="#" data-attachment-path="${escapeHtml(a.storage_path)}" class="thread-attachment-chip">${escapeHtml(a.filename)}</a>`
+            `<a href="#" data-attachment-path="${escapeHtml(a.storage_path)}" data-attachment-name="${escapeHtml(attachmentDisplayName(a))}" class="thread-attachment-chip">${escapeHtml(attachmentDisplayName(a))}</a>`
         )
         .join("")}</div>`
     : "";
