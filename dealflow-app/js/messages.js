@@ -47,6 +47,8 @@ const els = {
   settingsMenu: document.getElementById("settingsMenu"),
   menuSyncNowBtn: document.getElementById("menuSyncNowBtn"),
   menuSelectBtn: document.getElementById("menuSelectBtn"),
+  menuFolderBtn: document.getElementById("menuFolderBtn"),
+  menuFolderLabel: document.getElementById("menuFolderLabel"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
   mailboxesPopup: document.getElementById("mailboxesPopup"),
@@ -90,6 +92,7 @@ let accountOwnerNames = {}; // owner_id -> full_name, admin-only
 let detailThreadId = null; // null = list view
 let pendingCompose = null; // { attachments: [{filename, contentType, base64}] }
 let threadListSelectMode = false;
+let folderView = "received"; // "received" | "sent" — team leads/admins only (interns always see the one client-matched feed)
 let selectedThreadIds = new Set();
 let currentThreadRows = []; // the list currently rendered, for Select all / bulk actions
 
@@ -121,12 +124,13 @@ function mailboxLabel(a) {
 
 function updateTitle() {
   const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
+  const suffix = folderView === "sent" ? " · Sent" : "";
   if (!visible || visible.size !== 1) {
-    els.messagesTitle.textContent = "Messages";
+    els.messagesTitle.textContent = `Messages${suffix}`;
     return;
   }
   const acct = accounts.find((a) => visible.has(a.id));
-  els.messagesTitle.textContent = acct ? acct.email_address : "Messages";
+  els.messagesTitle.textContent = `${acct ? acct.email_address : "Messages"}${suffix}`;
 }
 
 if (canManageMail) {
@@ -198,6 +202,16 @@ function exitThreadSelectMode() {
   renderThreadList();
 }
 els.menuSelectBtn.addEventListener("click", enterThreadSelectMode);
+
+els.menuFolderBtn.addEventListener("click", () => {
+  folderView = folderView === "received" ? "sent" : "received";
+  els.menuFolderLabel.textContent = folderView === "sent" ? "Viewing: Sent" : "Viewing: Received";
+  closePageHeaderMenu();
+  if (threadListSelectMode) exitThreadSelectMode();
+  updateTitle();
+  exitDetail();
+  loadThreadList();
+});
 els.selectBackBtn.addEventListener("click", exitThreadSelectMode);
 els.selectAllBtn.addEventListener("click", () => {
   if (selectedThreadIds.size === currentThreadRows.length) selectedThreadIds = new Set();
@@ -268,6 +282,7 @@ async function loadThreadList() {
     }
     query = query.in("account_id", ids);
   }
+  if (canManageMail) query = query.eq("direction", folderView === "sent" ? "outbound" : "inbound");
   const { data, error } = await query;
   if (error) {
     els.wrap.innerHTML = "";
@@ -297,7 +312,7 @@ async function loadThreadList() {
 function renderThreadList() {
   const rows = currentThreadRows;
   if (!rows.length) {
-    els.wrap.innerHTML = `<div class="empty-state">No messages yet.</div>`;
+    els.wrap.innerHTML = `<div class="empty-state">${folderView === "sent" && canManageMail ? "No sent messages yet." : "No messages yet."}</div>`;
     return;
   }
 
@@ -641,8 +656,15 @@ els.composeSendBtn.addEventListener("click", async () => {
   }
   const openThreadId = data.thread_id;
   closeCompose();
-  if (openThreadId) openThread(openThreadId);
-  else loadThreadList();
+  if (openThreadId) await openThread(openThreadId);
+  else await loadThreadList();
+  // The message went out, but say so plainly if anything about it wasn't
+  // clean (a recipient the mail server refused, or no copy filed in the
+  // mailbox's real Sent folder) rather than silently looking fine.
+  const notes = [];
+  if (data.warning) notes.push(data.warning);
+  if (data.saved_to_sent === false) notes.push("A copy couldn't be saved to the mailbox's Sent folder.");
+  if (notes.length) showError(els.errorBox, new Error(notes.join(" ")));
 });
 
 // ---------------------------------------------------------------------------
