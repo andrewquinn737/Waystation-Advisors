@@ -579,19 +579,20 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; overflow-x: hidden; box-sizing: border-box; }
 .modal h2 { margin: 0 0 4px; font-size: 17px; }
 
-/* Mass email confirmation: same popup, same top edge, but stretched down to
-   the bottom of the screen so the Send/Cancel buttons sit at the bottom and
-   the recipient list gets all the room in between (the Sending list takes the
-   spare height and scrolls; Skipped keeps a capped share). */
-#massEmailModal, html.is-mobile-device #massEmailModal { align-items: stretch; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); overflow: hidden; }
+/* Mass email confirmation: same popup and top edge, stretched down toward the
+   bottom of the screen — stopping a little short so its rounded corners don't
+   touch the screen edge. Header stays put, one scroll box (Sending + Skipped
+   together) takes all the height in between, and Send/Cancel sit right below
+   it at the bottom. */
+#massEmailModal, html.is-mobile-device #massEmailModal { align-items: stretch; padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); overflow: hidden; }
 #massEmailModal .modal { display: flex; flex-direction: column; overflow: hidden; }
 #massEmailModal .modal > * { flex: 0 0 auto; }
-#massEmailModal #massEmailList { flex: 1 1 0; min-height: 60px; overflow-y: auto; }
-#massEmailModal #massEmailList.hidden { display: none; }
-#massEmailModal #massEmailSkipped { display: flex; flex-direction: column; flex: 0 1 auto; max-height: 30%; min-height: 0; }
-#massEmailModal #massEmailSkipped.hidden { display: none; }
-#massEmailModal #massEmailSkippedList { overflow-y: auto; min-height: 0; }
-#massEmailModal .form-actions { margin-top: auto; padding-top: 8px; }
+#massEmailModal #massEmailScroll {
+  flex: 1 1 0; min-height: 80px; overflow-y: auto; margin: 8px 0;
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+}
+#massEmailModal #massEmailScroll .hidden { display: none; }
+#massEmailModal .form-actions { margin-top: 0; padding-top: 4px; }
 .modal .close { position: absolute; }
 
 /* Import-dials CSV picker (see #importDialsDropzone/wireImportDropzone in
