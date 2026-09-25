@@ -535,12 +535,18 @@ const DIAL_FIELD_ALIASES = {
   // AI-written cold-outreach emails (one pair per company), stored on the dial
   // but never shown in the regular dial view — used by Advanced settings'
   // Recommended first/second email (see resolveRecommendedEmail in
-  // js/advancedSettings.js) and by Select mode's Mass email. One "Subject"
-  // column serves both: it's Email 1's subject, and Email 2 is sent as a
-  // follow-up threaded onto Email 1 ("Re: <subject>").
-  email_1: ["email 1", "email1", "email one", "first email", "recommended first email"],
+  // js/advancedSettings.js) and by Select mode's Mass email. Each email comes
+  // in as separate parts that rowsToDials compiles into the dial's single
+  // email_1/email_2 text (one blank line between parts): Email 1 =
+  // greeting + pitch + CTA, Email 2 = greeting + body. One "Subject" column
+  // serves both: it's Email 1's subject, and Email 2 is sent as a follow-up
+  // threaded onto Email 1 ("Re: <subject>").
+  email_1_greeting: ["email 1 greeting"],
+  email_1_pitch: ["email 1 pitch"],
+  email_1_cta: ["email 1 cta", "email 1 call to action"],
   email_subject: ["subject", "email subject", "subject line"],
-  email_2: ["email 2", "email2", "email two", "second email", "recommended second email"],
+  email_2_greeting: ["email 2 greeting"],
+  email_2_body: ["email 2 body"],
 };
 
 // A "Status" column's cell values (as seen in real CSV exports) -> this
@@ -710,6 +716,19 @@ function rowsToDials(rows, listId) {
       }
       delete d.first_name;
       delete d.last_name;
+      // Compile each email's parts into its one stored text, a blank line
+      // between parts (empty parts are skipped, so a missing CTA leaves no
+      // stray gap). Sets nothing at all if a CSV has none of the parts.
+      const compile = (...parts) => parts.filter(Boolean).join("\n\n");
+      const email1 = compile(d.email_1_greeting, d.email_1_pitch, d.email_1_cta);
+      const email2 = compile(d.email_2_greeting, d.email_2_body);
+      if (email1) d.email_1 = email1;
+      if (email2) d.email_2 = email2;
+      delete d.email_1_greeting;
+      delete d.email_1_pitch;
+      delete d.email_1_cta;
+      delete d.email_2_greeting;
+      delete d.email_2_body;
       if (d.state) d.state = normalizeStateValue(d.state);
       // A sheet that lists the same number under both mobile and company
       // can't tell us which one it really is, so it's saved once, under
