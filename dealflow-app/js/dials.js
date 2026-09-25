@@ -2111,7 +2111,7 @@ els.selectDeleteBtn.addEventListener("click", () => {
 // them (scheduled_emails table).
 //
 // The emails are dripped out, not blasted: the first goes immediately, each
-// next one a random 1-3 minutes after the previous. Because that can take
+// next one a random 3-6 minutes after the previous. Because that can take
 // hours for a big batch, the schedule lives in the database and is sent by a
 // server job every minute (dispatch_scheduled_emails -> the email-send Edge
 // Function, the same one Messages uses), so it keeps running with the tab
@@ -2120,8 +2120,8 @@ els.selectDeleteBtn.addEventListener("click", () => {
 // Still-pending ones can be cancelled from this same popup.
 // ---------------------------------------------------------------------------
 
-const MASS_EMAIL_MIN_GAP_S = 60;
-const MASS_EMAIL_MAX_GAP_S = 180;
+const MASS_EMAIL_MIN_GAP_S = 180;
+const MASS_EMAIL_MAX_GAP_S = 360;
 let massPlan = null; // { send, mailbox, offsetsMs, sendAts|null, timer }
 
 async function loadMyMailboxes() {
@@ -2142,8 +2142,8 @@ function formatSendTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-// First email immediately (offset 0), then each one 1-3 minutes after the
-// previous — cumulative, so e.g. 0, 2, 5, 6 minutes.
+// First email immediately (offset 0), then each one 3-6 minutes after the
+// previous — cumulative, so e.g. 0, 4, 9, 14 minutes.
 function randomOffsetsMs(count) {
   const out = [];
   let t = 0;
@@ -2152,6 +2152,37 @@ function randomOffsetsMs(count) {
     out.push(t);
   }
   return out;
+}
+
+// Per-mailbox daily cap (25 per rolling 24h, enforced by the database and
+// email-send too): returns one message per mailbox that `send` would push over.
+async function findQuotaViolations(send, defaultAccountId) {
+  const wanted = new Map();
+  send.forEach((x) => {
+    const id = x.accountId || defaultAccountId;
+    wanted.set(id, (wanted.get(id) || 0) + 1);
+  });
+  const mailboxes = await loadMyMailboxes();
+  const problems = [];
+  for (const [accountId, count] of wanted) {
+    const { data, error } = await supabase.rpc("mailbox_daily_quota", { p_account_id: accountId });
+    const q = Array.isArray(data) ? data[0] : data;
+    if (error || !q) continue; // the database re-checks on insert regardless
+    const remaining = Math.max(0, q.daily_limit - q.sent - q.scheduled);
+    if (count > remaining) {
+      const mb = mailboxes.find((m) => m.id === accountId);
+      problems.push(
+        `Daily limit: ${(mb && mb.email_address) || "this mailbox"} can send at most ${q.daily_limit} emails per 24 hours — ${q.sent} sent and ${q.scheduled} scheduled already, so ${remaining} more allowed, but this batch has ${count}. Select fewer dials.`
+      );
+    }
+  }
+  return problems;
+}
+
+function showMassEmailError(message) {
+  els.massEmailProgress.classList.remove("hidden");
+  els.massEmailProgress.style.color = "var(--danger)";
+  els.massEmailProgress.textContent = message;
 }
 
 async function fetchPendingScheduled() {
@@ -2271,6 +2302,7 @@ async function refreshMassEmailPendingBanner() {
 
 els.massEmailCancelPendingBtn.addEventListener("click", async () => {
   els.massEmailCancelPendingBtn.disabled = true;
+  els.massEmailProgress.style.color = "";
   const { error } = await supabase.from("scheduled_emails").update({ status: "cancelled" }).eq("created_by", profile.id).eq("status", "pending");
   els.massEmailCancelPendingBtn.disabled = false;
   if (error) return showError(els.errorBox, error);
@@ -2298,7 +2330,7 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
     : (kind === "second"
         ? `The Recommended second email will go out as a follow-up reply to each dial's first email (same thread, from the mailbox that sent it)`
         : `The Recommended first email will go out from ${mailbox.email_address}`) +
-      `, one at a time — the first right away, then each one a random 1–3 minutes after the last. It keeps sending even if you close the app. Times:`;
+      `, one at a time — the first right away, then each one a random 3–6 minutes after the last. It keeps sending even if you close the app. Times:`;
   els.massEmailList.innerHTML = send
     .map((x, i) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span> — <strong data-time-idx="${i}"></strong></li>`)
     .join("");
@@ -2311,6 +2343,7 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
     .join("");
   els.massEmailSkipped.classList.toggle("hidden", !skipped.length);
   els.massEmailProgress.classList.add("hidden");
+  els.massEmailProgress.style.color = "";
   els.massEmailProgress.textContent = "";
   els.massEmailSendBtn.classList.toggle("hidden", !send.length);
   els.massEmailSendBtn.disabled = false;
@@ -2318,6 +2351,10 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   els.massEmailCancelBtn.textContent = "Cancel";
   renderMassEmailTimes();
   massPlan.timer = setInterval(renderMassEmailTimes, 1000);
+  if (send.length) {
+    const problems = await findQuotaViolations(send, mailbox.id);
+    if (problems.length) showMassEmailError(problems.join(" "));
+  }
   refreshMassEmailPendingBanner();
   els.massEmailModal.classList.remove("hidden");
   lockPageScroll();
@@ -2332,6 +2369,12 @@ els.massEmailCancelBtn.addEventListener("click", () => {
 els.massEmailSendBtn.addEventListener("click", async () => {
   if (!massPlan || massPlan.sendAts || !massPlan.send.length) return;
   els.massEmailSendBtn.disabled = true;
+  els.massEmailProgress.style.color = "";
+  const problems = await findQuotaViolations(massPlan.send, massPlan.mailbox.id);
+  if (problems.length) {
+    els.massEmailSendBtn.disabled = false;
+    return showMassEmailError(problems.join(" "));
+  }
   const now = Date.now();
   const sendAts = massPlan.offsetsMs.map((o) => now + o);
   const rows = massPlan.send.map((x, i) => ({
@@ -2349,7 +2392,7 @@ els.massEmailSendBtn.addEventListener("click", async () => {
   const { error } = await supabase.from("scheduled_emails").insert(rows);
   if (error) {
     els.massEmailSendBtn.disabled = false;
-    return showError(els.errorBox, error);
+    return showMassEmailError(error.message || "Couldn't schedule the emails.");
   }
   massPlan.sendAts = sendAts;
   stopMassEmailClock();
