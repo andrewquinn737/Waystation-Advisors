@@ -550,3 +550,16 @@ export function selectedRecommendedEmailKind(profile) {
   if (profile.recommended_second_email_enabled) return "second";
   return null;
 }
+
+// Sign-off for the Recommended emails (they go out automatically, so nobody
+// is there to type one): a blank line after the last paragraph, then
+// "Thanks," and the sender's first name on the next line. Skipped if the
+// text already ends in a sign-off of its own, so an email whose CSV text
+// already says "Thanks,\nName" never gets a second one.
+export function withSignoff(body, senderName) {
+  const first = firstNameOf(senderName);
+  const text = (body || "").replace(/\s+$/, "");
+  if (!text || !first) return text;
+  if (/(^|\n)\s*(thanks|thank you|best|regards|best regards|sincerely|cheers)[,!.]?\s*\n[^\n]{1,60}\s*$/i.test(text)) return text;
+  return `${text}\n\nThanks,\n${first}`;
+}

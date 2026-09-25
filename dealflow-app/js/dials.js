@@ -12,6 +12,7 @@ import {
   resolveAboutUsEmailSubject,
   resolveRecommendedEmail,
   selectedRecommendedEmailKind,
+  withSignoff,
 } from "./advancedSettings.js";
 import { findPriorOutbound, followUpAlreadySent, stripReplyPrefix } from "./followUp.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
@@ -2104,10 +2105,18 @@ const MASS_EMAIL_MIN_GAP_S = 60;
 const MASS_EMAIL_MAX_GAP_S = 180;
 let massPlan = null; // { send, mailbox, offsetsMs, sendAts|null, timer }
 
+async function loadMyMailboxes() {
+  const { data, error } = await supabase.from("email_accounts").select("id, email_address, label").eq("owner_id", profile.id);
+  return error || !data ? [] : data;
+}
+
+function pickPrimaryMailbox(mailboxes) {
+  if (!mailboxes.length) return null;
+  return mailboxes.find((m) => (m.email_address || "").toLowerCase() === (profile.email || "").toLowerCase()) || mailboxes[0];
+}
+
 async function findPrimaryMailbox() {
-  const { data, error } = await supabase.from("email_accounts").select("id, email_address").eq("owner_id", profile.id);
-  if (error || !data || !data.length) return null;
-  return data.find((m) => (m.email_address || "").toLowerCase() === (profile.email || "").toLowerCase()) || data[0];
+  return pickPrimaryMailbox(await loadMyMailboxes());
 }
 
 function formatSendTime(ms) {
@@ -2146,6 +2155,14 @@ async function planMassEmail() {
   const send = [];
   const skipped = [];
   const pending = await fetchPendingScheduled();
+  const mailboxes = await loadMyMailboxes();
+  const primary = pickPrimaryMailbox(mailboxes);
+  // Every automatic email ends "Thanks," + the first name of the mailbox it's
+  // sent from (the name the recipient sees on the From line).
+  const signed = (body, accountId) => {
+    const mb = mailboxes.find((m) => m.id === accountId);
+    return withSignoff(body, (mb && mb.label) || profile.full_name);
+  };
   const isQueued = (to, body) => pending.some((p) => (p.to_address || "").toLowerCase() === to.toLowerCase() && p.body_text === body);
   for (const d of dials.filter((x) => selectedDialIds.has(x.id))) {
     const r = resolveRecommendedEmail(profile, d);
@@ -2158,15 +2175,16 @@ async function planMassEmail() {
       skipped.push({ name, why: "no email text imported" });
       continue;
     }
-    if (isQueued(d.email, r.body)) {
+    const prior = await findPriorOutbound(d.email, r.baseSubject);
+    const body = signed(r.body, r.followUp ? prior && prior.account_id : primary && primary.id);
+    if (isQueued(d.email, body)) {
       skipped.push({ name, why: "already scheduled" });
       continue;
     }
-    const prior = await findPriorOutbound(d.email, r.baseSubject);
     if (!r.followUp) {
       if (!r.subject) skipped.push({ name, why: "no subject line" });
       else if (prior) skipped.push({ name, why: "first email already sent" });
-      else send.push({ dialId: d.id, name, to: d.email, subject: r.subject, body: r.body });
+      else send.push({ dialId: d.id, name, to: d.email, subject: r.subject, body });
       continue;
     }
     if (!prior) skipped.push({ name, why: "first email not sent yet" });
@@ -2177,7 +2195,7 @@ async function planMassEmail() {
         name,
         to: d.email,
         subject: "Re: " + stripReplyPrefix(prior.subject),
-        body: r.body,
+        body,
         accountId: prior.account_id,
         inReplyTo: prior.message_id,
         threadId: prior.thread_id,
@@ -2552,7 +2570,7 @@ function renderDialsTable() {
 // whichever is actually on without needing to check which one first.
 function resolveEmailBody(dial) {
   const recommended = resolveRecommendedEmail(profile, dial);
-  if (recommended) return recommended.body;
+  if (recommended) return withSignoff(recommended.body, profile.full_name);
   return resolvePersonalizedEmailBody(profile, dial) || resolveAboutUsEmailBody(profile, dial);
 }
 function resolveEmailSubject(dial) {
