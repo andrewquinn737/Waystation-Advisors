@@ -218,6 +218,10 @@ a:hover { text-decoration: underline; }
   border: 1.5px solid var(--tabbar-active-border);
 }
 .bottom-tabbar a.active svg { fill: currentColor; }
+/* The envelope can't be solid-filled like the others — the fill would swallow
+   its own flap line and read as a black rectangle. Selected = the same
+   envelope drawn bolder instead. */
+.bottom-tabbar a.active svg.nav-mail { fill: none; stroke-width: 3.2; }
 /* Tap-press feedback (any tab, not just the selected one) is intentionally
    its own separate token from --tabbar-active-bg above — that one went
    transparent as part of removing the selected-tab color fill, and reusing

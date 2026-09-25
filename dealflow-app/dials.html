@@ -302,6 +302,10 @@
   <div class="modal-backdrop bottom-sheet hidden" id="massEmailModal">
     <div class="modal">
       <h2 id="massEmailTitle">Send Recommended first email?</h2>
+      <div class="hidden" id="massEmailPending" style="display:flex; align-items:center; gap:10px; justify-content:space-between; background:var(--gold-soft); border-radius:8px; padding:8px 10px; margin:8px 0;">
+        <span class="help-text" id="massEmailPendingText" style="margin:0;"></span>
+        <button type="button" class="btn secondary small" id="massEmailCancelPendingBtn">Cancel remaining</button>
+      </div>
       <p class="help-text" id="massEmailSummary"></p>
       <ul id="massEmailList" class="mass-email-list" style="max-height:200px; overflow-y:auto; margin:8px 0; padding-left:20px; list-style:disc;"></ul>
       <div class="hidden" id="massEmailSkipped">

@@ -251,6 +251,9 @@ const els = {
   massEmailSkippedTitle: document.getElementById("massEmailSkippedTitle"),
   massEmailSkippedList: document.getElementById("massEmailSkippedList"),
   massEmailProgress: document.getElementById("massEmailProgress"),
+  massEmailPending: document.getElementById("massEmailPending"),
+  massEmailPendingText: document.getElementById("massEmailPendingText"),
+  massEmailCancelPendingBtn: document.getElementById("massEmailCancelPendingBtn"),
   massEmailSendBtn: document.getElementById("massEmailSendBtn"),
   massEmailCancelBtn: document.getElementById("massEmailCancelBtn"),
   selectMoveHint: document.getElementById("selectMoveHint"),
@@ -2083,17 +2086,22 @@ els.selectDeleteBtn.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Mass email — Select mode's 5th button, only shown while a Recommended
 // first/second email is the selected Advanced-settings option. Confirms the
-// email type + recipients, then sends each selected dial's own Email 1/2
-// straight from the team lead's primary mailbox through the same email-send
-// Edge Function Messages uses, so every message is filed in the mailbox's
-// real Sent folder AND shows up under Messages -> Sent — no trip to Messages.
-// Sent one at a time with a short pause (gentler on the mail server than a
-// burst) and a live progress line; a failure on one dial never stops the rest.
+// email type + recipients WITH the time each one will go out, then queues
+// them (scheduled_emails table).
+//
+// The emails are dripped out, not blasted: the first goes immediately, each
+// next one a random 1-3 minutes after the previous. Because that can take
+// hours for a big batch, the schedule lives in the database and is sent by a
+// server job every minute (dispatch_scheduled_emails -> the email-send Edge
+// Function, the same one Messages uses), so it keeps running with the tab
+// closed or the phone locked. Each message is filed in the mailbox's real
+// Sent folder and shows up under Messages -> Sent at the moment it goes out.
+// Still-pending ones can be cancelled from this same popup.
 // ---------------------------------------------------------------------------
 
-const MASS_EMAIL_PAUSE_MS = 1500;
-let massEmailRunning = false;
-let massEmailStopRequested = false;
+const MASS_EMAIL_MIN_GAP_S = 60;
+const MASS_EMAIL_MAX_GAP_S = 180;
+let massPlan = null; // { send, mailbox, offsetsMs, sendAts|null, timer }
 
 async function findPrimaryMailbox() {
   const { data, error } = await supabase.from("email_accounts").select("id, email_address").eq("owner_id", profile.id);
@@ -2101,14 +2109,43 @@ async function findPrimaryMailbox() {
   return data.find((m) => (m.email_address || "").toLowerCase() === (profile.email || "").toLowerCase()) || data[0];
 }
 
+function formatSendTime(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+// First email immediately (offset 0), then each one 1-3 minutes after the
+// previous — cumulative, so e.g. 0, 2, 5, 6 minutes.
+function randomOffsetsMs(count) {
+  const out = [];
+  let t = 0;
+  for (let i = 0; i < count; i++) {
+    if (i > 0) t += (MASS_EMAIL_MIN_GAP_S + Math.floor(Math.random() * (MASS_EMAIL_MAX_GAP_S - MASS_EMAIL_MIN_GAP_S + 1))) * 1000;
+    out.push(t);
+  }
+  return out;
+}
+
+async function fetchPendingScheduled() {
+  const { data } = await supabase
+    .from("scheduled_emails")
+    .select("id, to_address, body_text, send_at, status")
+    .eq("created_by", profile.id)
+    .in("status", ["pending", "sending"])
+    .order("send_at", { ascending: true });
+  return data || [];
+}
+
 // Works out, per selected dial, what Mass email would send or why it skips.
 // First email: skipped if this address already got that subject (so running
 // it twice never double-sends). Second email: a follow-up threaded onto the
 // first email already sent to this address — skipped if the first was never
-// sent, or if the follow-up already went out.
+// sent, or if the follow-up already went out. Either kind is also skipped if
+// the same message is already sitting in the schedule.
 async function planMassEmail() {
   const send = [];
   const skipped = [];
+  const pending = await fetchPendingScheduled();
+  const isQueued = (to, body) => pending.some((p) => (p.to_address || "").toLowerCase() === to.toLowerCase() && p.body_text === body);
   for (const d of dials.filter((x) => selectedDialIds.has(x.id))) {
     const r = resolveRecommendedEmail(profile, d);
     const name = dialDisplayName(d);
@@ -2120,17 +2157,22 @@ async function planMassEmail() {
       skipped.push({ name, why: "no email text imported" });
       continue;
     }
+    if (isQueued(d.email, r.body)) {
+      skipped.push({ name, why: "already scheduled" });
+      continue;
+    }
     const prior = await findPriorOutbound(d.email, r.baseSubject);
     if (!r.followUp) {
       if (!r.subject) skipped.push({ name, why: "no subject line" });
       else if (prior) skipped.push({ name, why: "first email already sent" });
-      else send.push({ name, to: d.email, subject: r.subject, body: r.body });
+      else send.push({ dialId: d.id, name, to: d.email, subject: r.subject, body: r.body });
       continue;
     }
     if (!prior) skipped.push({ name, why: "first email not sent yet" });
     else if (await followUpAlreadySent(prior.message_id)) skipped.push({ name, why: "follow-up already sent" });
     else
       send.push({
+        dialId: d.id,
         name,
         to: d.email,
         subject: "Re: " + stripReplyPrefix(prior.subject),
@@ -2143,10 +2185,64 @@ async function planMassEmail() {
   return { send, skipped };
 }
 
+function stopMassEmailClock() {
+  if (massPlan && massPlan.timer) {
+    clearInterval(massPlan.timer);
+    massPlan.timer = null;
+  }
+}
+
 function closeMassEmailModal() {
+  stopMassEmailClock();
   els.massEmailModal.classList.add("hidden");
   unlockPageScroll();
 }
+
+// "Sending" bullets: name, address, and the time it goes out. Until the user
+// confirms, times are live (offset from right now, so what's shown is what
+// they'll get if they confirm this second); after confirming they're frozen.
+function renderMassEmailTimes() {
+  if (!massPlan) return;
+  const base = Date.now();
+  els.massEmailList.querySelectorAll("[data-time-idx]").forEach((el) => {
+    const i = Number(el.dataset.timeIdx);
+    el.textContent = formatSendTime(massPlan.sendAts ? massPlan.sendAts[i] : base + massPlan.offsetsMs[i]);
+  });
+}
+
+async function refreshMassEmailPendingBanner() {
+  const pending = await fetchPendingScheduled();
+  // Sends that failed in the last day (mail server refused, bad login, ...) —
+  // otherwise a queued email failing later would go unnoticed.
+  const { data: failed } = await supabase
+    .from("scheduled_emails")
+    .select("recipient_name, error")
+    .eq("created_by", profile.id)
+    .eq("status", "failed")
+    .gte("send_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+  const failedList = failed || [];
+  els.massEmailPending.classList.toggle("hidden", !pending.length && !failedList.length);
+  els.massEmailCancelPendingBtn.classList.toggle("hidden", !pending.length);
+  const parts = [];
+  if (pending.length) {
+    const last = Math.max(...pending.map((p) => new Date(p.send_at).getTime()));
+    parts.push(`${pending.length} email${pending.length === 1 ? " is" : "s are"} still scheduled — last one goes out at ${formatSendTime(last)}.`);
+  }
+  if (failedList.length) {
+    parts.push(`${failedList.length} failed in the last day: ${failedList.map((f) => `${f.recipient_name || "?"} (${f.error || "error"})`).join("; ")}.`);
+  }
+  els.massEmailPendingText.textContent = parts.join(" ");
+}
+
+els.massEmailCancelPendingBtn.addEventListener("click", async () => {
+  els.massEmailCancelPendingBtn.disabled = true;
+  const { error } = await supabase.from("scheduled_emails").update({ status: "cancelled" }).eq("created_by", profile.id).eq("status", "pending");
+  els.massEmailCancelPendingBtn.disabled = false;
+  if (error) return showError(els.errorBox, error);
+  await refreshMassEmailPendingBanner();
+  els.massEmailProgress.classList.remove("hidden");
+  els.massEmailProgress.textContent = "Cancelled every email that hadn't gone out yet.";
+});
 
 els.selectMassEmailBtn.addEventListener("click", async () => {
   const kind = selectedRecommendedEmailKind(profile);
@@ -2158,13 +2254,19 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   const mailbox = await findPrimaryMailbox();
   if (!mailbox) return showError(els.errorBox, new Error("No connected mailbox found to send from — add one under Messages first."));
 
+  stopMassEmailClock();
+  massPlan = { send, mailbox, offsetsMs: randomOffsetsMs(send.length), sendAts: null, timer: null };
+
   els.massEmailTitle.textContent = kind === "second" ? "Send Recommended second email (follow-up)?" : "Send Recommended first email?";
   els.massEmailSummary.textContent = !send.length
     ? "None of the selected dials can be emailed."
-    : kind === "second"
-      ? `The Recommended second email will be sent as a follow-up reply to the first email (same thread, from the mailbox that sent it) to ${send.length} dial${send.length === 1 ? "" : "s"}:`
-      : `The Recommended first email will be sent from ${mailbox.email_address} to ${send.length} dial${send.length === 1 ? "" : "s"}:`;
-  els.massEmailList.innerHTML = send.map((x) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span></li>`).join("");
+    : (kind === "second"
+        ? `The Recommended second email will go out as a follow-up reply to each dial's first email (same thread, from the mailbox that sent it)`
+        : `The Recommended first email will go out from ${mailbox.email_address}`) +
+      `, one at a time — the first right away, then each one a random 1–3 minutes after the last. It keeps sending even if you close the app. Times:`;
+  els.massEmailList.innerHTML = send
+    .map((x, i) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span> — <strong data-time-idx="${i}"></strong></li>`)
+    .join("");
   els.massEmailList.classList.toggle("hidden", !send.length);
   els.massEmailSkippedTitle.textContent = `Skipped (${skipped.length}):`;
   els.massEmailSkippedList.innerHTML = skipped
@@ -2177,73 +2279,52 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   els.massEmailSendBtn.disabled = false;
   els.massEmailSendBtn.textContent = "Send";
   els.massEmailCancelBtn.textContent = "Cancel";
+  renderMassEmailTimes();
+  massPlan.timer = setInterval(renderMassEmailTimes, 1000);
+  refreshMassEmailPendingBanner();
   els.massEmailModal.classList.remove("hidden");
   lockPageScroll();
-  els.massEmailModal._plan = { send, mailbox };
 });
 
 els.massEmailCancelBtn.addEventListener("click", () => {
-  // Mid-run this becomes "Stop" — finishes the message in flight, sends no more.
-  if (massEmailRunning) {
-    massEmailStopRequested = true;
-    els.massEmailCancelBtn.textContent = "Stopping…";
-    return;
-  }
+  const scheduledNow = !!(massPlan && massPlan.sendAts);
   closeMassEmailModal();
+  if (scheduledNow) exitSelectMode();
 });
 
 els.massEmailSendBtn.addEventListener("click", async () => {
-  const plan = els.massEmailModal._plan;
-  if (!plan || massEmailRunning) return;
-  massEmailRunning = true;
-  massEmailStopRequested = false;
+  if (!massPlan || massPlan.sendAts || !massPlan.send.length) return;
   els.massEmailSendBtn.disabled = true;
-  els.massEmailCancelBtn.textContent = "Stop";
-  els.massEmailProgress.classList.remove("hidden");
-  const {
-    data: { session: authSession },
-  } = await supabase.auth.getSession();
-  const failed = [];
-  let sent = 0;
-  for (let i = 0; i < plan.send.length; i++) {
-    if (massEmailStopRequested) break;
-    const item = plan.send[i];
-    els.massEmailProgress.textContent = `Sending ${i + 1} of ${plan.send.length} — ${item.name}…`;
-    try {
-      const { data, error } = await supabase.functions.invoke("email-send", {
-        body: {
-          account_id: item.accountId || plan.mailbox.id,
-          to: [item.to],
-          subject: item.subject,
-          text: item.body,
-          in_reply_to: item.inReplyTo,
-          thread_id: item.threadId,
-        },
-        headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
-      });
-      if (error || data?.error) throw error || new Error(data.error);
-      sent += 1;
-    } catch (e) {
-      failed.push(`${item.name} (${(e && e.message) || "failed"})`);
-    }
-    if (i < plan.send.length - 1 && !massEmailStopRequested) await new Promise((r) => setTimeout(r, MASS_EMAIL_PAUSE_MS));
+  const now = Date.now();
+  const sendAts = massPlan.offsetsMs.map((o) => now + o);
+  const rows = massPlan.send.map((x, i) => ({
+    created_by: profile.id,
+    account_id: x.accountId || massPlan.mailbox.id,
+    dial_id: x.dialId,
+    recipient_name: x.name,
+    to_address: x.to,
+    subject: x.subject,
+    body_text: x.body,
+    in_reply_to: x.inReplyTo || null,
+    thread_id: x.threadId || null,
+    send_at: new Date(sendAts[i]).toISOString(),
+  }));
+  const { error } = await supabase.from("scheduled_emails").insert(rows);
+  if (error) {
+    els.massEmailSendBtn.disabled = false;
+    return showError(els.errorBox, error);
   }
-  const notAttempted = plan.send.length - sent - failed.length;
-  massEmailRunning = false;
-  els.massEmailProgress.textContent =
-    `Sent ${sent} of ${plan.send.length}.` +
-    (notAttempted ? ` Stopped early — ${notAttempted} not sent.` : "") +
-    (failed.length ? ` Failed: ${failed.join("; ")}.` : "") +
-    (sent ? " They're in Messages → Sent." : "");
+  massPlan.sendAts = sendAts;
+  stopMassEmailClock();
+  renderMassEmailTimes();
+  // Fire the first one now rather than waiting for the next once-a-minute
+  // server pass (it's a no-op for anything not yet due).
+  supabase.rpc("dispatch_scheduled_emails").then(() => {});
+  els.massEmailProgress.classList.remove("hidden");
+  els.massEmailProgress.textContent = `Scheduled ${rows.length} email${rows.length === 1 ? "" : "s"}, from ${formatSendTime(sendAts[0])} to ${formatSendTime(sendAts[sendAts.length - 1])}. They send automatically — you can close the app. Each one appears in Messages → Sent when it goes out.`;
   els.massEmailSendBtn.classList.add("hidden");
   els.massEmailCancelBtn.textContent = "Done";
-  els.massEmailCancelBtn.addEventListener(
-    "click",
-    () => {
-      if (!failed.length && !notAttempted) exitSelectMode();
-    },
-    { once: true }
-  );
+  refreshMassEmailPendingBanner();
 });
 
 // Tapping anywhere outside the select-mode-bar and outside the dials list
