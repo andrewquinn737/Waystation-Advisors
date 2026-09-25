@@ -19,6 +19,7 @@
 //     enters into that flow at all.)
 
 import { supabase } from "./supabaseClient.js";
+import { findPriorOutbound, isReplySubject, stripReplyPrefix } from "./followUp.js";
 import { requireSession, showError } from "./auth.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
@@ -762,12 +763,27 @@ if (canManageMail && accounts.length) {
 if (canManageMail) {
   const params = new URLSearchParams(window.location.search);
   if (params.get("compose") === "1") {
-    openCompose({
-      mode: "new",
-      to: params.get("to") ? [params.get("to")] : [],
-      subject: params.get("subject") || "",
-      body: params.get("body") || "",
-    });
+    const to = params.get("to") || "";
+    const subject = params.get("subject") || "";
+    const body = params.get("body") || "";
     window.history.replaceState({}, "", "messages.html");
+    // A "Re: …" subject here means Dials' Recommended SECOND email (the only
+    // thing that builds such a link): thread it onto the first email already
+    // sent to this address, from the same mailbox. If that first email was
+    // never sent, fall back to a plain new message with the bare subject.
+    const prior = isReplySubject(subject) ? await findPriorOutbound(to, subject) : null;
+    if (prior) {
+      openCompose({
+        mode: "reply",
+        accountId: prior.account_id,
+        to: [to],
+        subject: "Re: " + stripReplyPrefix(prior.subject),
+        body,
+        inReplyTo: prior.message_id,
+        threadId: prior.thread_id,
+      });
+    } else {
+      openCompose({ mode: "new", to: to ? [to] : [], subject: isReplySubject(subject) ? stripReplyPrefix(subject) : subject, body });
+    }
   }
 }

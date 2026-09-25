@@ -13,6 +13,7 @@ import {
   resolveRecommendedEmail,
   selectedRecommendedEmailKind,
 } from "./advancedSettings.js";
+import { findPriorOutbound, followUpAlreadySent, stripReplyPrefix } from "./followUp.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
@@ -527,12 +528,12 @@ const DIAL_FIELD_ALIASES = {
   // AI-written cold-outreach emails (one pair per company), stored on the dial
   // but never shown in the regular dial view — used by Advanced settings'
   // Recommended first/second email (see resolveRecommendedEmail in
-  // js/advancedSettings.js) and by Select mode's Mass email. The optional
-  // subject columns win over a "Subject: …" first line inside the text.
+  // js/advancedSettings.js) and by Select mode's Mass email. One "Subject"
+  // column serves both: it's Email 1's subject, and Email 2 is sent as a
+  // follow-up threaded onto Email 1 ("Re: <subject>").
   email_1: ["email 1", "email1", "email one", "first email", "recommended first email"],
-  email_1_subject: ["email 1 subject", "email1 subject", "subject 1", "email 1 subject line"],
+  email_subject: ["subject", "email subject", "subject line"],
   email_2: ["email 2", "email2", "email two", "second email", "recommended second email"],
-  email_2_subject: ["email 2 subject", "email2 subject", "subject 2", "email 2 subject line"],
 };
 
 // A "Status" column's cell values (as seen in real CSV exports) -> this
@@ -2098,16 +2099,44 @@ async function findPrimaryMailbox() {
   return data.find((m) => (m.email_address || "").toLowerCase() === (profile.email || "").toLowerCase()) || data[0];
 }
 
-function planMassEmail() {
+// Works out, per selected dial, what Mass email would send or why it skips.
+// First email: skipped if this address already got that subject (so running
+// it twice never double-sends). Second email: a follow-up threaded onto the
+// first email already sent to this address — skipped if the first was never
+// sent, or if the follow-up already went out.
+async function planMassEmail() {
   const send = [];
   const skipped = [];
   for (const d of dials.filter((x) => selectedDialIds.has(x.id))) {
     const r = resolveRecommendedEmail(profile, d);
     const name = dialDisplayName(d);
-    if (!d.email) skipped.push({ name, why: "no email address" });
-    else if (!r) skipped.push({ name, why: "no email text imported" });
-    else if (!r.subject) skipped.push({ name, why: "no subject line" });
-    else send.push({ dial: d, name, to: d.email, subject: r.subject, body: r.body });
+    if (!d.email) {
+      skipped.push({ name, why: "no email address" });
+      continue;
+    }
+    if (!r) {
+      skipped.push({ name, why: "no email text imported" });
+      continue;
+    }
+    const prior = await findPriorOutbound(d.email, r.baseSubject);
+    if (!r.followUp) {
+      if (!r.subject) skipped.push({ name, why: "no subject line" });
+      else if (prior) skipped.push({ name, why: "first email already sent" });
+      else send.push({ name, to: d.email, subject: r.subject, body: r.body });
+      continue;
+    }
+    if (!prior) skipped.push({ name, why: "first email not sent yet" });
+    else if (await followUpAlreadySent(prior.message_id)) skipped.push({ name, why: "follow-up already sent" });
+    else
+      send.push({
+        name,
+        to: d.email,
+        subject: "Re: " + stripReplyPrefix(prior.subject),
+        body: r.body,
+        accountId: prior.account_id,
+        inReplyTo: prior.message_id,
+        threadId: prior.thread_id,
+      });
   }
   return { send, skipped };
 }
@@ -2121,14 +2150,18 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   const kind = selectedRecommendedEmailKind(profile);
   if (!kind) return;
   if (!selectedDialIds.size) return showError(els.errorBox, new Error("Select at least one dial first."));
-  const { send, skipped } = planMassEmail();
+  els.selectMassEmailBtn.disabled = true;
+  const { send, skipped } = await planMassEmail();
+  els.selectMassEmailBtn.disabled = false;
   const mailbox = await findPrimaryMailbox();
   if (!mailbox) return showError(els.errorBox, new Error("No connected mailbox found to send from — add one under Messages first."));
 
-  els.massEmailTitle.textContent = `Send Recommended ${kind} email?`;
-  els.massEmailSummary.textContent = send.length
-    ? `The Recommended ${kind} email will be sent from ${mailbox.email_address} to ${send.length} dial${send.length === 1 ? "" : "s"}:`
-    : "None of the selected dials can be emailed.";
+  els.massEmailTitle.textContent = kind === "second" ? "Send Recommended second email (follow-up)?" : "Send Recommended first email?";
+  els.massEmailSummary.textContent = !send.length
+    ? "None of the selected dials can be emailed."
+    : kind === "second"
+      ? `The Recommended second email will be sent as a follow-up reply to the first email (same thread, from the mailbox that sent it) to ${send.length} dial${send.length === 1 ? "" : "s"}:`
+      : `The Recommended first email will be sent from ${mailbox.email_address} to ${send.length} dial${send.length === 1 ? "" : "s"}:`;
   els.massEmailList.innerHTML = send.map((x) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span></li>`).join("");
   els.massEmailList.classList.toggle("hidden", !send.length);
   els.massEmailSkipped.innerHTML = skipped.length
@@ -2175,7 +2208,14 @@ els.massEmailSendBtn.addEventListener("click", async () => {
     els.massEmailProgress.textContent = `Sending ${i + 1} of ${plan.send.length} — ${item.name}…`;
     try {
       const { data, error } = await supabase.functions.invoke("email-send", {
-        body: { account_id: plan.mailbox.id, to: [item.to], subject: item.subject, text: item.body },
+        body: {
+          account_id: item.accountId || plan.mailbox.id,
+          to: [item.to],
+          subject: item.subject,
+          text: item.body,
+          in_reply_to: item.inReplyTo,
+          thread_id: item.threadId,
+        },
         headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
       });
       if (error || data?.error) throw error || new Error(data.error);

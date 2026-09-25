@@ -510,13 +510,17 @@ export function resolveAboutUsEmailSubject(profile, dial) {
 }
 
 // Recommended first/second email — the per-dial text imported from the
-// CSV's "Email 1"/"Email 2" columns (dials.email_1/email_2; optional
-// matching *_subject columns). Team leads only, and only while that option
-// is the selected one. If the cell's own first line reads "Subject: …", that
-// line becomes the subject and the rest the body (unless a separate subject
-// column was imported, which wins). Returns { subject, body } or null when
-// the option is off or this dial has no such email — callers then fall back
-// to a plain blank compose.
+// CSV's "Email 1"/"Email 2" columns (dials.email_1/email_2), with the CSV's
+// single "Subject" column (dials.email_subject) as the first email's subject.
+// Team leads only, and only while that option is the selected one. If the
+// first email's cell itself opens with a "Subject: …" line and no Subject
+// column was imported, that line is used as the subject instead.
+//
+// The SECOND email is a follow-up on the first: same subject prefixed
+// "Re: " (see followUp.js — the thread itself is attached at send time),
+// flagged followUp: true. Returns { subject, baseSubject, body, followUp }
+// or null when the option is off or this dial has no such email — callers
+// then fall back to a plain blank compose.
 export function resolveRecommendedEmail(profile, dial) {
   if (profile.role !== "team_lead") return null;
   let which = null;
@@ -525,14 +529,17 @@ export function resolveRecommendedEmail(profile, dial) {
   if (!which) return null;
   const raw = (dial["email_" + which] || "").replace(/\r\n?/g, "\n").trim();
   if (!raw) return null;
-  let subject = (dial["email_" + which + "_subject"] || "").trim();
+  let baseSubject = (dial.email_subject || "").trim();
   let body = raw;
   const m = raw.match(/^subject\s*:\s*(.*)\n?/i);
   if (m) {
-    if (!subject) subject = m[1].trim();
+    if (!baseSubject) baseSubject = m[1].trim();
     body = raw.slice(m[0].length).trim();
   }
-  return { subject: subject || null, body };
+  if (which === "2") {
+    return { subject: baseSubject ? "Re: " + baseSubject : null, baseSubject: baseSubject || null, body, followUp: true };
+  }
+  return { subject: baseSubject || null, baseSubject: baseSubject || null, body, followUp: false };
 }
 
 // "first" | "second" | null — which recommended email the signed-in team
