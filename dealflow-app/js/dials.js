@@ -2174,14 +2174,11 @@ async function planMassEmail() {
   const send = [];
   const skipped = [];
   const pending = await fetchPendingScheduled();
-  const mailboxes = await loadMyMailboxes();
-  const primary = pickPrimaryMailbox(mailboxes);
-  // Every automatic email ends "Thanks," + the first name of the mailbox it's
-  // sent from (the name the recipient sees on the From line).
-  const signed = (body, accountId) => {
-    const mb = mailboxes.find((m) => m.id === accountId);
-    return withSignoff(body, (mb && mb.label) || profile.full_name);
-  };
+  // Every automatic email ends "Thanks," + the first name of whoever is
+  // sending it — the signed-in user — regardless of whose tab the dial sits in
+  // (e.g. a team lead emailing from an intern's dial sheet) or which of their
+  // mailboxes it goes out from.
+  const signed = (body) => withSignoff(body, profile.full_name);
   const isQueued = (to, body) => pending.some((p) => (p.to_address || "").toLowerCase() === to.toLowerCase() && p.body_text === body);
   for (const d of dials.filter((x) => selectedDialIds.has(x.id))) {
     const r = resolveRecommendedEmail(profile, d);
@@ -2195,7 +2192,7 @@ async function planMassEmail() {
       continue;
     }
     const prior = await findPriorOutbound(d.email, r.baseSubject);
-    const body = signed(r.body, r.followUp ? prior && prior.account_id : primary && primary.id);
+    const body = signed(r.body);
     if (isQueued(d.email, body)) {
       skipped.push({ name, why: "already scheduled" });
       continue;
