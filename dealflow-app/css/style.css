@@ -218,10 +218,12 @@ a:hover { text-decoration: underline; }
   border: 1.5px solid var(--tabbar-active-border);
 }
 .bottom-tabbar a.active svg { fill: currentColor; }
-/* The envelope can't be solid-filled like the others — the fill would swallow
-   its own flap line and read as a black rectangle. Selected = the same
-   envelope drawn bolder instead. */
-.bottom-tabbar a.active svg.nav-mail { fill: none; stroke-width: 3.2; }
+/* Profile, Phone and Messages icons aren't solid-filled when selected (a fill
+   swallows the envelope's flap / reads as a blob) — the selected one is the
+   same outline drawn bolder instead. Only the handshake stays filled. */
+.bottom-tabbar a.active svg.nav-mail,
+.bottom-tabbar a.active svg.nav-person,
+.bottom-tabbar a.active svg.nav-phone { fill: none; stroke-width: 3.2; }
 /* Tap-press feedback (any tab, not just the selected one) is intentionally
    its own separate token from --tabbar-active-bg above — that one went
    transparent as part of removing the selected-tab color fill, and reusing
@@ -576,19 +578,6 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 480px; overflow-x: hidden; box-sizing: border-box; }
 .modal h2 { margin: 0 0 4px; font-size: 17px; }
-
-/* Bottom-sheet variant (Mass email confirmation): docked to the bottom edge
-   of the screen instead of floating near the top. Full width on phones,
-   capped width and centered on desktop; taller than the default popup, with
-   its own scroll, and each long list scrolls inside a capped height so the
-   Send/Cancel buttons stay in view. */
-.modal-backdrop.bottom-sheet, html.is-mobile-device .modal-backdrop.bottom-sheet { align-items: flex-end; padding: 0; }
-.modal-backdrop.bottom-sheet .modal {
-  max-width: 560px; max-height: 88vh; max-height: 88dvh; overflow-y: auto;
-  border-radius: var(--radius) var(--radius) 0 0;
-  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-}
-.modal-backdrop.bottom-sheet .mass-email-list { max-height: 26vh !important; max-height: 26dvh !important; }
 .modal .close { position: absolute; }
 
 /* Import-dials CSV picker (see #importDialsDropzone/wireImportDropzone in
