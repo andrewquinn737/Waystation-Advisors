@@ -303,8 +303,11 @@
     <div class="modal">
       <h2 id="massEmailTitle">Send Recommended first email?</h2>
       <p class="help-text" id="massEmailSummary"></p>
-      <ul id="massEmailList" style="max-height:220px; overflow-y:auto; margin:8px 0; padding-left:20px;"></ul>
-      <p class="help-text hidden" id="massEmailSkipped"></p>
+      <ul id="massEmailList" style="max-height:200px; overflow-y:auto; margin:8px 0; padding-left:20px; list-style:disc;"></ul>
+      <div class="hidden" id="massEmailSkipped">
+        <p class="help-text" style="margin:8px 0 4px; font-weight:600;" id="massEmailSkippedTitle"></p>
+        <ul id="massEmailSkippedList" style="max-height:160px; overflow-y:auto; margin:0 0 8px; padding-left:20px; list-style:disc;"></ul>
+      </div>
       <p class="help-text hidden" id="massEmailProgress" style="font-weight:600;"></p>
       <div class="form-actions">
         <button type="button" class="btn" id="massEmailSendBtn">Send</button>

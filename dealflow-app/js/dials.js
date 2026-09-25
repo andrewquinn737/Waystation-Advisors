@@ -248,6 +248,8 @@ const els = {
   massEmailSummary: document.getElementById("massEmailSummary"),
   massEmailList: document.getElementById("massEmailList"),
   massEmailSkipped: document.getElementById("massEmailSkipped"),
+  massEmailSkippedTitle: document.getElementById("massEmailSkippedTitle"),
+  massEmailSkippedList: document.getElementById("massEmailSkippedList"),
   massEmailProgress: document.getElementById("massEmailProgress"),
   massEmailSendBtn: document.getElementById("massEmailSendBtn"),
   massEmailCancelBtn: document.getElementById("massEmailCancelBtn"),
@@ -2164,9 +2166,10 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
       : `The Recommended first email will be sent from ${mailbox.email_address} to ${send.length} dial${send.length === 1 ? "" : "s"}:`;
   els.massEmailList.innerHTML = send.map((x) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span></li>`).join("");
   els.massEmailList.classList.toggle("hidden", !send.length);
-  els.massEmailSkipped.innerHTML = skipped.length
-    ? `<strong>Skipped (${skipped.length}):</strong> ` + skipped.map((x) => `${escapeHtml(x.name)} (${x.why})`).join(", ")
-    : "";
+  els.massEmailSkippedTitle.textContent = `Skipped (${skipped.length}):`;
+  els.massEmailSkippedList.innerHTML = skipped
+    .map((x) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">— ${escapeHtml(x.why)}</span></li>`)
+    .join("");
   els.massEmailSkipped.classList.toggle("hidden", !skipped.length);
   els.massEmailProgress.classList.add("hidden");
   els.massEmailProgress.textContent = "";
