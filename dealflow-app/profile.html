@@ -369,8 +369,8 @@
        Personalized email has its own on/off switch and a tap-to-open editor
        (see #personalizedEmailEditorPopup right below, which opens ON TOP of
        this one, relying on plain DOM order for stacking — same reasoning as
-       Dials'). "My email is Gmail" is a plain standalone toggle — no editor
-       needed, so the whole row just flips it on click. -->
+       Dials'). The recommended-email rows are plain toggles — no editor, the
+       whole row just flips them. -->
   <div class="modal-backdrop hidden" id="advancedSettingsPopup">
     <div class="modal">
       <h2>Advanced settings</h2>
@@ -389,16 +389,23 @@
           <span class="advanced-settings-row-label">About us email</span>
           <span class="toggle-switch" id="aboutUsEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
-        <button type="button" class="advanced-settings-row" id="useGmailForEmailRow">
-          <span class="advanced-settings-row-label">My email is Gmail</span>
-          <span class="toggle-switch" id="useGmailForEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        <!-- Team leads only (shown by js/advancedSettings.js) — text comes
+             per-dial from the CSV's Email 1/Email 2 columns. Part of the same
+             pick-only-one group as Personalized/About us email above. -->
+        <button type="button" class="advanced-settings-row hidden" id="recommendedFirstEmailRow">
+          <span class="advanced-settings-row-label">Recommended first email</span>
+          <span class="toggle-switch" id="recommendedFirstEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
+        <button type="button" class="advanced-settings-row hidden" id="recommendedSecondEmailRow">
+          <span class="advanced-settings-row-label">Recommended second email</span>
+          <span class="toggle-switch" id="recommendedSecondEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
         <button type="button" class="advanced-settings-row" id="personalizedTextingRow">
           <span class="advanced-settings-row-label">Personalized texting</span>
           <span class="toggle-switch" id="personalizedTextingToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
       </div>
-      <p class="help-text">Turn this on if the email listed on your Profile is hosted on Gmail — including a work address that just runs on Gmail behind the scenes. Instant email will then let Gmail pick the right account, instead of your device's default mail app (which doesn't otherwise have a way to be told which account to use).</p>
+      <p class="help-text">Only one email option can be on at a time — it decides what the instant Email icon pre-fills. Recommended first/second email (team leads) use each dial's own Email 1/Email 2 from the imported CSV.</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
       </div>

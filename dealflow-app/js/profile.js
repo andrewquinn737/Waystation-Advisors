@@ -58,8 +58,10 @@ const els = {
   advancedSettingsClose: document.getElementById("advancedSettingsClose"),
   personalizedEmailRow: document.getElementById("personalizedEmailRow"),
   personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
-  useGmailForEmailRow: document.getElementById("useGmailForEmailRow"),
-  useGmailForEmailToggle: document.getElementById("useGmailForEmailToggle"),
+  recommendedFirstEmailRow: document.getElementById("recommendedFirstEmailRow"),
+  recommendedFirstEmailToggle: document.getElementById("recommendedFirstEmailToggle"),
+  recommendedSecondEmailRow: document.getElementById("recommendedSecondEmailRow"),
+  recommendedSecondEmailToggle: document.getElementById("recommendedSecondEmailToggle"),
   personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
   personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
   personalizedEmailSubjectInput: document.getElementById("personalizedEmailSubjectInput"),
@@ -2411,12 +2413,11 @@ if (isAdminSync || isTeamLeadSync) {
 // them across devices/browsers); the bell/inbox UI itself is mounted in the
 // top nav by auth.js's requireSession(), on every page, not just Profile.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
-// "Advanced" settings (Personalized email + My email is Gmail) — shared
+// "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js. Note: Profile has no instant-Email
 // icons of its own that Personalized email would apply to (only Dials'
 // do — see that module's top-of-file comment); this page still gets the
-// full settings UI so the preference is editable from anywhere, and "My
-// email is Gmail" (which applies app-wide) works correctly here too.
+// full settings UI so the preference is editable from anywhere.
 wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu });
 
 // "Deleted tabs" (soft-deleted dial tabs — restore / reassign / permanently

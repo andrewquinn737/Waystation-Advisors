@@ -143,13 +143,18 @@
          outside this bar and outside the dials list itself exits select mode
          — opening the triangle/settings menus is exempt (see the outside-
          click listener in js/dials.js), so select mode survives that. Only
-         4 options now (Mass email/Mass text removed) — kept to one row
-         always, see .select-mode-bar in css/style.css. -->
+         up to 5 options (Mass email only for team leads with a recommended
+         email selected) — one row that scrolls sideways when they don't all
+         fit, see .select-mode-bar in css/style.css. -->
     <div class="select-mode-bar hidden" id="selectModeBar">
       <button type="button" class="select-mode-btn" id="selectBackBtn">Back</button>
       <button type="button" class="select-mode-btn" id="selectAllBtn">Select all</button>
       <button type="button" class="select-mode-btn" id="selectMoveBtn">Move</button>
       <button type="button" class="select-mode-btn danger" id="selectDeleteBtn">Delete</button>
+      <!-- Team leads with a Recommended first/second email selected only
+           (shown by enterSelectMode in js/dials.js). The bar scrolls
+           sideways when the buttons don't all fit (see css). -->
+      <button type="button" class="select-mode-btn hidden" id="selectMassEmailBtn">Mass email</button>
     </div>
     <div class="select-mode-hint hidden" id="selectMoveHint">Tap a tab above to move the selected dials there.</div>
 
@@ -292,15 +297,30 @@
     </div>
   </div>
 
+  <!-- Mass email confirmation/progress (Select mode's 5th button — see
+       js/dials.js). -->
+  <div class="modal-backdrop hidden" id="massEmailModal">
+    <div class="modal">
+      <h2 id="massEmailTitle">Send Recommended first email?</h2>
+      <p class="help-text" id="massEmailSummary"></p>
+      <ul id="massEmailList" style="max-height:220px; overflow-y:auto; margin:8px 0; padding-left:20px;"></ul>
+      <p class="help-text hidden" id="massEmailSkipped"></p>
+      <p class="help-text hidden" id="massEmailProgress" style="font-weight:600;"></p>
+      <div class="form-actions">
+        <button type="button" class="btn" id="massEmailSendBtn">Send</button>
+        <button type="button" class="btn secondary" id="massEmailCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- "Advanced" settings popup (see menuAdvancedBtn above). Personalized
        email has its own on/off switch on the right and a tap-to-open editor
        (see #personalizedEmailEditorPopup right below, which opens ON TOP of
        this one — same "popup over a popup" shape as js/dials.js's other
        stacked popups, here relying on plain DOM order instead of an
        explicit z-index override since both start at the base
-       .modal-backdrop stacking level). "My email is Gmail" is a plain
-       standalone toggle — no editor needed, so the whole row just flips it
-       on click (see js/dials.js). -->
+       .modal-backdrop stacking level). The recommended-email rows are plain
+       toggles — the whole row just flips them. -->
   <div class="modal-backdrop hidden" id="advancedSettingsPopup">
     <div class="modal">
       <h2>Advanced settings</h2>
@@ -319,16 +339,23 @@
           <span class="advanced-settings-row-label">About us email</span>
           <span class="toggle-switch" id="aboutUsEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
-        <button type="button" class="advanced-settings-row" id="useGmailForEmailRow">
-          <span class="advanced-settings-row-label">My email is Gmail</span>
-          <span class="toggle-switch" id="useGmailForEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        <!-- Team leads only (shown by js/advancedSettings.js) — text comes
+             per-dial from the CSV's Email 1/Email 2 columns. Part of the same
+             pick-only-one group as Personalized/About us email above. -->
+        <button type="button" class="advanced-settings-row hidden" id="recommendedFirstEmailRow">
+          <span class="advanced-settings-row-label">Recommended first email</span>
+          <span class="toggle-switch" id="recommendedFirstEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
+        <button type="button" class="advanced-settings-row hidden" id="recommendedSecondEmailRow">
+          <span class="advanced-settings-row-label">Recommended second email</span>
+          <span class="toggle-switch" id="recommendedSecondEmailToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
         <button type="button" class="advanced-settings-row" id="personalizedTextingRow">
           <span class="advanced-settings-row-label">Personalized texting</span>
           <span class="toggle-switch" id="personalizedTextingToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
       </div>
-      <p class="help-text">Turn this on if the email listed on your Profile is hosted on Gmail — including a work address that just runs on Gmail behind the scenes. Instant email will then let Gmail pick the right account, instead of your device's default mail app (which doesn't otherwise have a way to be told which account to use).</p>
+      <p class="help-text">Only one email option can be on at a time — it decides what the instant Email icon pre-fills. Recommended first/second email (team leads) use each dial's own Email 1/Email 2 from the imported CSV.</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
       </div>

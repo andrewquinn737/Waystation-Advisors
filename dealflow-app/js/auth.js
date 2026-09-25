@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { setOwnEmail, setOwnEmailIsGmail, setOwnRole, setTeamLeadMailbox } from "./contactIcons.js";
+import { setOwnEmail, setOwnRole, setTeamLeadMailbox } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError, withTimeout } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
@@ -49,7 +49,7 @@ export async function requireSession() {
       supabase
         .from("profiles")
         .select(
-          "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, email_is_gmail, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
+          "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
         )
         .eq("id", session.user.id)
         .single()
@@ -125,11 +125,7 @@ export async function requireSession() {
   // Google account the device/browser currently treats as default — see the
   // comment above setOwnEmail() for why this only ever helps Gmail addresses,
   // never phone numbers, and always falls back to a plain mailto: otherwise.
-  // email_is_gmail is the manual override for a Gmail-hosted custom work
-  // domain (set via Dials' Advanced settings), for when the address itself
-  // doesn't end in gmail.com/googlemail.com.
   setOwnEmail(resolvedProfile.email);
-  setOwnEmailIsGmail(resolvedProfile.email_is_gmail);
 
   // Also decides what the "Email" icon does, by role (see contactIcons.js's
   // own comment on setOwnRole/setTeamLeadMailbox for the 3-way split). Only

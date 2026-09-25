@@ -337,15 +337,16 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 
 /* Select-mode toolbar (Dials page) — replaces the page-header-menu while
    bulk-selecting dials. See js/dials.js enterSelectMode/exitSelectMode.
-   Always one row, never wrapping: flex-wrap: nowrap plus each button
-   shrinking (flex: 1 1 0, min-width: 0) so 4 buttons always fit; overflow-x
-   is a pure safety net for an extreme narrow-screen case, not the normal
-   path. */
+   Always one row, never wrapping: buttons keep their natural width
+   (flex: 1 0 auto) and stretch to fill the row when they all fit; with the
+   5th (Mass email) on a narrow phone the row scrolls sideways instead. */
 .select-mode-bar {
   display: flex; flex-wrap: nowrap; gap: 6px; margin: 8px 0 16px; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
 }
+.select-mode-bar::-webkit-scrollbar { display: none; }
 .select-mode-btn {
-  flex: 1 1 0; min-width: 0; white-space: nowrap; padding: 9px 8px; border-radius: 999px;
+  flex: 1 0 auto; white-space: nowrap; padding: 9px 14px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
 }

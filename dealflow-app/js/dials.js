@@ -10,6 +10,8 @@ import {
   resolvePersonalizedTextingBody,
   resolveAboutUsEmailBody,
   resolveAboutUsEmailSubject,
+  resolveRecommendedEmail,
+  selectedRecommendedEmailKind,
 } from "./advancedSettings.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
@@ -239,6 +241,15 @@ const els = {
   selectAllBtn: document.getElementById("selectAllBtn"),
   selectMoveBtn: document.getElementById("selectMoveBtn"),
   selectDeleteBtn: document.getElementById("selectDeleteBtn"),
+  selectMassEmailBtn: document.getElementById("selectMassEmailBtn"),
+  massEmailModal: document.getElementById("massEmailModal"),
+  massEmailTitle: document.getElementById("massEmailTitle"),
+  massEmailSummary: document.getElementById("massEmailSummary"),
+  massEmailList: document.getElementById("massEmailList"),
+  massEmailSkipped: document.getElementById("massEmailSkipped"),
+  massEmailProgress: document.getElementById("massEmailProgress"),
+  massEmailSendBtn: document.getElementById("massEmailSendBtn"),
+  massEmailCancelBtn: document.getElementById("massEmailCancelBtn"),
   selectMoveHint: document.getElementById("selectMoveHint"),
   confirmBulkDeleteModal: document.getElementById("confirmBulkDeleteModal"),
   confirmBulkDeleteTitle: document.getElementById("confirmBulkDeleteTitle"),
@@ -247,8 +258,10 @@ const els = {
   advancedSettingsClose: document.getElementById("advancedSettingsClose"),
   personalizedEmailRow: document.getElementById("personalizedEmailRow"),
   personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
-  useGmailForEmailRow: document.getElementById("useGmailForEmailRow"),
-  useGmailForEmailToggle: document.getElementById("useGmailForEmailToggle"),
+  recommendedFirstEmailRow: document.getElementById("recommendedFirstEmailRow"),
+  recommendedFirstEmailToggle: document.getElementById("recommendedFirstEmailToggle"),
+  recommendedSecondEmailRow: document.getElementById("recommendedSecondEmailRow"),
+  recommendedSecondEmailToggle: document.getElementById("recommendedSecondEmailToggle"),
   personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
   personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
   personalizedEmailSubjectInput: document.getElementById("personalizedEmailSubjectInput"),
@@ -306,7 +319,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 
-// "Advanced" settings (Personalized email + My email is Gmail) — shared
+// "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
 // it's factored out this way (every page wires the exact same behavior
 // against its own DOM elements, same pattern as wireNotificationsToggle).
@@ -511,6 +524,15 @@ const DIAL_FIELD_ALIASES = {
   // from the Summary field.
   call_notes: ["call notes", "callnotes", "call note"],
   contact_status: ["status"],
+  // AI-written cold-outreach emails (one pair per company), stored on the dial
+  // but never shown in the regular dial view — used by Advanced settings'
+  // Recommended first/second email (see resolveRecommendedEmail in
+  // js/advancedSettings.js) and by Select mode's Mass email. The optional
+  // subject columns win over a "Subject: …" first line inside the text.
+  email_1: ["email 1", "email1", "email one", "first email", "recommended first email"],
+  email_1_subject: ["email 1 subject", "email1 subject", "subject 1", "email 1 subject line"],
+  email_2: ["email 2", "email2", "email two", "second email", "recommended second email"],
+  email_2_subject: ["email 2 subject", "email2 subject", "subject 2", "email 2 subject line"],
 };
 
 // A "Status" column's cell values (as seen in real CSV exports) -> this
@@ -1916,6 +1938,10 @@ function enterSelectMode() {
   moveMode = false;
   selectedDialIds = new Set();
   els.selectModeBar.classList.remove("hidden");
+  els.selectModeBar.scrollLeft = 0;
+  // Mass email only exists while a Recommended first/second email is the
+  // selected Advanced-settings option (team leads only).
+  els.selectMassEmailBtn.classList.toggle("hidden", !selectedRecommendedEmailKind(profile));
   els.selectMoveHint.classList.add("hidden");
   els.selectMoveBtn.classList.remove("active");
   renderDialsTable();
@@ -2051,6 +2077,132 @@ els.selectDeleteBtn.addEventListener("click", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Mass email — Select mode's 5th button, only shown while a Recommended
+// first/second email is the selected Advanced-settings option. Confirms the
+// email type + recipients, then sends each selected dial's own Email 1/2
+// straight from the team lead's primary mailbox through the same email-send
+// Edge Function Messages uses, so every message is filed in the mailbox's
+// real Sent folder AND shows up under Messages -> Sent — no trip to Messages.
+// Sent one at a time with a short pause (gentler on the mail server than a
+// burst) and a live progress line; a failure on one dial never stops the rest.
+// ---------------------------------------------------------------------------
+
+const MASS_EMAIL_PAUSE_MS = 1500;
+let massEmailRunning = false;
+let massEmailStopRequested = false;
+
+async function findPrimaryMailbox() {
+  const { data, error } = await supabase.from("email_accounts").select("id, email_address").eq("owner_id", profile.id);
+  if (error || !data || !data.length) return null;
+  return data.find((m) => (m.email_address || "").toLowerCase() === (profile.email || "").toLowerCase()) || data[0];
+}
+
+function planMassEmail() {
+  const send = [];
+  const skipped = [];
+  for (const d of dials.filter((x) => selectedDialIds.has(x.id))) {
+    const r = resolveRecommendedEmail(profile, d);
+    const name = dialDisplayName(d);
+    if (!d.email) skipped.push({ name, why: "no email address" });
+    else if (!r) skipped.push({ name, why: "no email text imported" });
+    else if (!r.subject) skipped.push({ name, why: "no subject line" });
+    else send.push({ dial: d, name, to: d.email, subject: r.subject, body: r.body });
+  }
+  return { send, skipped };
+}
+
+function closeMassEmailModal() {
+  els.massEmailModal.classList.add("hidden");
+  unlockPageScroll();
+}
+
+els.selectMassEmailBtn.addEventListener("click", async () => {
+  const kind = selectedRecommendedEmailKind(profile);
+  if (!kind) return;
+  if (!selectedDialIds.size) return showError(els.errorBox, new Error("Select at least one dial first."));
+  const { send, skipped } = planMassEmail();
+  const mailbox = await findPrimaryMailbox();
+  if (!mailbox) return showError(els.errorBox, new Error("No connected mailbox found to send from — add one under Messages first."));
+
+  els.massEmailTitle.textContent = `Send Recommended ${kind} email?`;
+  els.massEmailSummary.textContent = send.length
+    ? `The Recommended ${kind} email will be sent from ${mailbox.email_address} to ${send.length} dial${send.length === 1 ? "" : "s"}:`
+    : "None of the selected dials can be emailed.";
+  els.massEmailList.innerHTML = send.map((x) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span></li>`).join("");
+  els.massEmailList.classList.toggle("hidden", !send.length);
+  els.massEmailSkipped.innerHTML = skipped.length
+    ? `<strong>Skipped (${skipped.length}):</strong> ` + skipped.map((x) => `${escapeHtml(x.name)} (${x.why})`).join(", ")
+    : "";
+  els.massEmailSkipped.classList.toggle("hidden", !skipped.length);
+  els.massEmailProgress.classList.add("hidden");
+  els.massEmailProgress.textContent = "";
+  els.massEmailSendBtn.classList.toggle("hidden", !send.length);
+  els.massEmailSendBtn.disabled = false;
+  els.massEmailSendBtn.textContent = "Send";
+  els.massEmailCancelBtn.textContent = "Cancel";
+  els.massEmailModal.classList.remove("hidden");
+  lockPageScroll();
+  els.massEmailModal._plan = { send, mailbox };
+});
+
+els.massEmailCancelBtn.addEventListener("click", () => {
+  // Mid-run this becomes "Stop" — finishes the message in flight, sends no more.
+  if (massEmailRunning) {
+    massEmailStopRequested = true;
+    els.massEmailCancelBtn.textContent = "Stopping…";
+    return;
+  }
+  closeMassEmailModal();
+});
+
+els.massEmailSendBtn.addEventListener("click", async () => {
+  const plan = els.massEmailModal._plan;
+  if (!plan || massEmailRunning) return;
+  massEmailRunning = true;
+  massEmailStopRequested = false;
+  els.massEmailSendBtn.disabled = true;
+  els.massEmailCancelBtn.textContent = "Stop";
+  els.massEmailProgress.classList.remove("hidden");
+  const {
+    data: { session: authSession },
+  } = await supabase.auth.getSession();
+  const failed = [];
+  let sent = 0;
+  for (let i = 0; i < plan.send.length; i++) {
+    if (massEmailStopRequested) break;
+    const item = plan.send[i];
+    els.massEmailProgress.textContent = `Sending ${i + 1} of ${plan.send.length} — ${item.name}…`;
+    try {
+      const { data, error } = await supabase.functions.invoke("email-send", {
+        body: { account_id: plan.mailbox.id, to: [item.to], subject: item.subject, text: item.body },
+        headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
+      });
+      if (error || data?.error) throw error || new Error(data.error);
+      sent += 1;
+    } catch (e) {
+      failed.push(`${item.name} (${(e && e.message) || "failed"})`);
+    }
+    if (i < plan.send.length - 1 && !massEmailStopRequested) await new Promise((r) => setTimeout(r, MASS_EMAIL_PAUSE_MS));
+  }
+  const notAttempted = plan.send.length - sent - failed.length;
+  massEmailRunning = false;
+  els.massEmailProgress.textContent =
+    `Sent ${sent} of ${plan.send.length}.` +
+    (notAttempted ? ` Stopped early — ${notAttempted} not sent.` : "") +
+    (failed.length ? ` Failed: ${failed.join("; ")}.` : "") +
+    (sent ? " They're in Messages → Sent." : "");
+  els.massEmailSendBtn.classList.add("hidden");
+  els.massEmailCancelBtn.textContent = "Done";
+  els.massEmailCancelBtn.addEventListener(
+    "click",
+    () => {
+      if (!failed.length && !notAttempted) exitSelectMode();
+    },
+    { once: true }
+  );
+});
+
 // Tapping anywhere outside the select-mode-bar and outside the dials list
 // itself exits select mode (per spec). Clicks inside any modal (the bulk
 // delete confirm or any other popup) are exempt — those manage their own
@@ -2134,6 +2286,12 @@ function visibleDials() {
 // selected tab, after the Categories filter (hiddenStatuses) is applied.
 function updateProspectCount(count) {
   if (!els.dialsProspectCount) return;
+  // In Select mode the header counts what's ticked instead of what's shown.
+  if (selectMode) {
+    const n = selectedDialIds.size;
+    els.dialsProspectCount.textContent = `${n} prospect${n === 1 ? "" : "s"} selected`;
+    return;
+  }
   els.dialsProspectCount.textContent = `${count} prospect${count === 1 ? "" : "s"} displayed`;
 }
 
@@ -2260,16 +2418,19 @@ function renderDialsTable() {
 // Dial detail / create popup
 // ---------------------------------------------------------------------------
 
-// Personalized email and About us email are mutually exclusive (see
-// toggleAboutUsEmailEnabled/togglePersonalizedEmailEnabled in
+// Personalized email, About us email and the team-lead Recommended first/
+// second email are mutually exclusive (see selectEmailOption in
 // js/advancedSettings.js — enforced both client-side and by a DB CHECK
-// constraint), so at most one of each pair ever returns non-null — a plain
-// OR picks whichever is actually on without needing to check which one
-// first.
+// constraint), so at most one ever returns non-null — a plain OR picks
+// whichever is actually on without needing to check which one first.
 function resolveEmailBody(dial) {
+  const recommended = resolveRecommendedEmail(profile, dial);
+  if (recommended) return recommended.body;
   return resolvePersonalizedEmailBody(profile, dial) || resolveAboutUsEmailBody(profile, dial);
 }
 function resolveEmailSubject(dial) {
+  const recommended = resolveRecommendedEmail(profile, dial);
+  if (recommended) return recommended.subject;
   return resolvePersonalizedEmailSubject(profile, dial) || resolveAboutUsEmailSubject(profile, dial);
 }
 

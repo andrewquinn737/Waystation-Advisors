@@ -311,8 +311,10 @@ const els = {
   advancedSettingsClose: document.getElementById("advancedSettingsClose"),
   personalizedEmailRow: document.getElementById("personalizedEmailRow"),
   personalizedEmailToggle: document.getElementById("personalizedEmailToggle"),
-  useGmailForEmailRow: document.getElementById("useGmailForEmailRow"),
-  useGmailForEmailToggle: document.getElementById("useGmailForEmailToggle"),
+  recommendedFirstEmailRow: document.getElementById("recommendedFirstEmailRow"),
+  recommendedFirstEmailToggle: document.getElementById("recommendedFirstEmailToggle"),
+  recommendedSecondEmailRow: document.getElementById("recommendedSecondEmailRow"),
+  recommendedSecondEmailToggle: document.getElementById("recommendedSecondEmailToggle"),
   personalizedEmailEditorPopup: document.getElementById("personalizedEmailEditorPopup"),
   personalizedEmailEditorToggle: document.getElementById("personalizedEmailEditorToggle"),
   personalizedEmailSubjectInput: document.getElementById("personalizedEmailSubjectInput"),
@@ -2379,12 +2381,11 @@ if (isAdmin || isTeamLead) {
 // Notifications on/off — everyone gets this, unlike Sellers/Buyers/Accounts
 // visible above.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
-// "Advanced" settings (Personalized email + My email is Gmail) — shared
+// "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js. Note: Clients' own instant-Email
 // icons don't apply Personalized email (only Dials' do — see that module's
 // top-of-file comment); this page still gets the full settings UI so the
-// preference is editable from anywhere, and "My email is Gmail" (which
-// applies app-wide) works correctly here too.
+// preference is editable from anywhere.
 wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu });
 els.editProfileBtn.addEventListener("click", async () => {
   // See resolveIntendedBuyerName's own comment — already resolved once when

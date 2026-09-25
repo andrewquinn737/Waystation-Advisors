@@ -34,24 +34,29 @@
 // icons are untouched even though the settings themselves are editable
 // from anywhere.
 //
-// "My email is Gmail" (profiles.email_is_gmail) is a plain standalone
-// toggle with no editor of its own — unlike the template rows, this one's
-// EFFECT (see setOwnEmailIsGmail's own comment in contactIcons.js) already
-// applies app-wide the moment it's set, regardless of which page it was
-// toggled from.
+// Recommended first email / Recommended second email (team leads only —
+// profiles.recommended_first_email_enabled/-second_) use the per-dial
+// "Email 1"/"Email 2" text imported from the CSV (dials.email_1/email_2,
+// never shown in the regular dial view — see resolveRecommendedEmail
+// below). They share ONE "pick at most one" group with Personalized email
+// and About us email — all four apply to the same instant-Email icon —
+// enforced client-side by selectEmailOption and by the
+// one_email_template_at_a_time CHECK constraint as a backstop. A team
+// lead's default is the first recommended email.
 // ---------------------------------------------------------------------------
 
 import { supabase } from "./supabaseClient.js";
 import { showError } from "./auth.js";
-import { setOwnEmailIsGmail } from "./contactIcons.js";
 
 // opts: { profile, els, closePageHeaderMenu }
 //   - profile: the signed-in profile row (mutated in place as settings
 //     change, same as every other settings toggle in this app).
 //   - els: the calling page's own element map — must include
 //     menuAdvancedBtn, advancedSettingsPopup, advancedSettingsClose,
-//     personalizedEmailRow, personalizedEmailToggle, useGmailForEmailRow,
-//     useGmailForEmailToggle, personalizedEmailEditorPopup,
+//     personalizedEmailRow, personalizedEmailToggle,
+//     recommendedFirstEmailRow, recommendedFirstEmailToggle,
+//     recommendedSecondEmailRow, recommendedSecondEmailToggle,
+//     personalizedEmailEditorPopup,
 //     personalizedEmailEditorToggle, personalizedEmailSubjectInput,
 //     personalizedEmailTextarea, personalizedEmailTokenCompany,
 //     personalizedEmailTokenSeller, personalizedEmailError,
@@ -73,9 +78,7 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
   els.menuAdvancedBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (closePageHeaderMenu) closePageHeaderMenu();
-    renderPersonalizedEmailToggles();
-    renderAboutUsEmailToggles();
-    renderUseGmailForEmailToggle();
+    renderAllEmailOptionToggles();
     renderPersonalizedTextingToggles();
     els.advancedSettingsPopup.classList.remove("hidden");
   });
@@ -95,31 +98,56 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     });
   }
 
-  async function togglePersonalizedEmailEnabled(e) {
-    e.stopPropagation(); // don't also trigger personalizedEmailRow's own click (which opens the editor)
-    const next = !(profile.personalized_email_enabled === true);
-    const prevPersonalized = profile.personalized_email_enabled;
-    const prevAboutUs = profile.about_us_email_enabled;
-    const updates = { personalized_email_enabled: next };
-    // Mutually exclusive with About us email — both apply to the same
-    // instant-Email icon, so turning this on turns that off (see
-    // toggleAboutUsEmailEnabled's mirror of this), backstopped by a DB
-    // CHECK constraint in case any other path ever tried to set both.
-    if (next && profile.about_us_email_enabled === true) {
-      updates.about_us_email_enabled = false;
-      profile.about_us_email_enabled = false;
-    }
-    profile.personalized_email_enabled = next;
+  const EMAIL_OPTION_KEYS = [
+    "personalized_email_enabled",
+    "about_us_email_enabled",
+    "recommended_first_email_enabled",
+    "recommended_second_email_enabled",
+  ];
+
+  function renderRecommendedEmailToggles() {
+    [
+      [els.recommendedFirstEmailToggle, profile.recommended_first_email_enabled === true],
+      [els.recommendedSecondEmailToggle, profile.recommended_second_email_enabled === true],
+    ].forEach(([el, on]) => {
+      el.classList.toggle("on", on);
+      el.setAttribute("aria-checked", String(on));
+    });
+  }
+
+  function renderAllEmailOptionToggles() {
+    const isTeamLead = profile.role === "team_lead";
+    els.recommendedFirstEmailRow.classList.toggle("hidden", !isTeamLead);
+    els.recommendedSecondEmailRow.classList.toggle("hidden", !isTeamLead);
     renderPersonalizedEmailToggles();
     renderAboutUsEmailToggles();
+    renderRecommendedEmailToggles();
+  }
+
+  // The four instant-Email options are a pick-at-most-one group: turning one
+  // on turns every other one off in the same update (backstopped by the DB
+  // CHECK constraint), turning the selected one off just leaves none picked.
+  async function selectEmailOption(key, next) {
+    const prev = {};
+    EMAIL_OPTION_KEYS.forEach((k) => (prev[k] = profile[k]));
+    const updates = {};
+    EMAIL_OPTION_KEYS.forEach((k) => {
+      const value = k === key ? next : next ? false : profile[k] === true;
+      if (k === key || (next && profile[k] === true)) updates[k] = value;
+      profile[k] = value;
+    });
+    renderAllEmailOptionToggles();
     const { error } = await supabase.from("profiles").update(updates).eq("id", profile.id);
     if (error) {
-      console.error("Failed to update personalized_email_enabled", error);
-      profile.personalized_email_enabled = prevPersonalized;
-      profile.about_us_email_enabled = prevAboutUs;
-      renderPersonalizedEmailToggles();
-      renderAboutUsEmailToggles();
+      console.error("Failed to update email option " + key, error);
+      EMAIL_OPTION_KEYS.forEach((k) => (profile[k] = prev[k]));
+      renderAllEmailOptionToggles();
     }
+  }
+
+  function togglePersonalizedEmailEnabled(e) {
+    e.stopPropagation(); // don't also trigger personalizedEmailRow's own click (which opens the editor)
+    selectEmailOption("personalized_email_enabled", !(profile.personalized_email_enabled === true));
   }
   els.personalizedEmailToggle.addEventListener("click", togglePersonalizedEmailEnabled);
   els.personalizedEmailEditorToggle.addEventListener("click", togglePersonalizedEmailEnabled);
@@ -137,28 +165,9 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     });
   }
 
-  async function toggleAboutUsEmailEnabled(e) {
+  function toggleAboutUsEmailEnabled(e) {
     e.stopPropagation(); // don't also trigger aboutUsEmailRow's own click (which opens the editor)
-    const next = !(profile.about_us_email_enabled === true);
-    const prevAboutUs = profile.about_us_email_enabled;
-    const prevPersonalized = profile.personalized_email_enabled;
-    const updates = { about_us_email_enabled: next };
-    // Mirror of togglePersonalizedEmailEnabled's own mutual-exclusion check.
-    if (next && profile.personalized_email_enabled === true) {
-      updates.personalized_email_enabled = false;
-      profile.personalized_email_enabled = false;
-    }
-    profile.about_us_email_enabled = next;
-    renderAboutUsEmailToggles();
-    renderPersonalizedEmailToggles();
-    const { error } = await supabase.from("profiles").update(updates).eq("id", profile.id);
-    if (error) {
-      console.error("Failed to update about_us_email_enabled", error);
-      profile.about_us_email_enabled = prevAboutUs;
-      profile.personalized_email_enabled = prevPersonalized;
-      renderAboutUsEmailToggles();
-      renderPersonalizedEmailToggles();
-    }
+    selectEmailOption("about_us_email_enabled", !(profile.about_us_email_enabled === true));
   }
   els.aboutUsEmailToggle.addEventListener("click", toggleAboutUsEmailEnabled);
   els.aboutUsEmailEditorToggle.addEventListener("click", toggleAboutUsEmailEnabled);
@@ -243,29 +252,14 @@ export function wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu })
     if (e.target === els.personalizedTextingEditorPopup) els.personalizedTextingEditorClose.click();
   });
 
-  function renderUseGmailForEmailToggle() {
-    const on = profile.email_is_gmail === true;
-    els.useGmailForEmailToggle.classList.toggle("on", on);
-    els.useGmailForEmailToggle.setAttribute("aria-checked", String(on));
-  }
-
-  // No editor to open here (unlike Personalized email's row) — the whole
-  // row just flips the one setting it has. setOwnEmailIsGmail updates the
-  // shared contactIcons.js module immediately so the very next "Email" tap
-  // (on ANY page) already reflects the change, with no reload needed.
-  els.useGmailForEmailRow.addEventListener("click", async () => {
-    const next = !(profile.email_is_gmail === true);
-    profile.email_is_gmail = next;
-    renderUseGmailForEmailToggle();
-    setOwnEmailIsGmail(next);
-    const { error } = await supabase.from("profiles").update({ email_is_gmail: next }).eq("id", profile.id);
-    if (error) {
-      console.error("Failed to update email_is_gmail", error);
-      profile.email_is_gmail = !next;
-      renderUseGmailForEmailToggle();
-      setOwnEmailIsGmail(!next);
-    }
-  });
+  // No editor to open for the recommended emails (their text comes per-dial
+  // from the CSV) — the whole row just flips its switch.
+  els.recommendedFirstEmailRow.addEventListener("click", () =>
+    selectEmailOption("recommended_first_email_enabled", !(profile.recommended_first_email_enabled === true))
+  );
+  els.recommendedSecondEmailRow.addEventListener("click", () =>
+    selectEmailOption("recommended_second_email_enabled", !(profile.recommended_second_email_enabled === true))
+  );
 
   // Tapping the ROW (not the switch — see stopPropagation above) opens the
   // fuller editor, "over" the Advanced settings popup rather than replacing
@@ -513,4 +507,39 @@ export function resolveAboutUsEmailBody(profile, dial) {
 export function resolveAboutUsEmailSubject(profile, dial) {
   if (!profile.about_us_email_enabled || !profile.about_us_email_subject) return null;
   return substitutePersonalizedTokens(profile.about_us_email_subject, dial, profile);
+}
+
+// Recommended first/second email — the per-dial text imported from the
+// CSV's "Email 1"/"Email 2" columns (dials.email_1/email_2; optional
+// matching *_subject columns). Team leads only, and only while that option
+// is the selected one. If the cell's own first line reads "Subject: …", that
+// line becomes the subject and the rest the body (unless a separate subject
+// column was imported, which wins). Returns { subject, body } or null when
+// the option is off or this dial has no such email — callers then fall back
+// to a plain blank compose.
+export function resolveRecommendedEmail(profile, dial) {
+  if (profile.role !== "team_lead") return null;
+  let which = null;
+  if (profile.recommended_first_email_enabled) which = "1";
+  else if (profile.recommended_second_email_enabled) which = "2";
+  if (!which) return null;
+  const raw = (dial["email_" + which] || "").replace(/\r\n?/g, "\n").trim();
+  if (!raw) return null;
+  let subject = (dial["email_" + which + "_subject"] || "").trim();
+  let body = raw;
+  const m = raw.match(/^subject\s*:\s*(.*)\n?/i);
+  if (m) {
+    if (!subject) subject = m[1].trim();
+    body = raw.slice(m[0].length).trim();
+  }
+  return { subject: subject || null, body };
+}
+
+// "first" | "second" | null — which recommended email the signed-in team
+// lead has selected (drives Mass email's availability/label).
+export function selectedRecommendedEmailKind(profile) {
+  if (profile.role !== "team_lead") return null;
+  if (profile.recommended_first_email_enabled) return "first";
+  if (profile.recommended_second_email_enabled) return "second";
+  return null;
 }
