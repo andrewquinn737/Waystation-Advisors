@@ -1873,3 +1873,8 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
 .sync-spinner { flex-shrink: 0; color: var(--text-muted); margin-left: 8px; animation: sync-spin 1s linear infinite; }
 .sync-spinner.hidden { display: none; }
 @keyframes sync-spin { to { transform: rotate(360deg); } }
+
+/* "Viewing" popup (Messages) — the current folder gets a check mark. */
+.viewing-check { visibility: hidden; color: var(--accent); font-weight: 700; }
+.viewing-option.active .viewing-check { visibility: visible; }
+.viewing-option.active .advanced-settings-row-label { font-weight: 700; }

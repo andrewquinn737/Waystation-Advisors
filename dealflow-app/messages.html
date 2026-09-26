@@ -76,8 +76,8 @@
         <span class="menu-item-label">Sync now</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span>
       </button>
-      <!-- Flips the list between mail you've received and mail you've sent
-           (Apple Mail-style folders). Label shows the view you're in now. -->
+      <!-- Opens the "Viewing" popup (Received / Sent / Spam / Trash /
+           Scheduled). Label shows the view you're in now. -->
       <button type="button" class="page-header-menu-item" id="menuFolderBtn">
         <span class="menu-item-label" id="menuFolderLabel">Viewing: Received</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
@@ -101,6 +101,26 @@
         <div id="mailboxesPopupBody"></div>
         <div class="form-actions">
           <button type="button" class="btn secondary" id="mailboxesPopupClose">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- "Viewing" popup — which folder to show. Received is the synced
+         inbox; Sent/Spam/Trash are read live from the real mailbox each time
+         (see email-live); Scheduled = emails queued by Mass email plus any
+         scheduled folder the mailbox itself has. -->
+    <div class="modal-backdrop hidden" id="viewingPopup">
+      <div class="modal">
+        <h2>Viewing</h2>
+        <div class="advanced-settings-list">
+          <button type="button" class="advanced-settings-row viewing-option" data-folder="received"><span class="advanced-settings-row-label">Received</span><span class="viewing-check">&#10003;</span></button>
+          <button type="button" class="advanced-settings-row viewing-option" data-folder="sent"><span class="advanced-settings-row-label">Sent</span><span class="viewing-check">&#10003;</span></button>
+          <button type="button" class="advanced-settings-row viewing-option" data-folder="spam"><span class="advanced-settings-row-label">Spam</span><span class="viewing-check">&#10003;</span></button>
+          <button type="button" class="advanced-settings-row viewing-option" data-folder="trash"><span class="advanced-settings-row-label">Trash</span><span class="viewing-check">&#10003;</span></button>
+          <button type="button" class="advanced-settings-row viewing-option" data-folder="scheduled"><span class="advanced-settings-row-label">Scheduled</span><span class="viewing-check">&#10003;</span></button>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn secondary" id="viewingPopupClose">Done</button>
         </div>
       </div>
     </div>

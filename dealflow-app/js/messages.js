@@ -51,6 +51,8 @@ const els = {
   menuSelectBtn: document.getElementById("menuSelectBtn"),
   menuFolderBtn: document.getElementById("menuFolderBtn"),
   menuFolderLabel: document.getElementById("menuFolderLabel"),
+  viewingPopup: document.getElementById("viewingPopup"),
+  viewingPopupClose: document.getElementById("viewingPopupClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
   mailboxesPopup: document.getElementById("mailboxesPopup"),
@@ -94,7 +96,12 @@ let accountOwnerNames = {}; // owner_id -> full_name, admin-only
 let detailThreadId = null; // null = list view
 let pendingCompose = null; // { attachments: [{filename, contentType, base64}] }
 let threadListSelectMode = false;
-let folderView = "received"; // "received" | "sent" — team leads/admins only (interns always see the one client-matched feed)
+// "received" | "sent" | "spam" | "trash" | "scheduled" — team leads/admins only
+// (interns always see the one client-matched feed). Received is the synced
+// inbox (threads, unread state, client links); every other view is read live
+// from the real mailbox / the send queue — see loadLiveFolder below.
+let folderView = "received";
+const FOLDER_LABELS = { received: "Received", sent: "Sent", spam: "Spam", trash: "Trash", scheduled: "Scheduled" };
 let selectedThreadIds = new Set();
 let currentThreadRows = []; // the list currently rendered, for Select all / bulk actions
 
@@ -126,7 +133,7 @@ function mailboxLabel(a) {
 
 function updateTitle() {
   const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
-  const suffix = folderView === "sent" ? " · Sent" : "";
+  const suffix = folderView === "received" ? "" : ` · ${FOLDER_LABELS[folderView]}`;
   if (!visible || visible.size !== 1) {
     els.messagesTitle.textContent = `Messages${suffix}`;
     return;
@@ -202,7 +209,7 @@ function runSync() {
 // mid-Select — re-rendering under someone's selection (or an open thread they
 // might be reading) would yank it away for no reason.
 function refreshAfterSync() {
-  if (detailThreadId || threadListSelectMode) return;
+  if (detailThreadId || threadListSelectMode || folderView !== "received") return;
   loadThreadList();
 }
 
@@ -235,14 +242,36 @@ function exitThreadSelectMode() {
 }
 els.menuSelectBtn.addEventListener("click", enterThreadSelectMode);
 
-els.menuFolderBtn.addEventListener("click", () => {
-  folderView = folderView === "received" ? "sent" : "received";
-  els.menuFolderLabel.textContent = folderView === "sent" ? "Viewing: Sent" : "Viewing: Received";
-  closePageHeaderMenu();
+function renderViewingPopup() {
+  els.viewingPopup.querySelectorAll(".viewing-option").forEach((btn) => btn.classList.toggle("active", btn.dataset.folder === folderView));
+}
+
+function setFolderView(next) {
+  folderView = next;
+  els.menuFolderLabel.textContent = `Viewing: ${FOLDER_LABELS[folderView]}`;
+  // Select mode (mark unread / delete) only means something on the synced inbox.
+  els.menuSelectBtn.classList.toggle("hidden", folderView !== "received");
   if (threadListSelectMode) exitThreadSelectMode();
   updateTitle();
   exitDetail();
   loadThreadList();
+}
+
+els.menuFolderBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closePageHeaderMenu();
+  renderViewingPopup();
+  els.viewingPopup.classList.remove("hidden");
+});
+els.viewingPopupClose.addEventListener("click", () => els.viewingPopup.classList.add("hidden"));
+els.viewingPopup.addEventListener("click", (e) => {
+  if (e.target === els.viewingPopup) els.viewingPopupClose.click();
+});
+els.viewingPopup.querySelectorAll(".viewing-option").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    els.viewingPopup.classList.add("hidden");
+    if (btn.dataset.folder !== folderView) setFolderView(btn.dataset.folder);
+  });
 });
 els.selectBackBtn.addEventListener("click", exitThreadSelectMode);
 els.selectAllBtn.addEventListener("click", () => {
@@ -298,6 +327,7 @@ function accountIdsForQuery() {
 }
 
 async function loadThreadList() {
+  if (canManageMail && folderView !== "received") return loadLiveFolder();
   els.errorBox.classList.add("hidden");
   els.wrap.innerHTML = `<div class="empty-state">Loading…</div>`;
 
@@ -339,6 +369,244 @@ async function loadThreadList() {
 
   currentThreadRows = [...threads.values()];
   renderThreadList();
+}
+
+// ---------------------------------------------------------------------------
+// Live folders (Sent / Spam / Trash / Scheduled) — nothing here is stored in
+// the app: every load asks the mailbox itself, over IMAP, through the
+// email-live Edge Function (headers for the list, the full message only when
+// one is opened). Scheduled also lists what Mass email has queued.
+// ---------------------------------------------------------------------------
+
+const LIVE_PAGE = 30;
+let liveState = null; // { kind, items, accountState: Map(accountId -> {offset, hasMore}), scheduled: [] }
+
+async function liveCall(body) {
+  const {
+    data: { session: authSession },
+  } = await supabase.auth.getSession();
+  const { data, error } = await supabase.functions.invoke("email-live", {
+    body,
+    headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+function liveFormatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function mailboxEmail(accountId) {
+  return accounts.find((a) => a.id === accountId)?.email_address || "";
+}
+
+async function loadLiveFolder(loadMore = false) {
+  const kind = folderView;
+  els.errorBox.classList.add("hidden");
+  const ids = accountIdsForQuery() || [];
+  if (!ids.length) {
+    els.wrap.innerHTML = `<div class="empty-state">No mailboxes connected yet.</div>`;
+    return;
+  }
+  if (!loadMore) {
+    els.wrap.innerHTML = `<div class="empty-state">Loading from the mailbox…</div>`;
+    liveState = { kind, items: [], accountState: new Map(), scheduled: [], failures: [] };
+  }
+  const state = liveState;
+  const targets = ids.filter((id) => !loadMore || state.accountState.get(id)?.hasMore);
+  const results = await Promise.all(
+    targets.map(async (id) => {
+      const offset = loadMore ? state.accountState.get(id).offset : 0;
+      try {
+        const data = await liveCall({ action: "list", account_id: id, kind: kind === "scheduled" ? "scheduled" : kind, offset, limit: LIVE_PAGE });
+        return { id, data };
+      } catch (e) {
+        return { id, error: e };
+      }
+    })
+  );
+  if (folderView !== kind || liveState !== state) return; // user switched away while loading
+  for (const r of results) {
+    if (r.error) {
+      state.failures.push(`${mailboxEmail(r.id)}: ${r.error.message || r.error}`);
+      state.accountState.set(r.id, { offset: 0, hasMore: false });
+      continue;
+    }
+    for (const it of r.data.items || []) state.items.push({ ...it, accountId: r.id });
+    const prev = loadMore ? state.accountState.get(r.id).offset : 0;
+    state.accountState.set(r.id, { offset: prev + (r.data.items || []).length, hasMore: !!r.data.has_more });
+  }
+  state.items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+  if (kind === "scheduled") {
+    const { data } = await supabase
+      .from("scheduled_emails")
+      .select("id, account_id, recipient_name, to_address, subject, send_at, status, error")
+      .in("account_id", ids)
+      .in("status", ["pending", "sending", "failed"])
+      .order("send_at", { ascending: true });
+    state.scheduled = (data || []).filter((r) => r.status !== "failed" || Date.now() - new Date(r.send_at).getTime() < 3 * 86400000);
+  }
+  renderLiveFolder();
+}
+
+function renderLiveFolder() {
+  const state = liveState;
+  const multi = accountIdsForQuery().length > 1;
+  const showTo = state.kind === "sent" || state.kind === "scheduled";
+  const parts = [];
+  if (state.failures.length) {
+    parts.push(`<div class="error-msg">${state.failures.map(escapeHtml).join("<br>")}</div>`);
+  }
+  if (state.kind === "scheduled") {
+    parts.push(
+      state.scheduled
+        .map(
+          (r) => `
+      <div class="mobile-card message-thread-row" data-scheduled-id="${escapeHtml(r.id)}">
+        <div class="mc-main">
+          <div class="mc-name">To: ${escapeHtml(r.recipient_name || r.to_address)}
+            <span class="message-client-badge">${r.status === "failed" ? "Failed" : r.status === "sending" ? "Sending" : "Scheduled"}</span></div>
+          <div class="mc-sub">${escapeHtml(r.subject || "(no subject)")}</div>
+          <div class="mc-sub faint">${r.status === "failed" ? escapeHtml(r.error || "Send failed") : `Goes out ${escapeHtml(new Date(r.send_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}`}${multi ? ` · ${escapeHtml(mailboxEmail(r.account_id))}` : ""}</div>
+        </div>
+        ${r.status === "pending" ? `<button type="button" class="btn secondary small" data-cancel-scheduled="${escapeHtml(r.id)}" style="flex-shrink:0;">Cancel</button>` : ""}
+      </div>`
+        )
+        .join("")
+    );
+  }
+  parts.push(
+    state.items
+      .map((m, i) => {
+        const who = showTo
+          ? `To: ${(m.to || []).map((a) => a.name || a.address).join(", ") || "(unknown)"}`
+          : m.from.name || m.from.address;
+        return `
+      <div class="mobile-card message-thread-row ${m.seen ? "" : "unread"}" data-live-index="${i}">
+        <div class="mc-main">
+          <div class="mc-name">${!m.seen && state.kind !== "sent" ? `<span class="message-unread-dot"></span>` : ""}${escapeHtml(who)}</div>
+          <div class="mc-sub">${escapeHtml(m.subject || "(no subject)")}</div>
+          ${multi ? `<div class="mc-sub faint">${escapeHtml(mailboxEmail(m.accountId))}</div>` : ""}
+        </div>
+        <div class="mc-sub faint" style="flex-shrink:0;">${escapeHtml(liveFormatDate(m.date))}</div>
+      </div>`;
+      })
+      .join("")
+  );
+  const empty = !state.items.length && !(state.kind === "scheduled" && state.scheduled.length);
+  const hasMore = [...state.accountState.values()].some((s) => s.hasMore);
+  els.wrap.innerHTML = empty
+    ? `<div class="empty-state">${state.failures.length ? parts.join("") : `Nothing in ${FOLDER_LABELS[state.kind]}.`}</div>`
+    : `<div class="team-member-list">${parts.join("")}${hasMore ? `<button type="button" class="btn secondary" id="liveLoadMoreBtn" style="margin:8px auto; display:block;">Load more</button>` : ""}</div>`;
+
+  els.wrap.querySelectorAll("[data-live-index]").forEach((row) => {
+    row.addEventListener("click", () => openLiveMessage(state.items[Number(row.dataset.liveIndex)]));
+  });
+  els.wrap.querySelectorAll("[data-cancel-scheduled]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      const { error } = await supabase.from("scheduled_emails").update({ status: "cancelled" }).eq("id", btn.dataset.cancelScheduled).eq("status", "pending");
+      if (error) {
+        btn.disabled = false;
+        return showError(els.errorBox, error);
+      }
+      state.scheduled = state.scheduled.filter((r) => r.id !== btn.dataset.cancelScheduled);
+      renderLiveFolder();
+    });
+  });
+  const more = document.getElementById("liveLoadMoreBtn");
+  if (more) {
+    more.addEventListener("click", async () => {
+      more.disabled = true;
+      more.textContent = "Loading…";
+      await loadLiveFolder(true);
+    });
+  }
+}
+
+async function openLiveMessage(item) {
+  const state = liveState;
+  els.errorBox.classList.add("hidden");
+  els.wrap.innerHTML = `<div class="empty-state">Opening…</div>`;
+  let msg;
+  try {
+    msg = (await liveCall({ action: "get", account_id: item.accountId, kind: state.kind, uid: item.uid })).message;
+  } catch (e) {
+    renderLiveFolder();
+    return showError(els.errorBox, e);
+  }
+  const date = msg.date ? new Date(msg.date).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  const person = (p, clickable) =>
+    `<span class="thread-participant-name"${clickable ? ` data-participant-address="${escapeHtml(p.address)}"` : ""}>${escapeHtml(p.name || p.address)}</span>`;
+  const body = msg.html
+    ? `<iframe class="thread-message-html" sandbox="allow-same-origin" srcdoc="${escapeHtml(msg.html)}"></iframe>`
+    : `<div class="thread-message-text">${escapeHtml(msg.text || "").replace(/\n/g, "<br>")}</div>`;
+  const atts = msg.attachments.length
+    ? `<div class="thread-message-attachments">${msg.attachments
+        .map((a) => `<a href="#" data-live-att="${a.index}" class="thread-attachment-chip">${escapeHtml(a.filename || "attachment")}</a>`)
+        .join("")}</div>`
+    : "";
+  els.wrap.innerHTML = `
+    <div class="thread-detail">
+      <h2 class="thread-detail-subject">${escapeHtml(msg.subject || "(no subject)")}</h2>
+      <div class="thread-message">
+        <div class="thread-message-header">
+          <span class="thread-message-from">${person(msg.from, state.kind !== "sent")}</span>
+          <span class="thread-message-date">${escapeHtml(date)}</span>
+        </div>
+        <div class="thread-message-to">To: ${(msg.to || []).map((p) => person(p, state.kind === "sent")).join(", ")}</div>
+        ${body}
+        ${atts}
+      </div>
+      <div class="thread-detail-actions">
+        <button type="button" class="btn secondary" id="liveBackBtn">Back</button>
+      </div>
+    </div>`;
+  document.getElementById("liveBackBtn").addEventListener("click", renderLiveFolder);
+  els.wrap.querySelectorAll("[data-participant-address]").forEach((el) => el.addEventListener("click", () => openParticipantRecord(el.dataset.participantAddress)));
+  els.wrap.querySelectorAll(".thread-message-html").forEach((frame) => {
+    frame.addEventListener("load", () => {
+      try {
+        frame.style.height = "0px";
+        const doc = frame.contentDocument;
+        frame.style.height = `${(doc?.body?.scrollHeight || doc?.documentElement?.scrollHeight || 80) + 4}px`;
+      } catch {
+        frame.style.height = "";
+      }
+    });
+  });
+  els.wrap.querySelectorAll("[data-live-att]").forEach((link) => {
+    link.addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (link.dataset.busy) return;
+      link.dataset.busy = "1";
+      const original = link.textContent;
+      link.textContent = "Opening…";
+      try {
+        const att = await liveCall({ action: "attachment", account_id: item.accountId, kind: state.kind, uid: item.uid, index: Number(link.dataset.liveAtt) });
+        const bytes = Uint8Array.from(atob(att.base64), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: att.content_type }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = att.filename || "attachment";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (err) {
+        showError(els.errorBox, err);
+      } finally {
+        link.textContent = original;
+        delete link.dataset.busy;
+      }
+    });
+  });
 }
 
 function renderThreadList() {
