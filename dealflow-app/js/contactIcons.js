@@ -2,6 +2,7 @@
 // dials.js, both in the detailed read-only field rows (rfContact) and in the
 // compact list/card rows (contactActionIcons).
 
+import { showConnectEmailNotice } from "./notice.js";
 import { escapeHtml } from "./clientForm.js";
 import { openQuickSend } from "./quickSend.js";
 
@@ -57,6 +58,27 @@ export function setOwnEmail(email) {
 // ---------------------------------------------------------------------------
 let ownRole = null;
 let teamLeadMailbox = null; // { accountId, email } | null
+// Whether the signed-in team lead/admin has connected at least one of their own
+// mailboxes (null = not known yet, treated as connected). Without one the Email
+// icon shows a "connect an email first" error instead of opening Messages.
+let ownHasMailbox = null;
+
+export function setOwnHasMailbox(flag) {
+  ownHasMailbox = flag === true || flag === false ? flag : null;
+}
+
+// Capture phase so this wins over any row/card click handler around the icon.
+document.addEventListener(
+  "click",
+  (e) => {
+    const btn = e.target.closest && e.target.closest(".no-mailbox-email-btn");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    showConnectEmailNotice();
+  },
+  true
+);
 
 export function setOwnRole(role) {
   ownRole = role || null;
@@ -111,6 +133,9 @@ function buildEmailHref(targetEmail, body, subject) {
 // below rather than a click handler baked in here, matching how every
 // other icon in this file stays a plain, dependency-free string builder).
 function emailActionHTML(targetEmail, body, subject) {
+  if (canUseMessages() && ownHasMailbox === false) {
+    return `<button type="button" class="contact-action-btn no-mailbox-email-btn" title="Email">${CONTACT_ICONS.mailto}</button>`;
+  }
   if (canUseMessages()) {
     const params = new URLSearchParams({ compose: "1", to: targetEmail });
     if (subject) params.set("subject", subject);

@@ -19,6 +19,7 @@
 //     enters into that flow at all.)
 
 import { supabase } from "./supabaseClient.js";
+import { showConnectEmailNotice } from "./notice.js";
 import { findPriorOutbound, isReplySubject, stripReplyPrefix } from "./followUp.js";
 import { requireSession, showError } from "./auth.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
@@ -339,7 +340,7 @@ async function loadThreadList() {
   const ids = accountIdsForQuery();
   if (ids) {
     if (!ids.length) {
-      els.wrap.innerHTML = `<div class="empty-state">No mailboxes connected yet.</div>`;
+      els.wrap.innerHTML = `<div class="empty-state">No email connected yet — go to Profile → Edit to connect one.</div>`;
       return;
     }
     query = query.in("account_id", ids);
@@ -437,7 +438,7 @@ async function loadLiveFolder(loadMore = false) {
   els.errorBox.classList.add("hidden");
   const ids = accountIdsForQuery() || [];
   if (!ids.length) {
-    els.wrap.innerHTML = `<div class="empty-state">No mailboxes connected yet.</div>`;
+    els.wrap.innerHTML = `<div class="empty-state">No email connected yet — go to Profile → Edit to connect one.</div>`;
     return;
   }
   if (!loadMore) {
@@ -977,6 +978,11 @@ function renderComposeAttachments() {
 }
 
 function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }) {
+  // Sending needs one of YOUR OWN connected mailboxes (Profile -> Edit).
+  if (!accounts.some((a) => a.owner_id === profile.id)) {
+    showConnectEmailNotice();
+    return;
+  }
   pendingCompose = { mode, inReplyTo, threadId, attachments: [] };
   els.composeError.classList.add("hidden");
   els.composeTitle.textContent = mode === "reply" ? "Reply" : "New message";
@@ -988,8 +994,14 @@ function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }
 
   const usable = accounts.filter((a) => isAdmin || a.owner_id === profile.id);
   els.composeFromSelect.innerHTML = usable.map((a) => `<option value="${a.id}">${escapeHtml(mailboxLabel(a))}</option>`).join("");
-  const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
-  const defaultAccountId = accountId || (visible && visible.size === 1 ? [...visible][0] : usable[0]?.id);
+  // Default sender: the email at the top of your list (Profile -> Edit), if
+  // it's connected; otherwise your first connected one.
+  const topEmail = (profile.email || "").toLowerCase();
+  const defaultAccountId =
+    accountId ||
+    usable.find((a) => a.owner_id === profile.id && (a.email_address || "").toLowerCase() === topEmail)?.id ||
+    usable.find((a) => a.owner_id === profile.id)?.id ||
+    usable[0]?.id;
   if (defaultAccountId) els.composeFromSelect.value = defaultAccountId;
   els.composeFromRow.classList.toggle("hidden", mode === "reply");
 

@@ -2164,7 +2164,7 @@ function randomOffsetsMs(count) {
 // Mutates each item's `senderId`; returns { problems: string[] }.
 async function assignSenders(send, mailboxes) {
   const problems = [];
-  if (!mailboxes.length) return { problems: ["No connected mailbox found to send from — add one under Messages first."] };
+  if (!mailboxes.length) return { problems: ["You need to connect an email to the app before you can send — go to Profile → Edit."] };
   const ordered = [pickPrimaryMailbox(mailboxes), ...mailboxes.filter((m) => m !== pickPrimaryMailbox(mailboxes))];
   const remaining = new Map();
   const used = new Map();
@@ -2365,7 +2365,7 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   const { send, skipped } = await planMassEmail();
   els.selectMassEmailBtn.disabled = false;
   const mailboxes = await loadMyMailboxes();
-  if (!mailboxes.length) return showError(els.errorBox, new Error("No connected mailbox found to send from — add one under Messages first."));
+  if (!mailboxes.length) return showError(els.errorBox, new Error("You need to connect an email to the app before you can send — go to Profile → Edit."));
   const assignment = await assignSenders(send, mailboxes);
   const emailOf = (id) => (mailboxes.find((m) => m.id === id) || {}).email_address || "";
 

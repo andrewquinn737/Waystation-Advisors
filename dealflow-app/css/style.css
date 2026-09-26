@@ -676,6 +676,23 @@ html.is-desktop-device .import-dials-drop-hint { display: block; }
 }
 .profile-edit-input.profile-edit-name { font-size: 18px; font-weight: 700; margin-top: 0; }
 
+/* Profile -> Edit for team leads/admins: each email is a button-shaped box the
+   size of the old text box (see js/profileEmails.js). Red outline = listed but
+   not connected; the top one is bold (the default sender); || is the drag grip. */
+.profile-mail-box {
+  display: flex; align-items: center; gap: 8px; width: 100%; max-width: 260px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);
+  padding: 6px 8px; margin: 4px 0; cursor: pointer; font-family: inherit; user-select: none;
+}
+.profile-mail-box.unconnected { border: 2px solid var(--danger); padding: 5px 7px; }
+.profile-mail-box.first .profile-mail-addr { font-weight: 700; }
+.profile-mail-box.dragging { background: var(--gold-soft); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+.profile-mail-addr { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.profile-mail-add { justify-content: center; color: var(--text-muted); border-style: dashed; }
+.profile-mail-add .profile-mail-addr { flex: none; }
+.profile-mail-grip { cursor: grab; touch-action: none; padding: 2px 4px; font-weight: 700; letter-spacing: -2px; color: var(--text-muted); }
+.profile-mail-help { max-width: 260px; margin: 2px 0 6px; }
+
 .profile-calls-section { margin-top: 18px; }
 .profile-calls-text { font-size: 15px; font-weight: 700; color: var(--text); margin: 0 0 10px; }
 .profile-quota-status { font-size: 12px; font-weight: 600; margin-top: 2px; }

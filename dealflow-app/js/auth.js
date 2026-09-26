@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { setOwnEmail, setOwnRole, setTeamLeadMailbox } from "./contactIcons.js";
+import { setOwnEmail, setOwnRole, setTeamLeadMailbox, setOwnHasMailbox } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError, withTimeout } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
@@ -152,6 +152,17 @@ export async function requireSession() {
       }
     } catch (e) {
       console.error("Could not resolve team lead mailbox", e);
+    }
+  }
+
+  // A team lead/admin can't send email until they've connected one of their own
+  // mailboxes (Profile -> Edit) — tell the Email icon so it can say so.
+  if (resolvedProfile.role === "team_lead" || resolvedProfile.role === "admin") {
+    try {
+      const { data: own } = await supabase.from("email_accounts").select("id").eq("owner_id", resolvedProfile.id).limit(1);
+      setOwnHasMailbox(!!(own && own.length));
+    } catch (e) {
+      console.error("Could not check connected mailboxes", e);
     }
   }
 
