@@ -493,6 +493,7 @@ async function loadClients() {
     clients = cached;
     showOfflineNotice(true);
     await loadClientProgressStages();
+    await loadSourceDialCompanies();
     renderTable();
     return;
   }
@@ -500,6 +501,7 @@ async function loadClients() {
   clients = data || [];
   cacheSet(cacheKey, clients);
   await loadClientProgressStages();
+  await loadSourceDialCompanies();
   renderTable();
 }
 
@@ -537,16 +539,54 @@ function clientProgressStage(clientId) {
   return clientProgressStages.get(clientId) || "no_meetings";
 }
 
+// Search: matches a client's name, business name, industry — and, so a
+// client whose own Company field is empty (e.g. buyers made from a dial, which
+// don't copy the dial's company over) can still be found by business name, the
+// company on the dial it came from and the name part of its email domain
+// (kylew@summitleadpartners.ai -> "summitleadpartners"). Both sides are
+// compared with punctuation and spaces stripped, so "summit lead", "Pitts
+// Oilfield & Services" and "pitts oilfield services" all still hit.
+const searchNorm = (str) => String(str || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+let sourceDialCompanyByClient = new Map(); // client id -> company_name of the dial it came from
+
+async function loadSourceDialCompanies() {
+  sourceDialCompanyByClient = new Map();
+  const dialIds = [...new Set(clients.map((c) => c.source_dial_id).filter(Boolean))];
+  if (!dialIds.length) return;
+  const { data } = await supabase.from("dials").select("id, company_name").in("id", dialIds);
+  const byDial = new Map((data || []).map((d) => [d.id, d.company_name]));
+  clients.forEach((c) => {
+    const company = c.source_dial_id && byDial.get(c.source_dial_id);
+    if (company) sourceDialCompanyByClient.set(c.id, company);
+  });
+}
+
+function emailDomainName(email) {
+  const domain = String(email || "").split("@")[1] || "";
+  const labels = domain.split(".");
+  return labels.length > 1 ? labels.slice(0, -1).join("") : domain;
+}
+
+function clientSearchMatches(c, q) {
+  const needle = searchNorm(q);
+  const fields = [clientDisplayName(c), c.company_name, sourceDialCompanyByClient.get(c.id), c.industry, emailDomainName(c.email)];
+  if (fields.some((f) => (f || "").toLowerCase().includes(q))) return true;
+  if (needle && fields.some((f) => searchNorm(f).includes(needle))) return true;
+  // Several words: every word just has to appear somewhere in the client's
+  // name/business/etc., in any order ("pitts oilfield services" finds "Pitts
+  // Oilfield Products & Services, LLC").
+  const words = q.split(/\s+/).map(searchNorm).filter(Boolean);
+  const haystack = fields.map(searchNorm).join(" ");
+  return words.length > 1 && words.every((w) => haystack.includes(w));
+}
+
 function renderTable() {
   const q = els.search.value.trim().toLowerCase();
   const visibleAccountIds = getVisibleAccountIds();
   const visibleBuyerIds = getVisibleAccountIds(BUYERS_VISIBLE_KEY);
   const rows = clients.filter(
     (c) =>
-      (!q ||
-        clientDisplayName(c).toLowerCase().includes(q) ||
-        (c.company_name || "").toLowerCase().includes(q) ||
-        (c.industry || "").toLowerCase().includes(q)) &&
+      (!q || clientSearchMatches(c, q)) &&
       !hiddenClientStatuses.has(c.pipeline_status || "not_in_contact") &&
       // Admin-only "Accounts visible" filter (now shared across Clients,
       // Dials, and Profile — see js/accountsVisible.js), applied before
