@@ -539,7 +539,8 @@ function clientProgressStage(clientId) {
   return clientProgressStages.get(clientId) || "no_meetings";
 }
 
-// Search: matches a client's name, business name, industry — and, so a
+// Search: matches a client's name, business name, phone number(s) (any format:
+// "801-555-1234", "(801) 555 1234", "8015551234"), industry — and, so a
 // client whose own Company field is empty (e.g. buyers made from a dial, which
 // don't copy the dial's company over) can still be found by business name, the
 // company on the dial it came from and the name part of its email domain
@@ -569,7 +570,7 @@ function emailDomainName(email) {
 
 function clientSearchMatches(c, q) {
   const needle = searchNorm(q);
-  const fields = [clientDisplayName(c), c.company_name, sourceDialCompanyByClient.get(c.id), c.industry, emailDomainName(c.email)];
+  const fields = [clientDisplayName(c), c.company_name, sourceDialCompanyByClient.get(c.id), c.industry, emailDomainName(c.email), c.phone, c.mobile_phone, c.company_phone];
   if (fields.some((f) => (f || "").toLowerCase().includes(q))) return true;
   if (needle && fields.some((f) => searchNorm(f).includes(needle))) return true;
   // Several words: every word just has to appear somewhere in the client's
