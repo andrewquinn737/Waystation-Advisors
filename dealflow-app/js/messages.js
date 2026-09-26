@@ -111,7 +111,7 @@ let currentThreadRows = []; // the list currently rendered, for Select all / bul
 
 async function loadAccounts() {
   if (!canManageMail) return;
-  const { data, error } = await supabase.from("email_accounts").select("*").order("owner_id").order("email_address");
+  const { data, error } = await supabase.from("email_accounts").select("id, owner_id, label, email_address, imap_host, smtp_host, sync_enabled, last_synced_at, last_sync_error").order("owner_id").order("email_address");
   if (error) return showError(els.errorBox, error);
   accounts = data || [];
   if (isAdmin) {
