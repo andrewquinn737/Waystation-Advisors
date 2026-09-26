@@ -2154,29 +2154,75 @@ function randomOffsetsMs(count) {
   return out;
 }
 
-// Per-mailbox daily cap (25 per rolling 24h, enforced by the database and
-// email-send too): returns one message per mailbox that `send` would push over.
-async function findQuotaViolations(send, defaultAccountId) {
-  const wanted = new Map();
-  send.forEach((x) => {
-    const id = x.accountId || defaultAccountId;
-    wanted.set(id, (wanted.get(id) || 0) + 1);
-  });
-  const mailboxes = await loadMyMailboxes();
+// Picks which of the user's mailboxes sends each email, and enforces the
+// per-mailbox daily cap (25 per rolling 24h — also enforced by the database
+// and email-send). First emails ALTERNATE 1-and-1 between the user's
+// mailboxes (primary first), skipping any mailbox that has hit its limit; if
+// every mailbox is full the batch is refused. A follow-up (second email) has
+// to go out from the mailbox that sent the first email — same thread, same
+// From address — so it is pinned to that mailbox and counts against it.
+// Mutates each item's `senderId`; returns { problems: string[] }.
+async function assignSenders(send, mailboxes) {
   const problems = [];
-  for (const [accountId, count] of wanted) {
-    const { data, error } = await supabase.rpc("mailbox_daily_quota", { p_account_id: accountId });
+  if (!mailboxes.length) return { problems: ["No connected mailbox found to send from — add one under Messages first."] };
+  const ordered = [pickPrimaryMailbox(mailboxes), ...mailboxes.filter((m) => m !== pickPrimaryMailbox(mailboxes))];
+  const remaining = new Map();
+  const used = new Map();
+  let limit = 25;
+  for (const mb of ordered) {
+    const { data, error } = await supabase.rpc("mailbox_daily_quota", { p_account_id: mb.id });
     const q = Array.isArray(data) ? data[0] : data;
-    if (error || !q) continue; // the database re-checks on insert regardless
-    const remaining = Math.max(0, q.daily_limit - q.sent - q.scheduled);
-    if (count > remaining) {
-      const mb = mailboxes.find((m) => m.id === accountId);
+    if (error || !q) {
+      remaining.set(mb.id, 25); // unknown — the database re-checks on insert regardless
+      continue;
+    }
+    limit = q.daily_limit;
+    remaining.set(mb.id, Math.max(0, q.daily_limit - q.sent - q.scheduled));
+    used.set(mb.id, q.sent + q.scheduled);
+  }
+  const label = (id) => (mailboxes.find((m) => m.id === id) || {}).email_address || "this mailbox";
+
+  // Pinned follow-ups first, so they aren't crowded out.
+  const pinned = new Map();
+  send.filter((x) => x.accountId).forEach((x) => pinned.set(x.accountId, (pinned.get(x.accountId) || 0) + 1));
+  for (const [id, count] of pinned) {
+    if (!remaining.has(id)) continue;
+    const r = remaining.get(id);
+    if (count > r) {
       problems.push(
-        `Daily limit: ${(mb && mb.email_address) || "this mailbox"} can send at most ${q.daily_limit} emails per 24 hours — ${q.sent} sent and ${q.scheduled} scheduled already, so ${remaining} more allowed, but this batch has ${count}. Select fewer dials.`
+        `Daily limit: follow-ups must go out from the mailbox that sent the first email, and ${label(id)} can only send ${r} more today (limit ${limit} per 24 hours, ${used.get(id) ?? "?"} used) — this batch needs ${count}. Select fewer dials.`
       );
     }
+    remaining.set(id, Math.max(0, r - count));
   }
-  return problems;
+
+  // First emails: round-robin over mailboxes that still have room.
+  let ptr = 0;
+  let unassigned = 0;
+  for (const item of send.filter((x) => !x.accountId)) {
+    let picked = null;
+    for (let step = 0; step < ordered.length; step++) {
+      const idx = (ptr + step) % ordered.length;
+      if ((remaining.get(ordered[idx].id) || 0) > 0) {
+        picked = idx;
+        break;
+      }
+    }
+    if (picked === null) {
+      unassigned += 1;
+      continue;
+    }
+    item.senderId = ordered[picked].id;
+    remaining.set(item.senderId, remaining.get(item.senderId) - 1);
+    ptr = (picked + 1) % ordered.length;
+  }
+  if (unassigned) {
+    const summary = ordered.map((m) => `${m.email_address} (${used.get(m.id) ?? "?"} of ${limit})`).join(", ");
+    problems.push(
+      `Daily limit: not enough room to send this batch — each mailbox can send at most ${limit} emails per 24 hours (${summary}). ${unassigned} email${unassigned === 1 ? "" : "s"} can't be sent. Select fewer dials.`
+    );
+  }
+  return { problems };
 }
 
 function showMassEmailError(message) {
@@ -2318,21 +2364,36 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   els.selectMassEmailBtn.disabled = true;
   const { send, skipped } = await planMassEmail();
   els.selectMassEmailBtn.disabled = false;
-  const mailbox = await findPrimaryMailbox();
-  if (!mailbox) return showError(els.errorBox, new Error("No connected mailbox found to send from — add one under Messages first."));
+  const mailboxes = await loadMyMailboxes();
+  if (!mailboxes.length) return showError(els.errorBox, new Error("No connected mailbox found to send from — add one under Messages first."));
+  const assignment = await assignSenders(send, mailboxes);
+  const emailOf = (id) => (mailboxes.find((m) => m.id === id) || {}).email_address || "";
 
   stopMassEmailClock();
-  massPlan = { send, mailbox, offsetsMs: randomOffsetsMs(send.length), sendAts: null, timer: null };
+  massPlan = { send, mailboxes, offsetsMs: randomOffsetsMs(send.length), sendAts: null, timer: null };
+
+  // Which mailboxes will actually send, and how many each: "a@x (3), b@x (2)".
+  const senderCounts = new Map();
+  send.forEach((x) => {
+    const id = x.accountId || x.senderId;
+    if (id) senderCounts.set(id, (senderCounts.get(id) || 0) + 1);
+  });
+  const sendersText = [...senderCounts].map(([id, n]) => `${emailOf(id)} (${n})`).join(", ");
 
   els.massEmailTitle.textContent = kind === "second" ? "Send Recommended second email (follow-up)?" : "Send Recommended first email?";
   els.massEmailSummary.textContent = !send.length
     ? "None of the selected dials can be emailed."
     : (kind === "second"
         ? `The Recommended second email will go out as a follow-up reply to each dial's first email (same thread, from the mailbox that sent it)`
-        : `The Recommended first email will go out from ${mailbox.email_address}`) +
+        : senderCounts.size > 1
+          ? `The Recommended first email will go out alternating between your mailboxes — ${sendersText}`
+          : `The Recommended first email will go out from ${sendersText || "your mailbox"}`) +
       `, one at a time — the first right away, then each one a random 3–6 minutes after the last. It keeps sending even if you close the app. Times:`;
   els.massEmailList.innerHTML = send
-    .map((x, i) => `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}</span> — <strong data-time-idx="${i}"></strong></li>`)
+    .map(
+      (x, i) =>
+        `<li>${escapeHtml(x.name)} <span class="help-text" style="display:inline;">${escapeHtml(x.to)}${senderCounts.size > 1 ? ` · from ${escapeHtml(emailOf(x.accountId || x.senderId))}` : ""}</span> — <strong data-time-idx="${i}"></strong></li>`
+    )
     .join("");
   els.massEmailSendingTitle.textContent = `Sending (${send.length}):`;
   els.massEmailSendingTitle.classList.toggle("hidden", !send.length);
@@ -2351,10 +2412,7 @@ els.selectMassEmailBtn.addEventListener("click", async () => {
   els.massEmailCancelBtn.textContent = "Cancel";
   renderMassEmailTimes();
   massPlan.timer = setInterval(renderMassEmailTimes, 1000);
-  if (send.length) {
-    const problems = await findQuotaViolations(send, mailbox.id);
-    if (problems.length) showMassEmailError(problems.join(" "));
-  }
+  if (assignment.problems.length) showMassEmailError(assignment.problems.join(" "));
   refreshMassEmailPendingBanner();
   els.massEmailModal.classList.remove("hidden");
   lockPageScroll();
@@ -2370,7 +2428,10 @@ els.massEmailSendBtn.addEventListener("click", async () => {
   if (!massPlan || massPlan.sendAts || !massPlan.send.length) return;
   els.massEmailSendBtn.disabled = true;
   els.massEmailProgress.style.color = "";
-  const problems = await findQuotaViolations(massPlan.send, massPlan.mailbox.id);
+  // Re-check with fresh numbers (another send may have used up a mailbox
+  // since the popup opened) and re-pick senders before queueing anything.
+  massPlan.send.forEach((x) => delete x.senderId);
+  const { problems } = await assignSenders(massPlan.send, massPlan.mailboxes);
   if (problems.length) {
     els.massEmailSendBtn.disabled = false;
     return showMassEmailError(problems.join(" "));
@@ -2379,7 +2440,7 @@ els.massEmailSendBtn.addEventListener("click", async () => {
   const sendAts = massPlan.offsetsMs.map((o) => now + o);
   const rows = massPlan.send.map((x, i) => ({
     created_by: profile.id,
-    account_id: x.accountId || massPlan.mailbox.id,
+    account_id: x.accountId || x.senderId,
     dial_id: x.dialId,
     recipient_name: x.name,
     to_address: x.to,

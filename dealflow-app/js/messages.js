@@ -394,6 +394,33 @@ async function liveCall(body) {
   return data;
 }
 
+// Downloads one attachment of a live-read message: asks email-live for the
+// bytes and saves them through an <a download> click (same reasoning as the
+// stored-attachment downloader in openThread).
+async function downloadLiveAttachment(link, { accountId, kind, uid, index }) {
+  if (link.dataset.busy) return;
+  link.dataset.busy = "1";
+  const original = link.textContent;
+  link.textContent = "Opening…";
+  try {
+    const att = await liveCall({ action: "attachment", account_id: accountId, kind, uid, index });
+    const bytes = Uint8Array.from(atob(att.base64), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: att.content_type }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = att.filename || "attachment";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    showError(els.errorBox, err);
+  } finally {
+    link.textContent = original;
+    delete link.dataset.busy;
+  }
+}
+
 function liveFormatDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -582,29 +609,9 @@ async function openLiveMessage(item) {
     });
   });
   els.wrap.querySelectorAll("[data-live-att]").forEach((link) => {
-    link.addEventListener("click", async (e) => {
+    link.addEventListener("click", (e) => {
       e.preventDefault();
-      if (link.dataset.busy) return;
-      link.dataset.busy = "1";
-      const original = link.textContent;
-      link.textContent = "Opening…";
-      try {
-        const att = await liveCall({ action: "attachment", account_id: item.accountId, kind: state.kind, uid: item.uid, index: Number(link.dataset.liveAtt) });
-        const bytes = Uint8Array.from(atob(att.base64), (c) => c.charCodeAt(0));
-        const url = URL.createObjectURL(new Blob([bytes], { type: att.content_type }));
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = att.filename || "attachment";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-      } catch (err) {
-        showError(els.errorBox, err);
-      } finally {
-        link.textContent = original;
-        delete link.dataset.busy;
-      }
+      downloadLiveAttachment(link, { accountId: item.accountId, kind: state.kind, uid: item.uid, index: Number(link.dataset.liveAtt) });
     });
   });
 }
@@ -720,13 +727,33 @@ async function openThread(threadId) {
     (attachmentsByMessage[a.message_id] ||= []).push(a);
   }
 
+  // Stored inbound mail is a preview only (no body, no attachment files) —
+  // read the full message live from the mailbox by its IMAP UID. Falls back
+  // to the stored snippet if the mailbox can't be reached or the message is
+  // gone. Messages that still carry a stored body (older ones, and what this
+  // app sent itself) render from that as before.
+  const liveById = {};
+  if (canManageMail) {
+    await Promise.all(
+      msgs
+        .filter((m) => m.direction === "inbound" && !m.body_html && !m.body_text && m.imap_uid)
+        .map(async (m) => {
+          try {
+            liveById[m.id] = (await liveCall({ action: "get", account_id: m.account_id, kind: "inbox", uid: m.imap_uid })).message;
+          } catch (e) {
+            liveById[m.id] = { error: e.message || String(e) };
+          }
+        })
+    );
+  }
+
   const last = msgs[msgs.length - 1];
   const canReply = canManageMail && accounts.some((a) => a.id === last.account_id);
 
   els.wrap.innerHTML = `
     <div class="thread-detail">
       <h2 class="thread-detail-subject">${escapeHtml(msgs.find((m) => m.subject)?.subject || "(no subject)")}</h2>
-      ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [])).join("")}
+      ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [], liveById[m.id])).join("")}
       <div class="thread-detail-actions">
         <button type="button" class="btn secondary" id="threadBackBtn">Back</button>
         ${canReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>` : ""}
@@ -812,6 +839,18 @@ async function openThread(threadId) {
     });
   });
 
+  els.wrap.querySelectorAll("[data-live-account]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      downloadLiveAttachment(link, {
+        accountId: link.dataset.liveAccount,
+        kind: link.dataset.liveKind,
+        uid: Number(link.dataset.liveUid),
+        index: Number(link.dataset.liveAtt),
+      });
+    });
+  });
+
   // Participant name → their Client/Dial record (see openParticipantRecord).
   els.wrap.querySelectorAll("[data-participant-address]").forEach((el) => {
     el.addEventListener("click", () => openParticipantRecord(el.dataset.participantAddress));
@@ -837,7 +876,7 @@ function attachmentDisplayName(a) {
   return "attachment";
 }
 
-function threadMessageHTML(m, atts) {
+function threadMessageHTML(m, atts, live) {
   const date = new Date(m.sent_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const fromLabel = m.direction === "outbound" ? `${m.from_name || m.from_address} (you)` : m.from_name || m.from_address;
   const fromClickable = m.direction === "outbound" ? "" : ` data-participant-address="${escapeHtml(m.from_address)}"`;
@@ -845,23 +884,38 @@ function threadMessageHTML(m, atts) {
   const toLabel = toEntries
     .map((a) => `<span class="thread-participant-name"${m.direction === "outbound" ? ` data-participant-address="${escapeHtml(a.address)}"` : ""}>${escapeHtml(a.name || a.address)}</span>`)
     .join(", ");
-  const bodyHTML = m.body_html
+  // `live`: the message read straight from the mailbox (see openThread) —
+  // { html, text, attachments } — or { error } if that failed.
+  const html = m.body_html || (live && live.html);
+  const text = m.body_text || (live && live.text);
+  const bodyHTML = html
     ? // allow-same-origin without allow-scripts: still fully blocks any script
       // in the email HTML from running (that's what actually matters for
       // safety), but lets this page measure the iframe's own contentDocument
       // to resize it to its real content height (see the load listener
       // above) — a fully opaque sandbox="" origin blocks that measurement
       // too, not just script execution.
-      `<iframe class="thread-message-html" sandbox="allow-same-origin" srcdoc="${escapeHtml(m.body_html)}"></iframe>`
-    : `<div class="thread-message-text">${escapeHtml(m.body_text || "").replace(/\n/g, "<br>")}</div>`;
-  const attsHTML = atts.length
+      `<iframe class="thread-message-html" sandbox="allow-same-origin" srcdoc="${escapeHtml(html)}"></iframe>`
+    : text
+      ? `<div class="thread-message-text">${escapeHtml(text).replace(/\n/g, "<br>")}</div>`
+      : `<div class="thread-message-text">${escapeHtml(m.snippet || "")}${live && live.error ? `<div class="help-text">Couldn't load the full message from the mailbox (${escapeHtml(live.error)}).</div>` : ""}</div>`;
+  const liveAtts = live && live.attachments ? live.attachments : [];
+  const liveAttsHTML = liveAtts.length
+    ? `<div class="thread-message-attachments">${liveAtts
+        .map(
+          (a) =>
+            `<a href="#" data-live-att="${a.index}" data-live-account="${escapeHtml(m.account_id)}" data-live-uid="${escapeHtml(m.imap_uid)}" data-live-kind="inbox" class="thread-attachment-chip">${escapeHtml(a.filename || "attachment")}</a>`
+        )
+        .join("")}</div>`
+    : "";
+  const attsHTML = liveAttsHTML || (atts.length
     ? `<div class="thread-message-attachments">${atts
         .map(
           (a) =>
             `<a href="#" data-attachment-path="${escapeHtml(a.storage_path)}" data-attachment-name="${escapeHtml(attachmentDisplayName(a))}" class="thread-attachment-chip">${escapeHtml(attachmentDisplayName(a))}</a>`
         )
         .join("")}</div>`
-    : "";
+    : "");
   return `
     <div class="thread-message ${m.direction}">
       <div class="thread-message-header">
