@@ -285,6 +285,13 @@
     <div class="modal">
       <h2>Accounts visible</h2>
       <p class="help-text">Choose which account(s) to include in this report.</p>
+      <!-- Admin accounts are left out of the report by default (see
+           resolveAccounts in js/reports.js) — this is the only way to bring
+           them back in, independent of the account rows below. -->
+      <label class="reports-include-admins-row">
+        <input type="checkbox" id="reportsIncludeAdminsCheckbox" />
+        Include admin accounts
+      </label>
       <div id="reportsAccountsVisibleBody"></div>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="reportsAccountsVisibleClose">Done</button>

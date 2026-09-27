@@ -41,6 +41,12 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 // ---------------------------------------------------------------------------
 
 const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible";
+// Admin accounts are excluded from Outreach/Team reports by default (their
+// own outreach numbers aren't the point of these reports, and mixing them
+// into "everyone" made per-team totals harder to read at a glance) — this
+// toggle brings them back in, independent of the ordinary Accounts visible
+// selection (see resolveAccounts below).
+const REPORTS_INCLUDE_ADMINS_KEY = "waystation_report_include_admins";
 // null represents "no buyer_id" both for rows where a tab was explicitly
 // never assigned to a buyer, and for historical rows whose tab/buyer
 // attribution predates this tracking existing at all (dial_lists rows are
@@ -279,6 +285,22 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
 
   initDefaultToSelf(profile.id, REPORTS_ACCOUNTS_KEY);
 
+  let includeAdmins = false;
+  try {
+    includeAdmins = localStorage.getItem(REPORTS_INCLUDE_ADMINS_KEY) === "1";
+  } catch {
+    // ignore (private browsing / storage disabled)
+  }
+  function setIncludeAdmins(next) {
+    includeAdmins = next;
+    try {
+      if (next) localStorage.setItem(REPORTS_INCLUDE_ADMINS_KEY, "1");
+      else localStorage.removeItem(REPORTS_INCLUDE_ADMINS_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
   let reportType = "outreach"; // "outreach" | "team"
   let periodType = "week"; // "week" | "month"
   let selectedPeriodStart = mondayOf(new Date());
@@ -298,9 +320,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   async function resolveAccounts() {
     if (!allAccountsCache) allAccountsCache = await getAllAccounts();
     const visible = getVisibleAccountIds(REPORTS_ACCOUNTS_KEY);
-    if (!visible) return allAccountsCache;
-    const picked = allAccountsCache.filter((a) => visible.has(a.id));
-    return picked.length ? picked : allAccountsCache;
+    const picked = !visible ? allAccountsCache : allAccountsCache.filter((a) => visible.has(a.id));
+    const pool = picked.length ? picked : allAccountsCache;
+    // Admin accounts are stripped out here regardless of what the ordinary
+    // Accounts visible selection says (including "Select all") — the only
+    // way an admin appears in a report is the dedicated toggle above.
+    return includeAdmins ? pool : pool.filter((a) => a.role !== "admin");
   }
 
   // get_reports_available_buyers() is a SECURITY DEFINER RPC (see
@@ -325,7 +350,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const periodStartStr = isoDate(selectedPeriodStart);
     const { data } = await supabase
       .from("report_dial_rollups")
-      .select("user_id, buyer_id, calls_made, owners_talked, owners_agreed_to_intro_call, intro_calls_completed")
+      .select("user_id, buyer_id, calls_made, attempted_contacts, owners_talked, owners_agreed_to_intro_call, intro_calls_completed")
       .in("user_id", accountIds)
       .eq("period_type", periodType)
       .eq("period_start", periodStartStr);
@@ -335,6 +360,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       return {
         name: a.full_name,
         callsMade: myDialRows.reduce((s, r) => s + r.calls_made, 0),
+        attemptedContacts: myDialRows.reduce((s, r) => s + r.attempted_contacts, 0),
         ownersTalked: myDialRows.reduce((s, r) => s + r.owners_talked, 0),
         ownersAgreed: myDialRows.reduce((s, r) => s + r.owners_agreed_to_intro_call, 0),
         introCompleted: myDialRows.reduce((s, r) => s + r.intro_calls_completed, 0),
@@ -636,18 +662,25 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
 
   function renderOutreachTable(rows) {
     const callsLabel = periodType === "month" ? "Targets contacted this month" : "Targets contacted this week";
+    // Attempted contacts counts every logged call (repeat attempts on the
+    // same target included), unlike Targets contacted's distinct-people
+    // count — shown alongside it so it lines up with what interns actually
+    // self-report on their weekly survey ("How many calls did you make this
+    // week?", the same raw count), instead of that being implicitly
+    // compared against the different Targets-contacted number.
     const totals = rows.reduce(
       (acc, r) => ({
         callsMade: acc.callsMade + r.callsMade,
+        attemptedContacts: acc.attemptedContacts + r.attemptedContacts,
         ownersTalked: acc.ownersTalked + r.ownersTalked,
         ownersAgreed: acc.ownersAgreed + r.ownersAgreed,
         introCompleted: acc.introCompleted + r.introCompleted,
       }),
-      { callsMade: 0, ownersTalked: 0, ownersAgreed: 0, introCompleted: 0 }
+      { callsMade: 0, attemptedContacts: 0, ownersTalked: 0, ownersAgreed: 0, introCompleted: 0 }
     );
-    const columns = ["Account", callsLabel, "Owners talked to", "Owners agreed to intro call", "Intro calls completed (confirmed leads)"];
-    const dataRows = rows.map((r) => [r.name, r.callsMade, r.ownersTalked, r.ownersAgreed, r.introCompleted]);
-    const totalsRow = ["Totals", totals.callsMade, totals.ownersTalked, totals.ownersAgreed, totals.introCompleted];
+    const columns = ["Account", callsLabel, "Attempted contacts", "Owners talked to", "Owners agreed to intro call", "Intro calls completed (confirmed leads)"];
+    const dataRows = rows.map((r) => [r.name, r.callsMade, r.attemptedContacts, r.ownersTalked, r.ownersAgreed, r.introCompleted]);
+    const totalsRow = ["Totals", totals.callsMade, totals.attemptedContacts, totals.ownersTalked, totals.ownersAgreed, totals.introCompleted];
     lastTableData = { columns, rows: [totalsRow, ...dataRows] };
 
     const bodyHTML = dataRows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`).join("");
@@ -895,6 +928,11 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // accounts selected) instead of duplicating that logic here.
   els.reportsAccountsVisiblePopup.addEventListener("click", (e) => {
     if (e.target === els.reportsAccountsVisiblePopup) els.reportsAccountsVisibleClose.click();
+  });
+  els.reportsIncludeAdminsCheckbox.checked = includeAdmins;
+  els.reportsIncludeAdminsCheckbox.addEventListener("change", () => {
+    setIncludeAdmins(els.reportsIncludeAdminsCheckbox.checked);
+    refresh();
   });
 
   // Waystation brand palette (css/style.css's :root block / waystationadvisors.com)

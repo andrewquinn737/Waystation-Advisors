@@ -1895,3 +1895,11 @@ html.is-mobile-device .compose-fab { bottom: 84px; }
 .viewing-check { visibility: hidden; color: var(--accent); font-weight: 700; }
 .viewing-option.active .viewing-check { visibility: visible; }
 .viewing-option.active .advanced-settings-row-label { font-weight: 700; }
+
+/* "Include admin accounts" checkbox in the Reports "Accounts visible" popup
+   (see js/reports.js) — plain label+checkbox, not the app's usual toggle
+   switch, since it's a one-off next to a list rather than a settings row. */
+.reports-include-admins-row {
+  display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600;
+  margin: 6px 0 10px; cursor: pointer;
+}

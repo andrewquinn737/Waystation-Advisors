@@ -153,6 +153,7 @@ const els = {
   reportsAccountsVisiblePopup: document.getElementById("reportsAccountsVisiblePopup"),
   reportsAccountsVisibleBody: document.getElementById("reportsAccountsVisibleBody"),
   reportsAccountsVisibleClose: document.getElementById("reportsAccountsVisibleClose"),
+  reportsIncludeAdminsCheckbox: document.getElementById("reportsIncludeAdminsCheckbox"),
   reportsRangeBtn: document.getElementById("reportsRangeBtn"),
   reportsSelectPeriodBtn: document.getElementById("reportsSelectPeriodBtn"),
   reportsSelectPeriodLabel: document.getElementById("reportsSelectPeriodLabel"),

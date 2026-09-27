@@ -254,21 +254,17 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
       row.addEventListener("click", (e) => {
         e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
         const id = row.dataset.id;
-        // The first individual pick after "Select all" jumps straight to
-        // "only this account" instead of starting from the full set and
-        // excluding just the one clicked. The old behavior looked right in
-        // isolation but was backwards in practice: every row starts
-        // (correctly) shown as checked under "Select all", so a user's
-        // very first click on the ONE account they actually wanted to see
-        // — say, to check their individual numbers — un-checked and
-        // EXCLUDED that account instead, dropping it out of the sum
-        // (numbers went DOWN when "selecting" someone, and back UP when
-        // clicking again to "unselect" them, since that re-added them to
-        // the rest of the team). Once a selection already exists (not
-        // null), clicking still toggles membership normally — add if
-        // absent, remove if present — same as any ordinary checklist.
+        // The first individual pick after "Select all" starts from the
+        // full set of every account and excludes just the one clicked
+        // (rather than jumping to "only this account") — every row starts
+        // shown as checked under "Select all", so unchecking the one you
+        // click removes just that account from an otherwise-full selection,
+        // same as unchecking any ordinary checklist item. Once a selection
+        // already exists (not null), clicking still toggles membership
+        // normally — add if absent, remove if present.
         if (s.visibleAccountIds === null) {
-          s.visibleAccountIds = new Set([id]);
+          s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
+          s.visibleAccountIds.delete(id);
         } else if (s.visibleAccountIds.has(id)) {
           s.visibleAccountIds.delete(id);
         } else {
@@ -288,11 +284,12 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
         e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
         const groupKey = groupBtn.dataset.group;
         const members = allAccounts.filter((a) => groupKeyFor(a) === groupKey);
-        // Same fix as the individual-row handler above: the first group
-        // pick after "Select all" jumps straight to "only this group"
-        // instead of starting from everyone and excluding the group.
+        // Same shape as the individual-row handler above: the first group
+        // pick after "Select all" starts from everyone and excludes this
+        // whole group, rather than jumping to "only this group".
         if (s.visibleAccountIds === null) {
-          s.visibleAccountIds = new Set(members.map((a) => a.id));
+          s.visibleAccountIds = new Set(allAccounts.map((a) => a.id));
+          members.forEach((a) => s.visibleAccountIds.delete(a.id));
         } else {
           const fullyVisible = members.every((a) => s.visibleAccountIds.has(a.id));
           members.forEach((a) => (fullyVisible ? s.visibleAccountIds.delete(a.id) : s.visibleAccountIds.add(a.id)));
