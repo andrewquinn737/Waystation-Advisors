@@ -1752,48 +1752,62 @@ async function loadCallsChart() {
     d.setDate(d.getDate() - i * 7);
     weekStarts.push(d);
   }
-  const cacheKey = `calls_${getDealSide()}_${ids.join(",")}`;
-  const { data, error } = await supabase
-    .from("call_status_changes")
-    .select("changed_at")
-    .in("user_id", ids)
-    .eq("dial_type", getDealSide())
-    .gte("changed_at", weekStarts[0].toISOString());
-  let rows;
-  if (error) {
-    if (!isNetworkError(error)) return showError(els.errorBox, error);
-    const cached = cacheGet(cacheKey);
-    if (!cached) return showOfflineNotice(false);
-    rows = cached;
-    showOfflineNotice(true);
-  } else {
-    hideOfflineNotice();
-    rows = data || [];
-    cacheSet(cacheKey, rows);
-  }
-
-  const counts = weekStarts.map((ws) => {
-    const we = new Date(ws);
-    we.setDate(we.getDate() + 7);
-    return rows.filter((r) => {
-      const t = new Date(r.changed_at);
-      return t >= ws && t < we;
-    }).length;
-  });
-
-  const thisWeekCount = counts[counts.length - 1];
-
-  // Today's count is just a narrower slice of the same `rows` already
-  // fetched above (which covers everything since the start of this week, so
-  // today is included in there).
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const startOfTomorrow = new Date(startOfToday);
   startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
-  const todayCount = rows.filter((r) => {
-    const t = new Date(r.changed_at);
-    return t >= startOfToday && t < startOfTomorrow;
-  }).length;
+
+  const cacheKey = `calls_${getDealSide()}_${ids.join(",")}`;
+  // One selected account is easy; several (especially "every account", the
+  // admin default) can rack up thousands of call_status_changes rows across
+  // 6 weeks — well past PostgREST's row cap on a plain .select(), which
+  // silently truncates instead of erroring. A truncated fetch was landing on
+  // an arbitrary slice of rows and undercounting whichever weeks/accounts
+  // got cut off (confirmed: two teams together crossed the row cap and came
+  // back exactly as many contacts short as the cap cut off — a single team
+  // alone stayed under it and was fine). Counting server-side with `head:
+  // true, count: "exact"` avoids ever transferring — or capping — the rows
+  // themselves; one exact COUNT(*) per week (plus one for "today") in
+  // parallel, only their numbers come back.
+  const { counts, todayCount, failed } = await (async () => {
+    const bounds = weekStarts.map((ws) => {
+      const we = new Date(ws);
+      we.setDate(we.getDate() + 7);
+      return [ws, we];
+    });
+    bounds.push([startOfToday, startOfTomorrow]);
+    const results = await Promise.all(
+      bounds.map(([from, to]) =>
+        supabase
+          .from("call_status_changes")
+          .select("id", { count: "exact", head: true })
+          .in("user_id", ids)
+          .eq("dial_type", getDealSide())
+          .gte("changed_at", from.toISOString())
+          .lt("changed_at", to.toISOString())
+      )
+    );
+    const err = results.find((r) => r.error)?.error;
+    if (err) return { failed: err };
+    return { counts: results.slice(0, weekStarts.length).map((r) => r.count || 0), todayCount: results[results.length - 1].count || 0 };
+  })();
+  let finalCounts, finalToday;
+  if (failed) {
+    if (!isNetworkError(failed)) return showError(els.errorBox, failed);
+    const cached = cacheGet(cacheKey);
+    if (!cached) return showOfflineNotice(false);
+    finalCounts = cached.counts;
+    finalToday = cached.todayCount;
+    showOfflineNotice(true);
+  } else {
+    hideOfflineNotice();
+    finalCounts = counts;
+    finalToday = todayCount;
+    cacheSet(cacheKey, { counts, todayCount });
+  }
+  const counts_ = finalCounts;
+  const thisWeekCount = counts_[counts_.length - 1];
+  const todayCount_ = finalToday;
 
   const quotaHTML = !quota
     ? ""
@@ -1803,8 +1817,8 @@ async function loadCallsChart() {
           ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
           : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more contact${remaining === 1 ? "" : "s"} to reach quota)</div>`;
       })();
-  els.callsThisWeekText.innerHTML = `${thisWeekCount} attempted contact${thisWeekCount === 1 ? "" : "s"} this week, ${todayCount} today${quotaHTML}`;
-  renderCallsChart(els.callsChart, weekStarts, counts, quota);
+  els.callsThisWeekText.innerHTML = `${thisWeekCount} attempted contact${thisWeekCount === 1 ? "" : "s"} this week, ${todayCount_} today${quotaHTML}`;
+  renderCallsChart(els.callsChart, weekStarts, counts_, quota);
 }
 
 // ---------------------------------------------------------------------------
@@ -1826,37 +1840,44 @@ async function loadIntroCallsChart() {
     weekStarts.push(d);
   }
   const cacheKey = `introCalls_${getDealSide()}_${ids.join(",")}`;
-  const { data, error } = await supabase
-    .from("intro_call_log")
-    .select("scheduled_at")
-    .in("user_id", ids)
-    .eq("client_type", getDealSide())
-    .gte("scheduled_at", weekStarts[0].toISOString());
-  let rows;
-  if (error) {
-    if (!isNetworkError(error)) return showError(els.errorBox, error);
+  // Same fix as loadCallsChart above — count each week server-side (head:
+  // true, count: "exact") instead of fetching every row and bucketing them
+  // in JS, which silently truncated (and undercounted) once several
+  // accounts' 6-week history crossed PostgREST's row cap.
+  const { counts, failed } = await (async () => {
+    const results = await Promise.all(
+      weekStarts.map((ws) => {
+        const we = new Date(ws);
+        we.setDate(we.getDate() + 7);
+        return supabase
+          .from("intro_call_log")
+          .select("id", { count: "exact", head: true })
+          .in("user_id", ids)
+          .eq("client_type", getDealSide())
+          .gte("scheduled_at", ws.toISOString())
+          .lt("scheduled_at", we.toISOString());
+      })
+    );
+    const err = results.find((r) => r.error)?.error;
+    if (err) return { failed: err };
+    return { counts: results.map((r) => r.count || 0) };
+  })();
+  let finalCounts;
+  if (failed) {
+    if (!isNetworkError(failed)) return showError(els.errorBox, failed);
     const cached = cacheGet(cacheKey);
     if (!cached) return showOfflineNotice(false);
-    rows = cached;
+    finalCounts = cached;
     showOfflineNotice(true);
   } else {
     hideOfflineNotice();
-    rows = data || [];
-    cacheSet(cacheKey, rows);
+    finalCounts = counts;
+    cacheSet(cacheKey, counts);
   }
 
-  const counts = weekStarts.map((ws) => {
-    const we = new Date(ws);
-    we.setDate(we.getDate() + 7);
-    return rows.filter((r) => {
-      const t = new Date(r.scheduled_at);
-      return t >= ws && t < we;
-    }).length;
-  });
-
-  const thisWeekCount = counts[counts.length - 1];
+  const thisWeekCount = finalCounts[finalCounts.length - 1];
   els.introCallsThisWeekText.textContent = `${thisWeekCount} intro call${thisWeekCount === 1 ? "" : "s"} scheduled this week`;
-  renderCallsChart(els.introCallsChart, weekStarts, counts, null);
+  renderCallsChart(els.introCallsChart, weekStarts, finalCounts, null);
 }
 
 // ---------------------------------------------------------------------------
