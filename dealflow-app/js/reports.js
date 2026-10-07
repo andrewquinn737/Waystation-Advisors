@@ -564,6 +564,23 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // wrapping (the default `overflow` already set in styles below), so the
   // full address is always visible even if that takes 2-3 lines.
   const MONEY_COLUMN = { key: "annual_revenue", label: "Revenue", format: (v) => (v == null ? "—" : `$${Number(v).toLocaleString()}`) };
+  // The client's current pipeline status — same 5 labels as the Clients page
+  // (CLIENT_STATUSES in js/clients.js). Shown on every milestone table (intro
+  // call completed and everything after it) so each company's standing is
+  // visible next to its other columns, on screen and in the PDF.
+  const CLIENT_STATUS_LABELS = {
+    sold: "Sold",
+    connected_to_buyer: "Connected to buyer",
+    potentially_interested: "Potentially interested",
+    not_in_contact: "Not in contact",
+    no_longer_interested: "No longer interested",
+  };
+  const STATUS_COLUMN = {
+    key: "pipeline_status",
+    label: "Status",
+    pdfWidth: 24,
+    format: (v) => (v ? CLIENT_STATUS_LABELS[v] || String(v) : "—"),
+  };
   const SET1_COLUMNS = [
     { key: "full_name", label: "Name" },
     { key: "company_name", label: "Company name" },
@@ -573,6 +590,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     { key: "industry", label: "Industry sector" },
     MONEY_COLUMN,
     { key: "employee_count", label: "Employees" },
+    STATUS_COLUMN,
   ];
   const SET2_COLUMNS = [
     { key: "contact_name", label: "Name", pdfWidth: 16 },
