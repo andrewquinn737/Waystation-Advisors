@@ -592,6 +592,31 @@
     </div>
   </div>
 
+  <!-- "Intro completed during outreach" (team leads/admins) — reached from the
+       Schedule Intro Call popup, under Open Calendly. For an intro call that
+       already happened live during outreach: report it here and the client is
+       created with that intro call already confirmed + reported in its
+       Timeline (see openCompletedIntroReportModal in js/dials.js). -->
+  <div class="modal-backdrop hidden" id="introCompletedModal">
+    <div class="modal">
+      <h2>Intro completed during outreach</h2>
+      <p class="help-text">Report the intro call you just held. This creates the client with the intro call already in their Timeline, marked as completed.</p>
+      <label for="introCompletedDateInput">Date</label>
+      <input type="date" id="introCompletedDateInput" />
+      <label for="introCompletedTimeSelect">Time</label>
+      <select id="introCompletedTimeSelect"></select>
+      <label for="introCompletedTimeZoneSelect">Time zone</label>
+      <select id="introCompletedTimeZoneSelect"></select>
+      <label for="introCompletedReportInput">What happened?</label>
+      <textarea id="introCompletedReportInput" rows="5"></textarea>
+      <div id="introCompletedError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="introCompletedSaveBtn">Save</button>
+        <button type="button" class="btn secondary" id="introCompletedCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="js/dials.js"></script>
 </body>
 </html>

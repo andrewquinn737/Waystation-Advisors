@@ -228,6 +228,14 @@ const els = {
   introCallTimeZoneSelect: document.getElementById("introCallTimeZoneSelect"),
   introCallTimeError: document.getElementById("introCallTimeError"),
   introCallTimeConfirmBtn: document.getElementById("introCallTimeConfirmBtn"),
+  introCompletedModal: document.getElementById("introCompletedModal"),
+  introCompletedDateInput: document.getElementById("introCompletedDateInput"),
+  introCompletedTimeSelect: document.getElementById("introCompletedTimeSelect"),
+  introCompletedTimeZoneSelect: document.getElementById("introCompletedTimeZoneSelect"),
+  introCompletedReportInput: document.getElementById("introCompletedReportInput"),
+  introCompletedError: document.getElementById("introCompletedError"),
+  introCompletedSaveBtn: document.getElementById("introCompletedSaveBtn"),
+  introCompletedCancelBtn: document.getElementById("introCompletedCancelBtn"),
   importDialsModal: document.getElementById("importDialsModal"),
   importDialsError: document.getElementById("importDialsError"),
   importDialsDropzone: document.getElementById("importDialsDropzone"),
@@ -3253,7 +3261,12 @@ async function handleScheduleIntroCallFromDial(dial) {
     return;
   }
 
-  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML();
+  // Team leads/admins also get "Intro completed during outreach" under the
+  // Open Calendly button — for an intro call they already held live during
+  // the outreach call itself, so there's nothing to book (see
+  // openCompletedIntroReportModal below).
+  const canReportDuringOutreach = profile.role === "team_lead" || profile.role === "admin";
+  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowCompletedDuringOutreach: canReportDuringOutreach });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     profile,
@@ -3261,6 +3274,10 @@ async function handleScheduleIntroCallFromDial(dial) {
     onCalendlyClosed: async () => {
       els.introCallPopup.classList.add("hidden");
       openIntroCallTimeConfirmModal(dial);
+    },
+    onCompletedDuringOutreach: () => {
+      els.introCallPopup.classList.add("hidden");
+      openCompletedIntroReportModal(dial);
     },
   });
 }
@@ -3446,6 +3463,116 @@ function openIntroCallTimeConfirmModal(dial) {
   };
   confirmBtn.addEventListener("click", onConfirmClick);
   introCallTimeConfirmCleanup = cleanup;
+}
+
+// ---------------------------------------------------------------------------
+// "Intro completed during outreach" (team leads/admins) — the intro call
+// already happened live during the outreach call, so there's no Calendly
+// booking to confirm. Asks when it happened (defaults to right now) and what
+// was discussed, then — in one step, same as the Calendly path — creates the
+// client from the dial, logs its first Timeline entry as an intro call, and
+// marks that entry confirmed WITH the report text (exactly what pressing the
+// Timeline's confirm circle and writing a report does — see
+// confirmEventWithReport in js/clients.js), so the client opens with the
+// intro call already reported. Also credits the Profile page's "Intro calls"
+// tracker, same as a Calendly booking does. Cancel leaves nothing behind.
+// ---------------------------------------------------------------------------
+let completedIntroCleanup = null;
+
+function openCompletedIntroReportModal(dial) {
+  completedIntroCleanup?.();
+  completedIntroCleanup = null;
+
+  const modal = els.introCompletedModal;
+  const dateInput = els.introCompletedDateInput;
+  const timeSelect = els.introCompletedTimeSelect;
+  const tzSelect = els.introCompletedTimeZoneSelect;
+  const reportInput = els.introCompletedReportInput;
+  const errEl = els.introCompletedError;
+  const saveBtn = els.introCompletedSaveBtn;
+  const cancelBtn = els.introCompletedCancelBtn;
+
+  // Defaults to right now: today's date and the latest 30-minute slot at or
+  // before the current time, clamped into the picker's 7:00 AM-7:00 PM range.
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  dateInput.value = local.toISOString().slice(0, 10);
+  const mins = Math.min(Math.max(now.getHours() * 60 + Math.floor(now.getMinutes() / 30) * 30, 7 * 60), 19 * 60);
+  const defaultTime = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+  timeSelect.innerHTML = timeOptionsHTML(defaultTime, { includeNoTime: false });
+  tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
+  reportInput.value = "";
+  errEl.classList.add("hidden");
+  modal.classList.remove("hidden");
+
+  // Kept outside onSaveClick so a retry after a partial failure (e.g. the
+  // event insert worked but confirming it didn't) picks up where it left
+  // off instead of creating a second client/event for the same dial.
+  let createdClient = null;
+  let createdEventId = null;
+  let credited = false;
+
+  const onSaveClick = async () => {
+    const val = dateInput.value;
+    const time = timeSelect.value;
+    const timezone = tzSelect.value;
+    if (!val || !time) {
+      errEl.textContent = "Please enter both a date and time.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    saveBtn.disabled = true;
+    errEl.classList.add("hidden");
+    try {
+      if (!createdClient) createdClient = await createClientFromDial(dial);
+      if (!createdEventId) {
+        const { data: ev, error } = await supabase
+          .from("client_events")
+          .insert({
+            client_id: createdClient.id,
+            event_type: "intro_call",
+            event_date: zonedTimeToUtcIso(val, time, timezone),
+            details: { via: "outreach", time, timezone },
+            created_by: profile.id,
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        createdEventId = ev.id;
+      }
+      const { error: confirmErr } = await supabase.rpc("set_client_event_confirmed", {
+        p_event_id: createdEventId,
+        p_confirmed: true,
+        p_report: reportInput.value.trim(),
+      });
+      if (confirmErr) throw confirmErr;
+      if (!credited) {
+        await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
+        credited = true;
+      }
+    } catch (err) {
+      errEl.textContent = err.message || String(err);
+      errEl.classList.remove("hidden");
+      saveBtn.disabled = false;
+      return;
+    }
+    saveBtn.disabled = false;
+    // Same as the Calendly path: hides "Schedule intro call" on this dial now
+    // that it's been used (see renderDialModal's showScheduleIntroBtn).
+    dial._scheduleIntroCallUsed = true;
+    renderDialModal();
+    cleanup();
+  };
+  const onCancelClick = () => cleanup();
+  const cleanup = () => {
+    modal.classList.add("hidden");
+    saveBtn.removeEventListener("click", onSaveClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+    completedIntroCleanup = null;
+  };
+  saveBtn.addEventListener("click", onSaveClick);
+  cancelBtn.addEventListener("click", onCancelClick);
+  completedIntroCleanup = cleanup;
 }
 
 els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
