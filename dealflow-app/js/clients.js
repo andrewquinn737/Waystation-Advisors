@@ -13,7 +13,7 @@ import { rfContact, contactActionIcons, stopContactActionPropagation, wireQuickS
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { getDealSide, wireDealSideToggle } from "./dealSide.js";
+import { getClientSide, wireDealSideToggle, allowBrokerSide } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { wireNotificationsToggle } from "./notifications.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice } from "./offlineCache.js";
@@ -25,6 +25,7 @@ const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
 const isAdmin = profile?.role === "admin";
+allowBrokerSide(isAdmin); // brokers are admin-only (see js/dealSide.js)
 // Team leads get the settings gear (Sellers/Buyers + Accounts visible) like
 // admins do, but Accounts visible only ever lists their own teammates (see
 // getAllAccounts below) — everything else gated on isAdmin alone (Contract
@@ -49,8 +50,22 @@ const CLIENT_STATUSES = [
   { value: "not_in_contact", label: "Not in contact", bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)", dot: "var(--status-no-response-dot)" },
   { value: "no_longer_interested", label: "No longer interested", bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)", dot: "var(--status-not-interested-dot)" },
 ];
+// Brokers (admin-only) only ever use two statuses: "Potentially interested"
+// (shared with the list above) and "Relationship established" (green, like
+// "Connected to buyer").
+const RELATIONSHIP_STATUS = {
+  value: "relationship_established",
+  label: "Relationship established",
+  bg: "var(--status-scheduled-bg)",
+  border: "var(--status-scheduled-border)",
+  dot: "var(--status-scheduled-dot)",
+};
+const BROKER_STATUSES = [CLIENT_STATUSES.find((st) => st.value === "potentially_interested"), RELATIONSHIP_STATUS];
+function statusesFor(clientType) {
+  return clientType === "broker" ? BROKER_STATUSES : CLIENT_STATUSES;
+}
 function clientStatusInfo(value) {
-  return CLIENT_STATUSES.find((s) => s.value === value) || CLIENT_STATUSES[3];
+  return CLIENT_STATUSES.find((st) => st.value === value) || (value === RELATIONSHIP_STATUS.value ? RELATIONSHIP_STATUS : CLIENT_STATUSES[3]);
 }
 
 // The green "connected_to_buyer" category reads as "In cahoots" while
@@ -58,9 +73,11 @@ function clientStatusInfo(value) {
 // connected to a seller they're in cahoots with) — every other status/mode
 // keeps its normal label. Used everywhere a status label is displayed
 // instead of reading `s.label`/`info.label` directly.
-function statusLabel(s) {
-  if (s.value === "connected_to_buyer" && getDealSide() === "buyer") return "In cahoots";
-  if (s.value === "sold" && getDealSide() === "buyer") return "Bought company";
+// `side` defaults to the side currently being viewed; the Referrals tab passes
+// "buyer" explicitly since it lists buyers while the page itself is on Brokers.
+function statusLabel(s, side = getClientSide()) {
+  if (s.value === "connected_to_buyer" && side === "buyer") return "In cahoots";
+  if (s.value === "sold" && side === "buyer") return "Bought company";
   return s.label;
 }
 
@@ -186,7 +203,7 @@ const EVENT_TYPE_LABELS = {
 };
 
 // The "Progress" filter's options — "No meetings yet" plus whichever side's
-// milestone list is currently showing (see getDealSide()/progressStepsFor).
+// milestone list is currently showing (see getClientSide()/progressStepsFor).
 // A client's filtering "stage" is whichever of these is its FURTHEST
 // confirmed milestone (the highest-index entry in ITS OWN side's list with a
 // confirmed client_events row, or "no_meetings" if it has none at all) — see
@@ -267,7 +284,16 @@ const BUYERS_VISIBLE_KEY = "waystation_buyers_visible";
 let clients = [];
 let currentClient = null; // null while creating a new client
 let currentMode = "create"; // 'create' | 'view' | 'edit'
-let currentSubTab = "profile"; // 'profile' | 'progress' | 'timeline' — view mode only
+let currentSubTab = "profile"; // 'profile' | 'progress' | 'timeline' | 'referrals' (brokers) — view mode only
+// What kind of client the "New client" form is creating (the side being
+// viewed, unless a broker's Referrals tab is creating a buyer — see
+// startCreateBuyerForBroker) and, in that case, which broker to pre-attach it
+// to and which broker's Referrals tab to return to afterwards.
+let createClientType = "seller";
+let createBrokerId = null;
+let returnToBroker = null;
+let currentReferrals = []; // buyers attached to the broker currently open
+let brokerChoices = []; // [{id, full_name}] for a buyer's "Found through broker" select
 let currentClientEvents = []; // client_events rows for currentClient, newest-last
 
 const els = {
@@ -476,11 +502,11 @@ async function loadClients() {
   // this one loads — replaced by the real render (or an empty-state
   // message, or the offline-cache fallback below) as soon as it resolves.
   els.tableWrap.innerHTML = skeletonListHtml({ columnWidths: CLIENTS_SKELETON_COLUMN_WIDTHS });
-  const cacheKey = "clients_" + getDealSide();
+  const cacheKey = "clients_" + getClientSide();
   const { data, error } = await supabase
     .from("clients")
     .select("*")
-    .eq("client_type", getDealSide())
+    .eq("client_type", getClientSide())
     .order("created_at", { ascending: false });
   if (error) {
     // A real (non-network) error keeps its original behavior — an inline
@@ -599,7 +625,7 @@ function renderTable() {
       // subtractive: an empty selectedProgressStages means no filter is
       // active at all (every client passes through), matching none of the 8
       // options being picked yet.
-      (selectedProgressStages.size === 0 || selectedProgressStages.has(clientProgressStage(c.id))) &&
+      (getClientSide() === "broker" || selectedProgressStages.size === 0 || selectedProgressStages.has(clientProgressStage(c.id))) &&
       // "Buyers visible" (see menuBuyersVisibleBtn wiring below) — Sellers
       // side only, so this is a no-op on the Buyers side even if a
       // selection is still saved from earlier. null means no filter active
@@ -607,7 +633,7 @@ function renderTable() {
       // no buyer attached (intended_buyer_id null) never matches any
       // specific selection — it isn't "attached to a selected buyer" under
       // any choice — same as the feature's own description.
-      (!visibleBuyerIds || getDealSide() !== "seller" || (c.intended_buyer_id && visibleBuyerIds.has(c.intended_buyer_id)))
+      (!visibleBuyerIds || getClientSide() !== "seller" || (c.intended_buyer_id && visibleBuyerIds.has(c.intended_buyer_id)))
   );
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
 
@@ -675,14 +701,15 @@ function renderCategoriesSubmenu() {
   // same select-all/deselect-all-on-second-press pattern as the Accounts
   // visible popup's own Select all row (see js/accountsVisible.js). "All
   // selected" here means nothing is currently hidden.
-  const allCategoriesSelected = hiddenClientStatuses.size === 0;
+  const sideStatuses = statusesFor(getClientSide());
+  const allCategoriesSelected = sideStatuses.every((st) => !hiddenClientStatuses.has(st.value));
   const selectAllHTML = `
       <button type="button" class="category-rect-option select-all-option ${allCategoriesSelected ? "is-selected" : ""}" data-select-all="1">
         <span class="category-rect-swatch progress-check-swatch">${allCategoriesSelected ? CHECK_SVG : ""}</span>Select all
       </button>`;
   els.categoriesSubmenu.innerHTML =
     selectAllHTML +
-    CLIENT_STATUSES.map(
+    sideStatuses.map(
       (s) => `
       <button type="button" class="category-rect-option ${hiddenClientStatuses.has(s.value) ? "is-hidden" : ""}" data-value="${s.value}">
         <span class="category-rect-swatch" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(statusLabel(s))}
@@ -694,10 +721,10 @@ function renderCategoriesSubmenu() {
     // instead of being a no-op; otherwise (partial or none selected) it
     // shows everything, same select-all/deselect-all-on-second-press pattern
     // as Accounts visible's own Select all row.
-    if (hiddenClientStatuses.size === 0) {
-      CLIENT_STATUSES.forEach((s) => hiddenClientStatuses.add(s.value));
+    if (allCategoriesSelected) {
+      sideStatuses.forEach((st) => hiddenClientStatuses.add(st.value));
     } else {
-      hiddenClientStatuses.clear();
+      sideStatuses.forEach((st) => hiddenClientStatuses.delete(st.value));
     }
     persistHiddenClientStatuses();
     renderCategoriesSubmenu();
@@ -752,7 +779,7 @@ els.menuCategoriesBtn.addEventListener("click", (e) => {
 // ---------------------------------------------------------------------------
 
 function renderProgressSubmenu() {
-  els.progressSubmenu.innerHTML = progressStagesFor(getDealSide()).map(
+  els.progressSubmenu.innerHTML = progressStagesFor(getClientSide()).map(
     (p) => `
       <button type="button" class="category-rect-option ${selectedProgressStages.has(p.value) ? "is-selected" : ""}" data-value="${p.value}">
         <span class="category-rect-swatch progress-check-swatch">${selectedProgressStages.has(p.value) ? CHECK_SVG : ""}</span>${escapeHtml(p.label)}
@@ -771,6 +798,13 @@ function renderProgressSubmenu() {
   });
 }
 renderProgressSubmenu();
+
+// Brokers have no Progress milestones, so the filter is hidden on that side.
+function updateProgressBtnVisibility() {
+  els.menuProgressBtn.classList.toggle("hidden", getClientSide() === "broker");
+  if (getClientSide() === "broker") els.progressSubmenu.classList.add("hidden");
+}
+updateProgressBtnVisibility();
 
 function positionProgressSubmenu() {
   const rect = els.menuProgressBtn.getBoundingClientRect();
@@ -866,7 +900,7 @@ if (isAdmin || isTeamLead) {
 // side). Called once up front and again from wireDealSideToggle's callback
 // every time the Sellers/Buyers side actually changes.
 function updateBuyersVisibleBtnVisibility() {
-  els.menuBuyersVisibleBtn.classList.toggle("hidden", !(isAdmin || isTeamLead) || getDealSide() !== "seller");
+  els.menuBuyersVisibleBtn.classList.toggle("hidden", !(isAdmin || isTeamLead) || getClientSide() !== "seller");
 }
 updateBuyersVisibleBtnVisibility();
 
@@ -954,14 +988,16 @@ function categoryDropdownHTML(client) {
   return `
     <div class="dial-status-dropdown client-status-dropdown">
       <button type="button" class="dial-status-btn" id="clientStatusBtn"
-        style="background:${info.bg}; border-color:${info.border};">${escapeHtml(statusLabel(info))}</button>
+        style="background:${info.bg}; border-color:${info.border};">${escapeHtml(statusLabel(info, client.client_type))}</button>
       <div class="dial-status-menu hidden" id="clientStatusMenu">
-        ${CLIENT_STATUSES.map(
-          (s) => `
+        ${statusesFor(client.client_type)
+          .map(
+            (s) => `
           <button type="button" class="dial-status-option" data-value="${s.value}">
-            <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(statusLabel(s))}
+            <span class="dial-status-dot" style="background:${s.dot}; border-color:${s.border};"></span>${escapeHtml(statusLabel(s, client.client_type))}
           </button>`
-        ).join("")}
+          )
+          .join("")}
       </div>
     </div>`;
 }
@@ -1011,7 +1047,45 @@ function priceRangeDisplay(client) {
   return fmt(hasMin ? client.money_to_spend_min : client.money_to_spend_max);
 }
 
+// "Found through broker" row on a buyer's profile — the broker's name is a
+// link into that broker's own profile (admins only; other roles can't see
+// broker rows, so for them it's plain text).
+function brokerLinkRowHTML(client) {
+  const name = client._brokerName;
+  const valueHTML = !client.broker_id || !name
+    ? "Not found through broker"
+    : isAdmin
+      ? `<a href="#" id="openBrokerLink" data-broker-id="${client.broker_id}">${escapeHtml(name)}</a>`
+      : escapeHtml(name);
+  const empty = !client.broker_id || !name;
+  return `<div class="readonly-field"><div class="rf-label">Found through broker</div><div class="rf-value ${empty ? "empty" : ""}">${valueHTML}</div></div>`;
+}
+
+function wireBrokerLink() {
+  const link = document.getElementById("openBrokerLink");
+  if (!link) return;
+  link.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const { data } = await supabase.from("clients").select("*").eq("id", link.dataset.brokerId).maybeSingle();
+    if (data) await openDetailModal(data, "referrals");
+  });
+}
+
 function buildClientViewHTML(client) {
+  if (client.client_type === "broker") {
+    return `
+      ${categoryDropdownHTML(client)}
+      ${rfLocation(client)}
+      ${rfContact("Email", client.email, "email")}
+      ${buildPhoneNumbersHTML(client)}
+      ${rfLink("LinkedIn", client.linkedin)}
+      ${rf("Company", client.company_name)}
+      ${rf("Person responsible", client.intern_name)}
+      ${rf("Industry", client.industry)}
+      ${rf(lookingForLabel("broker"), client.looking_for)}
+      ${rf("Other notes", client.other_notes)}
+    `;
+  }
   const isBuyer = client.client_type === "buyer";
   // founded_month can now be blank while founded_year is set (see
   // clientForm.js's separate month/year selects) — filter(Boolean) avoids a
@@ -1024,7 +1098,7 @@ function buildClientViewHTML(client) {
     ${buildPhoneNumbersHTML(client)}
     ${rfLink("LinkedIn", client.linkedin)}
     ${rf("Person responsible", client.intern_name)}
-    ${isBuyer ? "" : rf("Intended buyer", client._intendedBuyerName || "None")}
+    ${isBuyer ? brokerLinkRowHTML(client) : rf("Intended buyer", client._intendedBuyerName || "None")}
     ${isBuyer ? "" : rf("Industry sector", client.industry)}
     ${isBuyer ? "" : rf("Annual revenue", client.annual_revenue != null ? `$${Number(client.annual_revenue).toLocaleString()}` : "")}
     ${isBuyer ? "" : rf("Employees", client.employee_count)}
@@ -1821,6 +1895,143 @@ async function openIntendedBuyerPicker() {
   cancelBtn.addEventListener("click", onCancelClick);
 }
 
+// ---------------------------------------------------------------------------
+// Referrals tab (brokers only) — one colored box per buyer attached to this
+// broker (clients.broker_id), showing the buyer's name and their current
+// status the way it reads on the Buyers side ("In cahoots", etc.). Tapping a
+// box opens that buyer's own profile. The "+" in the bottom-left corner adds
+// a buyer: either connect one that already exists in the app, or create a
+// brand-new one already attached to this broker.
+// ---------------------------------------------------------------------------
+function buildReferralsHTML(referrals) {
+  const boxes = referrals.length
+    ? referrals
+        .map((b) => {
+          const info = clientStatusInfo(b.pipeline_status);
+          const loc = clientLocation(b);
+          return `
+      <button type="button" class="referral-box" data-client-id="${b.id}" style="background:${info.bg}; border-color:${info.border};">
+        <span class="referral-box-main">
+          <span class="referral-box-name">${escapeHtml(clientDisplayName(b))}</span>
+          ${loc === "—" ? "" : `<span class="referral-box-sub">${escapeHtml(loc)}</span>`}
+        </span>
+        <span class="referral-box-status">${escapeHtml(statusLabel(info, "buyer"))}</span>
+      </button>`;
+        })
+        .join("")
+    : `<div class="empty-state">No buyers attached to this broker yet — tap + to add one.</div>`;
+  return `
+    <div class="referral-list">${boxes}</div>
+    <button type="button" class="referral-add-btn" id="referralAddBtn" title="Add buyer">+</button>
+  `;
+}
+
+function wireReferralsTab() {
+  els.clientModalBody.querySelectorAll(".referral-box[data-client-id]").forEach((box) => {
+    box.addEventListener("click", () => {
+      const buyer = currentReferrals.find((b) => b.id === box.dataset.clientId);
+      if (buyer) openDetailModal(buyer, "profile");
+    });
+  });
+  document.getElementById("referralAddBtn").addEventListener("click", showAddBuyerChoice);
+}
+
+let addBuyerModalEl = null;
+function ensureAddBuyerModal() {
+  if (addBuyerModalEl) return addBuyerModalEl;
+  addBuyerModalEl = document.createElement("div");
+  addBuyerModalEl.className = "modal-backdrop hidden";
+  addBuyerModalEl.id = "addBuyerModal";
+  addBuyerModalEl.style.zIndex = "200"; // above the full-screen client view
+  addBuyerModalEl.innerHTML = `
+    <div class="modal">
+      <h2 id="addBuyerTitle">Add buyer</h2>
+      <div id="addBuyerBody"></div>
+      <div class="form-actions"><button type="button" class="btn secondary" id="addBuyerCancel">Cancel</button></div>
+    </div>`;
+  document.body.appendChild(addBuyerModalEl);
+  addBuyerModalEl.addEventListener("click", (e) => {
+    if (e.target === addBuyerModalEl) closeAddBuyerModal();
+  });
+  addBuyerModalEl.querySelector("#addBuyerCancel").addEventListener("click", closeAddBuyerModal);
+  return addBuyerModalEl;
+}
+function closeAddBuyerModal() {
+  if (addBuyerModalEl) addBuyerModalEl.classList.add("hidden");
+}
+
+function showAddBuyerChoice() {
+  const modal = ensureAddBuyerModal();
+  modal.querySelector("#addBuyerTitle").textContent = "Add buyer";
+  const body = modal.querySelector("#addBuyerBody");
+  body.innerHTML = `
+    <div class="advanced-settings-list">
+      <button type="button" class="advanced-settings-row" id="addBuyerExistingBtn"><span class="advanced-settings-row-label">Connect an existing buyer</span></button>
+      <button type="button" class="advanced-settings-row" id="addBuyerNewBtn"><span class="advanced-settings-row-label">Create a new buyer</span></button>
+    </div>`;
+  body.querySelector("#addBuyerExistingBtn").addEventListener("click", showConnectBuyerPicker);
+  body.querySelector("#addBuyerNewBtn").addEventListener("click", () => {
+    closeAddBuyerModal();
+    startCreateBuyerForBroker();
+  });
+  modal.classList.remove("hidden");
+}
+
+async function showConnectBuyerPicker() {
+  const modal = ensureAddBuyerModal();
+  modal.querySelector("#addBuyerTitle").textContent = "Connect an existing buyer";
+  const body = modal.querySelector("#addBuyerBody");
+  body.innerHTML = `<div class="empty-state">Loading…</div>`;
+  const [{ data: buyers, error }] = await Promise.all([
+    supabase.from("clients").select("id, full_name, city, state, broker_id").eq("client_type", "buyer").order("full_name", { ascending: true }),
+    loadBrokerChoices(),
+  ]);
+  if (error) {
+    body.innerHTML = `<div class="error-msg">${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  const brokerName = new Map(brokerChoices.map((b) => [b.id, b.full_name]));
+  const options = (buyers || []).filter((b) => b.broker_id !== currentClient.id);
+  body.innerHTML = `
+    <div id="connectBuyerError" class="error-msg hidden"></div>
+    <input type="search" id="connectBuyerSearch" placeholder="Search buyers..." />
+    <p class="help-text">Each buyer can only be attached to one broker — connecting one that already has a broker moves it here.</p>
+    <div id="connectBuyerList" style="max-height:50vh; overflow-y:auto;"></div>`;
+  const listEl = body.querySelector("#connectBuyerList");
+  const render = () => {
+    const q = body.querySelector("#connectBuyerSearch").value.trim().toLowerCase();
+    const shown = options.filter((b) => !q || (b.full_name || "").toLowerCase().includes(q));
+    listEl.innerHTML = shown.length
+      ? shown
+          .map((b) => {
+            const loc = [b.city, b.state].filter(Boolean).join(", ");
+            const withBroker = b.broker_id ? `Currently with ${brokerName.get(b.broker_id) || "another broker"}` : "";
+            return `<button type="button" class="advanced-settings-row" data-buyer-id="${b.id}" style="flex-direction:column; align-items:flex-start;">
+              <span class="advanced-settings-row-label">${escapeHtml(b.full_name || "—")}</span>
+              <span class="help-text" style="margin:0;">${escapeHtml([loc, withBroker].filter(Boolean).join(" · "))}</span>
+            </button>`;
+          })
+          .join("")
+      : `<div class="empty-state">No buyers to connect.</div>`;
+    listEl.querySelectorAll("[data-buyer-id]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const { error: updErr } = await supabase.from("clients").update({ broker_id: currentClient.id }).eq("id", btn.dataset.buyerId);
+        if (updErr) {
+          const errEl = body.querySelector("#connectBuyerError");
+          errEl.textContent = updErr.message;
+          errEl.classList.remove("hidden");
+          return;
+        }
+        closeAddBuyerModal();
+        await loadReferrals();
+        renderModalBody();
+      });
+    });
+  };
+  body.querySelector("#connectBuyerSearch").addEventListener("input", render);
+  render();
+}
+
 async function loadClientEvents() {
   if (!currentClient) {
     currentClientEvents = [];
@@ -2106,7 +2317,11 @@ function renderSubtabsBar() {
   const show = currentMode === "view" && !!currentClient;
   els.clientSubtabs.classList.toggle("hidden", !show);
   if (!show) return;
+  // Brokers get Profile + Referrals; sellers and buyers get Profile +
+  // Progress + Timeline.
+  const tabsForClient = currentClient.client_type === "broker" ? ["profile", "referrals"] : ["profile", "progress", "timeline"];
   els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
+    btn.classList.toggle("hidden", !tabsForClient.includes(btn.dataset.tab));
     btn.classList.toggle("active", btn.dataset.tab === currentSubTab);
   });
 }
@@ -2131,9 +2346,9 @@ function validateAndCollect() {
   // buildEditableSections/collectFormData in js/clientForm.js) — the active
   // deal-side toggle while creating a brand-new client (currentClient is
   // still null then), or the existing client's own client_type while
-  // editing. Editing must never let this drift to whatever getDealSide()
+  // editing. Editing must never let this drift to whatever getClientSide()
   // happens to be at save time — a client's side is fixed at creation.
-  const clientType = currentMode === "create" ? getDealSide() : currentClient.client_type;
+  const clientType = currentMode === "create" ? createClientType : currentClient.client_type;
   const data = collectFormData(els.clientModalBody, clientType);
   clearFieldErrors();
   const { missing, popupLabels } = getMissingFields(data);
@@ -2167,7 +2382,7 @@ function renderModalBody() {
     els.clientModalSubtitle.classList.add("hidden");
     els.clientModalBody.innerHTML = `
       <div id="clientModalError" class="error-msg hidden"></div>
-      ${buildEditableSections(defaultClient(profile, { client_type: getDealSide() }))}
+      ${buildEditableSections(defaultClient(profile, { client_type: createClientType, broker_id: createBrokerId }), { brokers: brokerChoices })}
       <div class="form-actions">
         <button type="button" class="btn" id="saveClientBtn">Save</button>
         <button type="button" class="btn secondary" id="cancelClientBtn">Cancel</button>
@@ -2175,7 +2390,7 @@ function renderModalBody() {
     `;
     wireEditableFormEvents(els.clientModalBody);
     document.getElementById("saveClientBtn").addEventListener("click", handleCreateSave);
-    document.getElementById("cancelClientBtn").addEventListener("click", closeModal);
+    document.getElementById("cancelClientBtn").addEventListener("click", cancelCreate);
     return;
   }
 
@@ -2193,7 +2408,9 @@ function renderModalBody() {
   // is currently selected.
   let bodyHTML;
   if (currentMode === "edit") {
-    bodyHTML = buildEditableSections(currentClient);
+    bodyHTML = buildEditableSections(currentClient, { brokers: brokerChoices });
+  } else if (currentSubTab === "referrals") {
+    bodyHTML = buildReferralsHTML(currentReferrals);
   } else if (currentSubTab === "progress") {
     bodyHTML = buildProgressHTML(currentClientEvents);
   } else if (currentSubTab === "timeline") {
@@ -2207,7 +2424,7 @@ function renderModalBody() {
   // entry (every() is vacuously true for an empty array too), so there's
   // never any seller-only/buyer-only event history left stranded on the
   // other side after switching.
-  const canConvertType = (isAdmin || isTeamLead) && currentClientEvents.every((e) => e.event_type === "created");
+  const canConvertType = (isAdmin || isTeamLead) && currentClient.client_type !== "broker" && currentClientEvents.every((e) => e.event_type === "created");
 
   els.clientModalBody.innerHTML = `
     <div id="clientModalError" class="error-msg hidden"></div>
@@ -2245,6 +2462,8 @@ function renderModalBody() {
         openConfirmConvert(() => convertClientType(newType), `Convert this client to a ${newType}?`);
       });
     }
+  } else if (currentSubTab === "referrals") {
+    wireReferralsTab();
   } else if (currentSubTab === "timeline") {
     wireTimelineTab();
   } else if (currentSubTab === "progress") {
@@ -2252,6 +2471,7 @@ function renderModalBody() {
     wireProgressMetWith();
   } else if (currentSubTab === "profile") {
     wireCategoryDropdown();
+    wireBrokerLink();
     stopContactActionPropagation(els.clientModalBody);
   wireQuickSendButtons(els.clientModalBody);
   }
@@ -2262,12 +2482,32 @@ async function handleCreateSave() {
   if (!data) return;
   data.assigned_to = profile.id;
   // client_type is already set correctly on `data` — validateAndCollect
-  // passes getDealSide() through to collectFormData() for create mode (see
+  // passes getClientSide() through to collectFormData() for create mode (see
   // js/clientForm.js), so no separate override is needed here anymore.
   const { error } = await supabase.from("clients").insert(data);
   if (error) return showError(document.getElementById("clientModalError"), error);
+  // A buyer created from a broker's Referrals tab goes straight back to
+  // that tab (now listing the new buyer) instead of closing everything.
+  if (returnToBroker) {
+    const broker = returnToBroker;
+    returnToBroker = null;
+    await openDetailModal(broker, "referrals");
+    return;
+  }
   closeModal();
   await loadClients();
+}
+
+// Cancel on the "New client" form — closes it, unless it was opened from a
+// broker's Referrals tab, in which case it goes back to that tab.
+async function cancelCreate() {
+  if (returnToBroker) {
+    const broker = returnToBroker;
+    returnToBroker = null;
+    await openDetailModal(broker, "referrals");
+    return;
+  }
+  closeModal();
 }
 
 async function handleEditSave() {
@@ -2281,6 +2521,7 @@ async function handleEditSave() {
   // the view we're about to render right below would still show whichever
   // buyer was intended BEFORE this save.
   await resolveIntendedBuyerName(currentClient);
+  await resolveBrokerName(currentClient);
   currentMode = "view";
   renderModalBody();
   await loadClients();
@@ -2324,6 +2565,7 @@ async function convertClientType(newType) {
   } else {
     data.money_to_spend_min = null;
     data.money_to_spend_max = null;
+    data.broker_id = null; // only buyers carry a broker link
   }
   const { error } = await supabase.from("clients").update(data).eq("id", currentClient.id);
   if (error) return showError(document.getElementById("clientModalError"), error);
@@ -2334,12 +2576,35 @@ async function convertClientType(newType) {
   await loadClients();
 }
 
-function openCreateModal() {
+async function loadBrokerChoices() {
+  const { data } = await supabase.from("clients").select("id, full_name").eq("client_type", "broker").order("full_name", { ascending: true });
+  brokerChoices = data || [];
+}
+
+async function openCreateModal() {
   currentClient = null;
   currentMode = "create";
   currentSubTab = "profile";
+  createClientType = getClientSide();
+  createBrokerId = null;
+  returnToBroker = null;
+  if (createClientType === "buyer") await loadBrokerChoices();
   els.clientModal.classList.remove("hidden");
   lockPageScroll();
+  renderModalBody();
+}
+
+// From a broker's Referrals tab: "Create a new buyer" — opens the normal New
+// client form as a buyer with this broker already chosen under "Found
+// through broker"; saving or cancelling returns to the broker's Referrals.
+async function startCreateBuyerForBroker() {
+  returnToBroker = currentClient;
+  createClientType = "buyer";
+  createBrokerId = currentClient.id;
+  await loadBrokerChoices();
+  currentClient = null;
+  currentMode = "create";
+  currentSubTab = "profile";
   renderModalBody();
 }
 
@@ -2359,13 +2624,44 @@ async function resolveIntendedBuyerName(client) {
   }
 }
 
+// Same idea as resolveIntendedBuyerName, for a buyer's "Found through
+// broker" row (see brokerLinkRowHTML) — the RPC is security definer, so the
+// name resolves even for roles that can't read broker rows directly.
+async function resolveBrokerName(client) {
+  client._brokerName = null;
+  if (client.client_type === "buyer" && client.broker_id) {
+    const { data } = await supabase.rpc("get_client_full_name", { p_client_id: client.broker_id });
+    client._brokerName = data || null;
+  }
+}
+
+// Buyers attached to the broker currently open (clients.broker_id).
+async function loadReferrals() {
+  if (!currentClient || currentClient.client_type !== "broker") {
+    currentReferrals = [];
+    return;
+  }
+  const { data } = await supabase
+    .from("clients")
+    .select("*")
+    .eq("client_type", "buyer")
+    .eq("broker_id", currentClient.id)
+    .order("full_name", { ascending: true });
+  currentReferrals = data || [];
+}
+
 async function openDetailModal(client, initialSubTab = "profile") {
   currentClient = client;
   currentMode = "view";
-  currentSubTab = initialSubTab;
+  // Brokers only have Profile + Referrals; everyone else only Profile/
+  // Progress/Timeline — a deep link (or an earlier selection) for the wrong
+  // kind falls back to Profile.
+  const isBroker = client.client_type === "broker";
+  currentSubTab = isBroker ? (initialSubTab === "referrals" ? "referrals" : "profile") : initialSubTab === "referrals" ? "profile" : initialSubTab;
   els.clientModal.classList.remove("hidden");
   lockPageScroll();
-  await Promise.all([loadClientEvents(), resolveIntendedBuyerName(currentClient)]);
+  await Promise.all([isBroker ? Promise.resolve() : loadClientEvents(), resolveIntendedBuyerName(currentClient), resolveBrokerName(currentClient), loadReferrals()]);
+  if (isBroker) currentClientEvents = [];
   renderModalBody();
 }
 
@@ -2400,6 +2696,7 @@ wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu })
 if (isAdmin || isTeamLead) {
   els.dealSideToggleBtn.classList.remove("hidden");
   wireDealSideToggle(els.dealSideToggleBtn, els.dealSideLabel, async () => {
+    updateProgressBtnVisibility();
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");
     // Refreshes the green category's label ("Connected to buyer" <->
@@ -2417,7 +2714,7 @@ if (isAdmin || isTeamLead) {
     updateBuyersVisibleBtnVisibility();
     await loadClients();
     renderTable();
-  });
+  }, { allowBroker: isAdmin });
 }
 // Notifications on/off — everyone gets this, unlike Sellers/Buyers/Accounts
 // visible above.
@@ -2436,6 +2733,7 @@ els.editProfileBtn.addEventListener("click", async () => {
   // template with nowhere to await a lookup of its own, so it has to be
   // fetched and stashed on the client object before entering edit mode.
   await resolveIntendedBuyerName(currentClient);
+  if (currentClient.client_type === "buyer") await loadBrokerChoices();
   currentMode = "edit";
   renderModalBody();
 });

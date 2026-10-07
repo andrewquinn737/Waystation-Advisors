@@ -31,7 +31,7 @@ export function escapeHtml(str) {
 // js/dealSide.js's Sellers/Buyers toggle, admin-only) is looking for a
 // seller instead, so the label flips based on client.client_type.
 export function lookingForLabel(clientType) {
-  return clientType === "buyer" ? "What they're looking for in a seller" : "What they're looking for in a buyer";
+  return clientType === "buyer" || clientType === "broker" ? "What they're looking for in a seller" : "What they're looking for in a buyer";
 }
 
 export function defaultClient(profile, overrides) {
@@ -41,7 +41,7 @@ export function defaultClient(profile, overrides) {
       email: "", mobile_phone: "", company_phone: "", linkedin: "", company_name: "", industry: "",
       annual_revenue: null, employee_count: null, founded_year: null, founded_month: null,
       money_to_spend_min: null, money_to_spend_max: null,
-      looking_for: "", other_notes: "",
+      looking_for: "", other_notes: "", broker_id: null,
       intern_name: profile?.full_name || "",
     },
     overrides || {}
@@ -63,13 +63,24 @@ function foundedYearOptions(selectedYear) {
 
 // Personal information + Contact information — identical for both sides, so
 // factored out and shared by both branches of buildEditableSections below.
-function personalAndContactSectionsHTML(client) {
+function personalAndContactSectionsHTML(client, brokers = []) {
   return `
     <div class="accordion-section open" data-section="personal">
       <div class="accordion-header"><span>Personal information</span><span class="chevron">&#9662;</span></div>
       <div class="accordion-body">
         <div class="field-label-row"><label for="f_full_name">Full name</label><span class="field-required-msg hidden" data-field="full_name">required</span></div>
         <input id="f_full_name" value="${escapeHtml(client.full_name)}" />
+        ${
+          client.client_type === "broker"
+            ? `
+        <!-- Brokers only — the brokerage/firm they work for. Optional (unlike
+             a seller's company name), but it's what the Clients list's
+             Company column and the profile header show for them. -->
+        <label for="f_company_name">Company name <span class="help-text" style="display:inline;">(optional)</span></label>
+        <input id="f_company_name" value="${escapeHtml(client.company_name)}" />
+        `
+            : ""
+        }
         <div class="form-row">
           <div>
             <div class="field-label-row"><label for="f_city">City</label><span class="field-required-msg hidden" data-field="city">required</span></div>
@@ -108,6 +119,20 @@ function personalAndContactSectionsHTML(client) {
         `
             : ""
         }
+        ${
+          client.client_type === "buyer"
+            ? `
+        <!-- Buyers only — which broker (if any) this buyer was found through
+             (clients.broker_id). One broker can have many buyers; a buyer has
+             at most one broker, and the default is none. -->
+        <label for="f_broker_id">Found through broker</label>
+        <select id="f_broker_id">
+          <option value="">Not found through broker</option>
+          ${brokers.map((b) => `<option value="${b.id}" ${client.broker_id === b.id ? "selected" : ""}>${escapeHtml(b.full_name)}</option>`).join("")}
+        </select>
+        `
+            : ""
+        }
       </div>
     </div>
 
@@ -127,14 +152,36 @@ function personalAndContactSectionsHTML(client) {
   `;
 }
 
-export function buildEditableSections(client) {
+// opts.brokers: [{id, full_name}] — the broker choices for a buyer's "Found
+// through broker" select (see personalAndContactSectionsHTML); ignored for
+// every other kind of client.
+export function buildEditableSections(client, { brokers = [] } = {}) {
+  if (client.client_type === "broker") {
+    // Brokers: same Personal/Contact sections, then one Notes section with
+    // Industry (optional), what they're looking for in a seller, and other
+    // notes — no company details, preferences, progress or timeline.
+    return `
+      ${personalAndContactSectionsHTML(client, brokers)}
+      <div class="accordion-section" data-section="notes">
+        <div class="accordion-header"><span>Notes</span><span class="chevron">&#9662;</span></div>
+        <div class="accordion-body">
+          <label for="f_industry">Industry <span class="help-text" style="display:inline;">(optional)</span></label>
+          <input id="f_industry" value="${escapeHtml(client.industry)}" />
+          <div class="field-label-row"><label for="f_looking_for">${lookingForLabel(client.client_type)}</label><span class="field-required-msg hidden" data-field="looking_for">required</span></div>
+          <textarea id="f_looking_for">${escapeHtml(client.looking_for || "")}</textarea>
+          <label for="f_other_notes">Other notes</label>
+          <textarea id="f_other_notes">${escapeHtml(client.other_notes || "")}</textarea>
+        </div>
+      </div>
+    `;
+  }
   if (client.client_type === "buyer") {
     // Buyer clients get no "Company details" section at all (that's a
     // seller-only concept) — Preferences and Other notes also collapse into
     // one combined "Notes" section, with money_to_spend_min/max ("EBITDA
     // range desired") added alongside looking_for/other_notes.
     return `
-      ${personalAndContactSectionsHTML(client)}
+      ${personalAndContactSectionsHTML(client, brokers)}
       <div class="accordion-section" data-section="notes">
         <div class="accordion-header"><span>Notes</span><span class="chevron">&#9662;</span></div>
         <div class="accordion-body">
@@ -232,6 +279,7 @@ export function wireEditableFormEvents(container) {
 // never change what side a client is on).
 export function collectFormData(container, clientType) {
   const isBuyer = clientType === "buyer";
+  const isBroker = clientType === "broker";
   const data = {
     full_name: container.querySelector("#f_full_name").value.trim(),
     client_type: clientType,
@@ -245,6 +293,22 @@ export function collectFormData(container, clientType) {
     other_notes: container.querySelector("#f_other_notes").value.trim(),
     intern_name: container.querySelector("#f_intern_name").value.trim(),
   };
+  if (isBroker) {
+    // Brokers keep only an optional company name + industry; everything
+    // seller/buyer-specific is explicitly nulled (same reasoning as the buyer
+    // branch below).
+    data.company_name = container.querySelector("#f_company_name").value.trim() || null;
+    data.industry = container.querySelector("#f_industry").value.trim() || null;
+    data.intended_buyer_id = null;
+    data.broker_id = null;
+    data.annual_revenue = null;
+    data.employee_count = null;
+    data.founded_year = null;
+    data.founded_month = null;
+    data.money_to_spend_min = null;
+    data.money_to_spend_max = null;
+    return data;
+  }
   if (!isBuyer) {
     // Only rendered for sellers (see personalAndContactSectionsHTML) —
     // "" means "None" was chosen, same empty-string-means-null convention
@@ -252,6 +316,7 @@ export function collectFormData(container, clientType) {
     data.intended_buyer_id = container.querySelector("#f_intended_buyer_id")?.value || null;
   }
   if (isBuyer) {
+    data.broker_id = container.querySelector("#f_broker_id")?.value || null;
     const min = container.querySelector("#f_money_min").value;
     const max = container.querySelector("#f_money_max").value;
     data.money_to_spend_min = min === "" ? null : Number(min);
@@ -292,7 +357,9 @@ export function collectFormData(container, clientType) {
 export function getMissingFields(data) {
   const missing = [];
   const popupLabels = [];
-  const isBuyer = data.client_type === "buyer";
+  // Company name/industry are required for sellers only — a buyer's form has
+  // neither, and a broker's are optional.
+  const isSeller = data.client_type === "seller";
 
   if (!data.full_name) {
     missing.push("full_name");
@@ -301,7 +368,7 @@ export function getMissingFields(data) {
 
   // Company name/industry only exist on a seller's form at all (see
   // buildEditableSections) — never required for a buyer.
-  if (!isBuyer && !data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
+  if (isSeller && !data.company_name) { missing.push("company_name"); popupLabels.push("Company name"); }
 
   if (!data.email && !data.mobile_phone && !data.company_phone) { missing.push("contact"); popupLabels.push("Phone number and/or email"); }
 
@@ -310,7 +377,7 @@ export function getMissingFields(data) {
   if (!data.state) { missing.push("state"); locMissing = true; }
   if (locMissing) popupLabels.push("Location");
 
-  if (!isBuyer && !data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
+  if (isSeller && !data.industry) { missing.push("industry"); popupLabels.push("Sector"); }
 
   if (!data.looking_for) { missing.push("looking_for"); popupLabels.push("What they're looking for"); }
 

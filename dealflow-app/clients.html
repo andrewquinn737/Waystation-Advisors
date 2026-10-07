@@ -93,7 +93,8 @@
     </div>
     <!-- Settings gear popover — admin/team-lead-only Sellers/Buyers data-side
          toggle + Accounts visible (both start hidden and are individually
-         unhidden by JS for admin/team lead — see js/dealSide.js,
+         unhidden by JS for admin/team lead — see js/dealSide.js (opens a
+         Sellers/Buyers popup; admins also get Brokers),
          js/accountsVisible.js), plus a 3rd Notifications on/off option shown
          to every role (see js/notifications.js). The gear button + this menu
          are always shown now, since Notifications applies to everyone. -->
@@ -165,6 +166,9 @@
       <button type="button" data-tab="profile">Profile</button>
       <button type="button" data-tab="progress">Progress</button>
       <button type="button" data-tab="timeline">Timeline</button>
+      <!-- Brokers only (see renderSubtabsBar in js/clients.js) — a broker has
+           Profile + Referrals instead of Progress/Timeline. -->
+      <button type="button" data-tab="referrals" class="hidden">Referrals</button>
     </div>
   </div>
 
