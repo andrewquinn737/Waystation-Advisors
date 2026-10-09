@@ -1169,3 +1169,38 @@ create policy "dials_update_own" on dials
 -- hidden — see isCalledTodayVisible's comment on that).
 -- ============================================================================
 alter table dials add column if not exists status_hide_effective_date date;
+
+-- ============================================================================
+-- INDEPENDENT LEAD ROLE (4th role) — applied as migration
+-- "independent_lead_role". Acts like an intern everywhere (data scoping,
+-- is_team_lead_of, transfers, report/buyer pools all treat it as an intern)
+-- except the app lets it keep its own Calendly link on Profile and
+-- schedule/complete its own intro calls (see resolveCalendlyLink in
+-- js/mainAdmin.js and canReportDuringOutreach in js/dials.js).
+--
+-- Putting someone INTO the locked "Independent Leads" team makes them an
+-- independent lead (trigger below + moveMemberToGroup in js/profile.js).
+-- Moving one OUT to another team leaves role alone — they just show up under
+-- that team's lead with the interns until an admin switches their position.
+-- ============================================================================
+alter table profiles drop constraint profiles_role_check;
+alter table profiles add constraint profiles_role_check
+  check (role in ('intern', 'team_lead', 'admin', 'independent_lead'));
+
+create or replace function public.enforce_locked_team_no_lead()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if new.team_id is not null and exists (select 1 from public.teams where id = new.team_id and is_locked) then
+    if new.role in ('intern', 'team_lead') and (tg_op = 'INSERT' or new.team_id is distinct from old.team_id) then
+      new.role := 'independent_lead';
+    elsif new.role = 'team_lead' then
+      new.role := case when tg_op = 'UPDATE' then old.role else 'independent_lead' end;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+-- is_team_lead_of, transfer_dial_list, get_eligible_counterparts,
+-- get_reports_available_buyers and reassign_dial_list_buyer were each widened
+-- from role = 'intern' / in ('team_lead','intern') to also include
+-- 'independent_lead' (same bodies otherwise).

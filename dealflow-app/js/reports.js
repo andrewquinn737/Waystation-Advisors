@@ -270,7 +270,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       .from("profiles")
       .select("id, full_name")
       .eq("team_id", profile.team_id)
-      .or(`role.eq.intern,id.eq.${profile.id}`)
+      .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
       .order("full_name", { ascending: true });
     return error ? [] : data || [];
   }

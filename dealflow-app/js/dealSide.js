@@ -5,8 +5,9 @@
 // which have existed since the original design — see the "ADMIN-ONLY
 // SELLERS/BUYERS TOGGLE" comment there). This module just tracks + persists
 // which side is currently being viewed/created into, and wires the button in
-// each page's settings dropdown — which now opens a small popup to choose
-// from (it used to flip between two sides on every tap).
+// each page's settings dropdown — for admins that opens a small popup to
+// choose from (there are three options on Clients); team leads keep the
+// original one-tap Sellers <-> Buyers switch.
 //
 // "Brokers" is a third kind of CLIENT (admin-only, Clients page only —
 // dials and call stats have no broker side). So there are two readers:
@@ -89,19 +90,31 @@ function closePopup() {
   unlockPageScroll();
 }
 
-// toggleBtn: the settings-menu button that shows the current side's name and
-// opens the picker when clicked.
+// toggleBtn: the settings-menu button that shows the current side's name.
 // labelEl: the <span> inside it whose text gets updated to match.
 // onChange: called (no args) right after a DIFFERENT side is picked, so the
 //   caller can re-load + re-render whichever list it's showing.
 // opts.allowBroker: offer the Brokers option (admins on the Clients page).
-export function wireDealSideToggle(toggleBtn, labelEl, onChange, { allowBroker = false } = {}) {
+// opts.popup: admins get a popup to pick from (Clients has three options);
+//   everyone else who can switch at all (team leads) keeps the original
+//   one-tap Sellers <-> Buyers switch. Defaults to following allowBroker.
+export function wireDealSideToggle(toggleBtn, labelEl, onChange, { allowBroker = false, popup = allowBroker } = {}) {
   if (allowBroker) allowBrokerSide(true);
   const current = () => (allowBroker ? getClientSide() : getDealSide());
   const render = () => {
     labelEl.textContent = SIDE_LABELS[current()];
   };
   render();
+
+  if (!popup) {
+    toggleBtn.addEventListener("click", () => {
+      setSide(current() === "buyer" ? "seller" : "buyer");
+      render();
+      onChange();
+    });
+    return;
+  }
+
   toggleBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     closeAllPageHeaderMenus();

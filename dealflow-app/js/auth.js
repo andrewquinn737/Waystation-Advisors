@@ -240,7 +240,7 @@ export function renderNav(profile) {
       </div>
       <div class="who">
         <span>${profile.full_name}</span>
-        <span class="role-badge">${profile.role === "admin" ? "Admin" : profile.role === "team_lead" ? "Team lead" : "Intern"}</span>
+        <span class="role-badge">${profile.role === "admin" ? "Admin" : profile.role === "team_lead" ? "Team lead" : profile.role === "independent_lead" ? "Independent lead" : "Intern"}</span>
         <button class="btn danger small" id="signOutBtn">Log out</button>
       </div>
     </div>

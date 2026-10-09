@@ -1238,7 +1238,7 @@ async function openTransferMenu() {
   const isOwnTab = !list || list.created_by === profile.id;
   let query = supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
   if (isTeamLead) {
-    query = query.or(`role.eq.admin,and(role.eq.intern,team_id.eq.${profile.team_id}),id.eq.${profile.id}`);
+    query = query.or(`role.eq.admin,and(role.in.(intern,independent_lead),team_id.eq.${profile.team_id}),id.eq.${profile.id}`);
   }
   if (isOwnTab) query = query.neq("id", profile.id);
   const { data, error } = await query;
@@ -1634,7 +1634,7 @@ async function loadContractSignedBuyers() {
         .from("profiles")
         .select("id")
         .eq("team_id", profile.team_id)
-        .or(`role.eq.intern,id.eq.${profile.id}`);
+        .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`);
       ownerIds = (teamProfiles || []).map((p) => p.id);
     } else {
       ownerIds = [profile.id];
@@ -1784,7 +1784,7 @@ if (isAdmin || isTeamLead) {
     // almost certainly doesn't belong to this side at all).
     currentListId = null;
     await loadLists();
-  });
+  }, { popup: isAdmin });
 }
 
 els.menuAddNewBtn.addEventListener("click", () => {
@@ -3261,11 +3261,11 @@ async function handleScheduleIntroCallFromDial(dial) {
     return;
   }
 
-  // Team leads/admins also get "Intro completed during outreach" under the
+  // Team leads/admins/independent leads also get "Intro completed during outreach" under the
   // Open Calendly button — for an intro call they already held live during
   // the outreach call itself, so there's nothing to book (see
   // openCompletedIntroReportModal below).
-  const canReportDuringOutreach = profile.role === "team_lead" || profile.role === "admin";
+  const canReportDuringOutreach = profile.role === "team_lead" || profile.role === "admin" || profile.role === "independent_lead";
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowCompletedDuringOutreach: canReportDuringOutreach });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
@@ -3693,7 +3693,7 @@ if (isAdmin || isTeamLead) {
         .from("profiles")
         .select("id, full_name")
         .eq("team_id", profile.team_id)
-        .or(`role.eq.intern,id.eq.${profile.id}`)
+        .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },

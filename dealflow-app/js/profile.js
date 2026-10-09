@@ -306,7 +306,7 @@ async function resolveSelectedAccounts() {
   // from in the first place — this just needs to agree with that scope).
   const pool = isAdminSync
     ? all
-    : all.filter((a) => a.id === profile.id || (profile.team_id && a.team_id === profile.team_id && a.role === "intern"));
+    : all.filter((a) => a.id === profile.id || (profile.team_id && a.team_id === profile.team_id && (a.role === "intern" || a.role === "independent_lead")));
   const visible = getVisibleAccountIds();
   if (!visible) return pool.length ? pool : [profile];
   const picked = pool.filter((a) => visible.has(a.id));
@@ -323,7 +323,7 @@ async function renderProfileHeader() {
   const showAccount = isSingleOther ? selected[0] : profile;
 
   els.profileName.textContent = showAccount.full_name;
-  els.profileRole.textContent = showAccount.role === "admin" ? "Admin" : showAccount.role === "team_lead" ? "Team lead" : "Intern";
+  els.profileRole.textContent = showAccount.role === "admin" ? "Admin" : showAccount.role === "team_lead" ? "Team lead" : showAccount.role === "independent_lead" ? "Independent lead" : "Intern";
   renderAvatar(showAccount);
 
   // Either line is simply omitted if that field isn't on file (e.g. older
@@ -345,7 +345,7 @@ async function renderProfileHeader() {
   // Calendly link — only the main admin and team leads ever have one that
   // means anything (see js/mainAdmin.js/js/introCall.js), so the section
   // only shows for whichever of those the currently-displayed account is.
-  const showsCalendly = showAccount.role === "team_lead" || showAccount.id === mainAdminId;
+  const showsCalendly = showAccount.role === "team_lead" || showAccount.role === "independent_lead" || showAccount.id === mainAdminId;
   if (els.calendlyLinkSection) {
     els.calendlyLinkSection.classList.toggle("hidden", !showsCalendly);
     if (showsCalendly) {
@@ -432,7 +432,10 @@ function enterProfileEditMode() {
   // main admin or a team lead (see js/mainAdmin.js) — the section itself is
   // already shown/hidden to match by renderProfileHeader, so this just
   // decides whether to swap in an input at all.
-  const canEditCalendly = profile.id === mainAdminId || profile.role === "team_lead";
+  const canEditCalendly = profile.id === mainAdminId || profile.role === "team_lead" || profile.role === "independent_lead";
+  // "Use partner's link / my link" only means something to someone who has a
+  // partner link to fall back on — an independent lead only ever has their own.
+  const canChooseCalendlyPreference = canEditCalendly && profile.role !== "independent_lead";
   let calendlyInput = null;
   if (canEditCalendly) {
     calendlyInput = document.createElement("input");
@@ -455,19 +458,19 @@ function enterProfileEditMode() {
   // back over whatever was just picked.
   let preferenceShown = false;
   function syncCalendlyPreferenceVisibility() {
-    const shows = canEditCalendly && !!calendlyInput.value.trim();
+    const shows = canChooseCalendlyPreference && !!calendlyInput.value.trim();
     if (shows && !preferenceShown) {
       els.calendlyPreferenceSelect.value = profile.use_own_calendly_link ? "own" : "partner";
     }
     preferenceShown = shows;
     els.calendlyPreferenceSection.classList.toggle("hidden", !shows);
   }
-  if (canEditCalendly) {
+  if (canChooseCalendlyPreference) {
     syncCalendlyPreferenceVisibility();
     calendlyInput.addEventListener("input", syncCalendlyPreferenceVisibility);
   }
 
-  profileEditInputs = { nameInput, phoneInput, emailInput, mailListHost, calendlyInput, canEditCalendly };
+  profileEditInputs = { nameInput, phoneInput, emailInput, mailListHost, calendlyInput, canEditCalendly, canChooseCalendlyPreference };
   nameInput.focus();
   nameInput.select();
 }
@@ -476,7 +479,7 @@ async function exitProfileEditMode() {
   if (!profileEditMode) return;
   profileEditMode = false;
   els.avatarInitials.classList.remove("editable");
-  const { nameInput, phoneInput, emailInput, mailListHost, calendlyInput, canEditCalendly } = profileEditInputs;
+  const { nameInput, phoneInput, emailInput, mailListHost, calendlyInput, canEditCalendly, canChooseCalendlyPreference } = profileEditInputs;
   profileEditInputs = null;
 
   const newName = nameInput.value.trim() || profile.full_name;
@@ -487,7 +490,7 @@ async function exitProfileEditMode() {
   // captured back when edit mode was entered — the preference section may
   // have appeared or disappeared since then as the link was typed in/out
   // (see syncCalendlyPreferenceVisibility above).
-  const showCalendlyPreference = canEditCalendly && !!newCalendlyLink;
+  const showCalendlyPreference = canChooseCalendlyPreference && !!newCalendlyLink;
   const newUseOwnCalendlyLink = showCalendlyPreference ? els.calendlyPreferenceSelect.value === "own" : profile.use_own_calendly_link;
   nameInput.replaceWith(els.profileName);
   phoneInput.replaceWith(els.profilePhone);
@@ -662,7 +665,7 @@ function escapeHtml(str) {
 }
 
 function memberPositionLabel(m) {
-  return m.role === "admin" ? "Admin" : m.role === "team_lead" ? "Team lead" : "Intern";
+  return m.role === "admin" ? "Admin" : m.role === "team_lead" ? "Team lead" : m.role === "independent_lead" ? "Independent lead" : "Intern";
 }
 
 // Which group (key) a given profile row currently belongs to. Admins always
@@ -854,7 +857,7 @@ function renderTeams() {
       e.stopPropagation();
       const menu = btn.closest(".position-menu");
       const memberId = menu.dataset.memberId;
-      const role = btn.dataset.role; // "intern" | "team_lead" | "admin"
+      const role = btn.dataset.role; // "intern" | "independent_lead" | "team_lead" | "admin"
 
       if (role === "admin") {
         moveMemberToGroup(memberId, ADMINS_KEY);
@@ -862,6 +865,18 @@ function renderTeams() {
       }
       if (role === "team_lead") {
         setMemberAsTeamLead(memberId);
+        return;
+      }
+      if (role === "independent_lead") {
+        const member = allMembers.find((m) => m.id === memberId);
+        if (member?.role === "admin") {
+          // Same as demoting an admin to intern: no "previous team" — an
+          // independent lead's natural home is the Independent Leads box.
+          const lockedTeam = customTeams.find((t) => t.is_locked);
+          moveMemberToGroup(memberId, lockedTeam ? lockedTeam.id : UNASSIGNED_KEY);
+        } else {
+          setMemberRoleInPlace(memberId, "independent_lead");
+        }
         return;
       }
       // role === "intern"
@@ -908,6 +923,7 @@ function memberCardHTML(m) {
       <span class="mc-sub position-toggle" data-member-id="${m.id}">${escapeHtml(positionLabel)}</span>
       <div class="position-menu hidden" data-member-id="${m.id}">
         <button type="button" class="position-option" data-role="intern">Intern</button>
+        <button type="button" class="position-option" data-role="independent_lead">Independent lead</button>
         ${canBeTeamLead ? `<button type="button" class="position-option" data-role="team_lead">Team lead</button>` : ""}
         <button type="button" class="position-option" data-role="admin">Admin</button>
       </div>
@@ -1032,7 +1048,7 @@ function toggleMemberDetail(card, member) {
   // showsCalendly above) — so interns can see the schedule they'd actually
   // be booking into, without cluttering every other member's card with an
   // empty row.
-  const showsCalendly = member.role === "team_lead" || member.id === mainAdminId;
+  const showsCalendly = member.role === "team_lead" || member.role === "independent_lead" || member.id === mainAdminId;
   wrap.insertAdjacentHTML(
     "beforeend",
     `<div class="team-member-detail">
@@ -1136,16 +1152,33 @@ document.addEventListener("click", () => closeAllPositionMenus());
 // Moves a member into `groupKey` (either ADMINS_KEY, UNASSIGNED_KEY, or a
 // custom team's id) — shared by the position dropdown's Admin/Intern options
 // and the drag-drop gesture below. Moving into Admins always sets
-// role='admin'; moving anywhere else always sets role='intern' (an admin or
-// team lead dragged out becomes a plain intern again, per spec) plus that
-// destination's team_id. Team lead promotion itself is NOT done through this
+// role='admin'; moving into the locked Independent Leads box always sets
+// role='independent_lead'; moving anywhere else sets role='intern' (an admin
+// or team lead dragged out becomes a plain intern again, per spec) — except
+// an independent lead keeps their role when moved to another team — plus
+// that destination's team_id. Team lead promotion itself is NOT done through this
 // function — see setMemberAsTeamLead/demoteTeamLeadInPlace below, which
 // change role without moving anyone between boxes.
 async function moveMemberToGroup(memberId, groupKey) {
-  const updates =
-    groupKey === ADMINS_KEY
-      ? { role: "admin" }
-      : { role: "intern", team_id: groupKey === UNASSIGNED_KEY ? null : groupKey };
+  const member = allMembers.find((m) => m.id === memberId);
+  let updates;
+  if (groupKey === ADMINS_KEY) {
+    updates = { role: "admin" };
+  } else if (isLockedTeam(groupKey)) {
+    // Anyone put into the locked Independent Leads box becomes an
+    // independent lead (the locked_team_no_lead trigger enforces the same
+    // server-side).
+    updates = { role: "independent_lead", team_id: groupKey };
+  } else {
+    // An independent lead moved to a different team (or Unassigned) keeps
+    // that role — they just sit with that team's interns until someone
+    // switches their position. Everyone else dragged out becomes a plain
+    // intern again, as before.
+    updates = {
+      role: member?.role === "independent_lead" ? "independent_lead" : "intern",
+      team_id: groupKey === UNASSIGNED_KEY ? null : groupKey,
+    };
+  }
   const { error } = await supabase.from("profiles").update(updates).eq("id", memberId);
   if (error) return showError(els.teamsErrorBox, error);
   await loadTeams();
@@ -1186,6 +1219,15 @@ async function setMemberAsTeamLead(memberId) {
   await loadTeams();
 }
 
+// Switches just the role (no box change) — used by the position dropdown's
+// "Independent lead" option for someone already sitting in a team.
+async function setMemberRoleInPlace(memberId, role) {
+  const { error } = await supabase.from("profiles").update({ role }).eq("id", memberId);
+  if (error) return showError(els.teamsErrorBox, error);
+  await loadTeams();
+  await applyAutoPromotion(memberId);
+}
+
 // Demoting an admin via the position dropdown's "Intern" option has always
 // meant "send to Unassigned interns as a plain intern" (moveMemberToGroup,
 // above) — Admins is a virtual group with no team_id of its own to fall back
@@ -1218,7 +1260,9 @@ async function applyAutoPromotion(excludeMemberId) {
     const members = teamMembersByGroup[team.id] || [];
     if (members.length === 1) {
       const only = members[0];
-      if (only.id !== excludeMemberId && only.role !== "team_lead") {
+      // An independent lead alone in a box keeps their role ("the role stays
+      // the same unless switched") — auto-promotion only applies to interns.
+      if (only.id !== excludeMemberId && only.role === "intern") {
         const { error } = await supabase.from("profiles").update({ role: "team_lead" }).eq("id", only.id);
         if (!error) changed = true;
       }
@@ -1929,16 +1973,26 @@ function fmtEventDateTime(iso, hasTime) {
 // ADDS ids not already covered by `ids` — a team lead/main admin viewing
 // the default "Select all" pool (which already includes every intern) sees
 // no change; this only matters once Accounts visible has been narrowed.
+// Interns always book intro calls through someone else's Calendly link; an
+// independent lead only does so until they add their own.
+function routesThroughPartnerLink(a) {
+  return a.role === "intern" || (a.role === "independent_lead" && !a.calendly_link);
+}
+
 async function extraIntroCallOwnerIds(alreadyCoveredIds) {
   if (isTeamLeadSync && profile.calendly_link && profile.team_id) {
     const all = await loadAllAccountsForSelection();
-    return all.filter((a) => a.team_id === profile.team_id && a.role === "intern" && !alreadyCoveredIds.includes(a.id)).map((a) => a.id);
+    // An independent lead with their own Calendly link books through that
+    // instead (see resolveCalendlyLink in js/mainAdmin.js) — not this lead's.
+    return all
+      .filter((a) => a.team_id === profile.team_id && routesThroughPartnerLink(a) && !alreadyCoveredIds.includes(a.id))
+      .map((a) => a.id);
   }
   if (profile.id === mainAdminId) {
     const all = await loadAllAccountsForSelection();
     const teamLeadCalendlyByTeam = new Map(all.filter((a) => a.role === "team_lead").map((a) => [a.team_id, a.calendly_link]));
     return all
-      .filter((a) => a.role === "intern" && !alreadyCoveredIds.includes(a.id) && !teamLeadCalendlyByTeam.get(a.team_id))
+      .filter((a) => routesThroughPartnerLink(a) && !alreadyCoveredIds.includes(a.id) && !teamLeadCalendlyByTeam.get(a.team_id))
       .map((a) => a.id);
   }
   return [];
@@ -2372,7 +2426,7 @@ if (isAdminSync || isTeamLeadSync) {
     els.settingsMenu.classList.add("hidden");
     els.pageSettingsBtn.classList.remove("open");
     refreshActiveCallsView();
-  });
+  }, { popup: isAdminSync });
   els.menuAccountsVisibleBtn.classList.remove("hidden");
   wireAccountsVisiblePopup({
     menuBtn: els.menuAccountsVisibleBtn,
@@ -2399,7 +2453,7 @@ if (isAdminSync || isTeamLeadSync) {
         .from("profiles")
         .select("id, full_name")
         .eq("team_id", profile.team_id)
-        .or(`role.eq.intern,id.eq.${profile.id}`)
+        .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },

@@ -862,7 +862,7 @@ if (isAdmin || isTeamLead) {
         .from("profiles")
         .select("id, full_name")
         .eq("team_id", profile.team_id)
-        .or(`role.eq.intern,id.eq.${profile.id}`)
+        .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
         .order("full_name", { ascending: true });
       return error ? [] : data || [];
     },
@@ -1815,7 +1815,7 @@ async function loadIntendedBuyerOptions() {
   let ownerIds = null;
   if (!isAdmin) {
     if (profile.team_id) {
-      const { data: teamProfiles } = await supabase.from("profiles").select("id").eq("team_id", profile.team_id).or(`role.eq.intern,id.eq.${profile.id}`);
+      const { data: teamProfiles } = await supabase.from("profiles").select("id").eq("team_id", profile.team_id).or(`role.in.(intern,independent_lead),id.eq.${profile.id}`);
       ownerIds = (teamProfiles || []).map((p) => p.id);
     } else {
       ownerIds = [profile.id];

@@ -34,8 +34,11 @@ export async function getMainAdmin() {
 // Interns use their own team lead's link, falling back to the main admin's
 // if their team lead hasn't set one (or they have no team lead at all).
 export async function resolveCalendlyLink(profile) {
+  // An independent lead with their own link books through it; without one
+  // they fall back exactly like an intern (team lead's link, else main admin's).
+  if (profile.role === "independent_lead" && profile.calendly_link) return profile.calendly_link;
   const mainAdmin = await getMainAdmin();
-  if (profile.role !== "intern") {
+  if (profile.role !== "intern" && profile.role !== "independent_lead") {
     if (profile.use_own_calendly_link && profile.calendly_link) return profile.calendly_link;
     return mainAdmin?.calendly_link || null;
   }

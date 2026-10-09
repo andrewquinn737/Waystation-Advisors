@@ -279,7 +279,7 @@ export function wireDeletedTabsPopup({ menuBtn, closePageHeaderMenu, escapeHtml 
       el.reassignModal.classList.add("hidden");
       return showError(el.errorBox, error);
     }
-    const roleLabel = { admin: "Admin", team_lead: "Team lead", intern: "Intern" };
+    const roleLabel = { admin: "Admin", team_lead: "Team lead", independent_lead: "Independent lead", intern: "Intern" };
     el.reassignSelect.innerHTML =
       `<option value="">Choose an account…</option>` +
       (data || [])
