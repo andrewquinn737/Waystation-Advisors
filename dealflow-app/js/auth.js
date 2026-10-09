@@ -76,6 +76,10 @@ export async function requireSession() {
     const cached = isNetworkError(error) ? cacheGet("profile_" + session.user.id) : null;
     if (!cached) {
       console.error("Could not load profile", error);
+      // A real (non-network) failure means this stored session isn't usable —
+      // clear it, otherwise login.html sees it, sends us straight back here,
+      // and the two pages bounce forever.
+      if (!isNetworkError(error)) await supabase.auth.signOut({ scope: "local" });
       window.location.href = "login.html";
       return null;
     }

@@ -66,9 +66,21 @@
     const password = document.getElementById("password");
     const submitBtn = document.getElementById("submitBtn");
 
-    // If already signed in, skip straight to the app.
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) window.location.href = "profile.html";
+    // If already signed in, skip straight to the app. A session sitting in
+    // local storage isn't proof of that though — if the server no longer
+    // accepts it (revoked/rotated away elsewhere), the app bounces straight
+    // back here and this used to bounce right into the app again: an endless
+    // login <-> app loop with no way to reach the form. So confirm it with the
+    // server first, and clear a rejected session so the form is usable. (A
+    // dropped connection says nothing about the session, so it's left alone.)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return;
+      const { data, error } = await supabase.auth.getUser();
+      if (data?.user && !error) {
+        window.location.href = "profile.html";
+      } else if (error && error.name !== "AuthRetryableFetchError") {
+        await supabase.auth.signOut({ scope: "local" });
+      }
     });
 
     form.addEventListener("submit", async (e) => {
