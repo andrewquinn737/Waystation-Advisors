@@ -1204,3 +1204,19 @@ $$;
 -- get_reports_available_buyers and reassign_dial_list_buyer were each widened
 -- from role = 'intern' / in ('team_lead','intern') to also include
 -- 'independent_lead' (same bodies otherwise).
+
+-- ============================================================================
+-- QUESTIONNAIRE TRACKING FLOW (one buyer + his sellers) — applied as migration
+-- "questionnaire_tracking_flow_for_one_buyer".
+-- clients.tracking_flow ('questionnaire' | null). Only the buyer Arieh Levi has
+-- it set; sellers inherit it from the buyer they're attached to
+-- (coalesce(intended_buyer_id, source tab's buyer)) via the clients_tracking_flow
+-- trigger (only admins can change a buyer's own value). Seller steps become
+-- Questionnaire (the intro_call event, relabelled) -> Client approval -> Bid
+-- accepted by seller (new shared event_type 'bid_accepted') -> Close, and the
+-- buyer's report uses the matching wording (js/reports.js
+-- QUESTIONNAIRE_LABEL_SET). get_buyer_progress_summary now also returns a
+-- 'bid_accepted' metric and get_buyer_milestone_clients lists 'bid_accepted'.
+-- Buyers' progress list also swapped Secured financing for NDA + financials
+-- (before LOI) — front end only (js/clients.js BUYER_PROGRESS_STEPS).
+-- ============================================================================

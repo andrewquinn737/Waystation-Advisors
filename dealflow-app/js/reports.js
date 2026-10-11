@@ -85,7 +85,7 @@ const CHART_METRIC_LABELS = [
 ];
 
 // The "Outreach for week/month of ___" bar chart's own bars — a distinct,
-// shorter list from CHART_METRIC_LABELS above: no "Approved targets" (it's
+// shorter list from labelSet.chart above: no "Approved targets" (it's
 // already in the Total progress summary right next to this chart, so
 // repeating it here was redundant). Targets contacted leads (leftmost),
 // followed by Total number of contacts (renamed from Attempted contacts),
@@ -125,6 +125,44 @@ const CONTACTED_TABLE_TITLES = [
   ["unable_to_contact", "Unable to contact"],
   ["not_interested", "Not interested"],
 ];
+
+// Label sets for the selected buyer's report. Almost every buyer uses the
+// standard lists above; the one buyer on the "questionnaire" tracking flow
+// (clients.tracking_flow, see js/clients.js) — and so every seller attached
+// to him — gets the questionnaire wording, a "Bid accepted by seller" row
+// instead of the client-call/NDA/LOI rows, and the same relabelled owner
+// categories. `labelSet` is swapped by fetchBuyerCentricData() before
+// anything renders (on screen and in the PDF).
+const relabel = (list, key, label) => list.map(([k, l]) => (k === key ? [k, label] : [k, l]));
+const STANDARD_LABEL_SET = {
+  summary: SUMMARY_METRIC_LABELS,
+  chart: CHART_METRIC_LABELS,
+  graph: GRAPH_METRIC_LABELS,
+  milestone: MILESTONE_TABLE_TITLES,
+  contacted: CONTACTED_TABLE_TITLES,
+};
+const QUESTIONNAIRE_LABEL_SET = {
+  summary: [
+    ["approved_targets", "Approved targets"],
+    ["targets_contacted", "Targets contacted"],
+    ["owners_talked", "Owners talked to"],
+    ["owners_agreed", "Owners agreed to questionnaire"],
+    ["intro_calls_completed", "Questionnaire completed"],
+    ["leads_approved_by_client", "Leads approved by client"],
+    ["bid_accepted", "Bid accepted by seller"],
+    ["closed", "Closed"],
+  ],
+  chart: relabel(CHART_METRIC_LABELS, "intro_call_scheduled", "Accepted questionnaire"),
+  graph: relabel(GRAPH_METRIC_LABELS, "intro_call_scheduled", "Accepted questionnaire"),
+  milestone: [
+    ["close", "Closed"],
+    ["bid_accepted", "Bid accepted by seller"],
+    ["client_approval", "Leads approved by client"],
+    ["intro_call", "Questionnaire completed"],
+  ],
+  contacted: relabel(CONTACTED_TABLE_TITLES, "intro_call_scheduled", "Accepted questionnaire"),
+};
+let labelSet = STANDARD_LABEL_SET;
 
 // PDF-only text cleanup (the on-screen table shows the raw values as-is) —
 // strips emoji (\p{Extended_Pictographic} is the proper Unicode property for
@@ -382,6 +420,10 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       return;
     }
     const buyerId = [...selectedBuyerIds][0];
+    // Which wording this buyer's report uses (see QUESTIONNAIRE_LABEL_SET).
+    // Falls back to the standard set if the lookup fails.
+    const { data: flowRow } = await supabase.from("clients").select("tracking_flow").eq("id", buyerId).maybeSingle();
+    labelSet = flowRow?.tracking_flow === "questionnaire" ? QUESTIONNAIRE_LABEL_SET : STANDARD_LABEL_SET;
     const { startISO, endISO } = periodBoundsISO(selectedPeriodStart, periodType);
     const [summaryRes, chartRes, sinceSignedRes, milestoneRes, contactedRes] = await Promise.all([
       supabase.rpc("get_buyer_progress_summary", { p_buyer_id: buyerId }),
@@ -448,12 +490,12 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       chartTop = 20,
       chartLeft = 50,
       chartRight = 700;
-    const slotWidth = (chartRight - chartLeft) / GRAPH_METRIC_LABELS.length;
+    const slotWidth = (chartRight - chartLeft) / labelSet.graph.length;
     const barWidth = Math.min(46, slotWidth - 14);
     const labelFontSize = 10.5;
-    const values = GRAPH_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
+    const values = labelSet.graph.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
     const maxValue = Math.max(1, ...values);
-    const bars = GRAPH_METRIC_LABELS.map(([key, label], i) => {
+    const bars = labelSet.graph.map(([key, label], i) => {
       const value = values[i];
       const barHeight = (value / maxValue) * (axisY - chartTop);
       const slotCenter = chartLeft + slotWidth * i + slotWidth / 2;
@@ -480,7 +522,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // Total progress summary — a plain 2-column (label, value) table, totals
   // for the selected buyer's whole lifetime (see get_buyer_progress_summary).
   function buildSummaryTableHTML(summaryRows) {
-    const rows = SUMMARY_METRIC_LABELS.map(([key, label]) => {
+    const rows = labelSet.summary.map(([key, label]) => {
       const value = summaryRows.find((r) => r.metric === key)?.value ?? 0;
       return `<tr><td>${escapeHtml(label)}</td><td class="num">${value}</td></tr>`;
     }).join("");
@@ -494,11 +536,11 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // lifetime instead of period-scoped, with a totals row computed here
   // client-side (not server-side — simpler to just sum what's on screen).
   function buildSinceSignedTableHTML(rows) {
-    const totals = CHART_METRIC_LABELS.map(([key]) => rows.reduce((s, r) => s + (r[key] || 0), 0));
-    const headCells = ["Tab", ...CHART_METRIC_LABELS.map(([, label]) => label)].map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const totals = labelSet.chart.map(([key]) => rows.reduce((s, r) => s + (r[key] || 0), 0));
+    const headCells = ["Tab", ...labelSet.chart.map(([, label]) => label)].map((c) => `<th>${escapeHtml(c)}</th>`).join("");
     const bodyRows = rows
       .map((r) => {
-        const cells = CHART_METRIC_LABELS.map(([key]) => `<td class="num">${r[key] || 0}</td>`).join("");
+        const cells = labelSet.chart.map(([key]) => `<td class="num">${r[key] || 0}</td>`).join("");
         return `<tr><td>${escapeHtml(r.list_name)}</td>${cells}</tr>`;
       })
       .join("");
@@ -630,13 +672,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     }
     const { summary, chart, sinceSigned, milestoneClients, contactedOwners, periodLabel } = buyerCentric;
 
-    const milestoneTablesHTML = MILESTONE_TABLE_TITLES.map(([type, title]) => {
+    const milestoneTablesHTML = labelSet.milestone.map(([type, title]) => {
       const rows = milestoneClients.filter((r) => r.milestone_type === type);
       return rows.length ? buildOwnerTableHTML(title, rows, SET1_COLUMNS) : "";
     })
       .filter(Boolean)
       .join("");
-    const contactedTablesHTML = CONTACTED_TABLE_TITLES.map(([category, title]) => {
+    const contactedTablesHTML = labelSet.contacted.map(([category, title]) => {
       const rows = contactedOwners.filter((r) => r.category === category);
       return rows.length ? buildOwnerTableHTML(`${title} for ${periodLabel}`, rows, SET2_COLUMNS) : "";
     })
@@ -1005,15 +1047,15 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     const bottomPad = 18;
     const axisY = y + height - bottomPad;
     const plotHeight = height - topPad - bottomPad;
-    const slotWidth = width / GRAPH_METRIC_LABELS.length;
+    const slotWidth = width / labelSet.graph.length;
     const barWidth = Math.min(20, slotWidth - 10);
     const labelMaxWidth = slotWidth - 4;
-    const values = GRAPH_METRIC_LABELS.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
+    const values = labelSet.graph.map(([key]) => chartRows.find((r) => r.metric === key)?.value || 0);
     const maxValue = Math.max(1, ...values);
     doc.setDrawColor(...PDF_BORDER);
     doc.setLineWidth(0.3);
     doc.line(x, axisY, x + width, axisY);
-    GRAPH_METRIC_LABELS.forEach(([key, label], i) => {
+    labelSet.graph.forEach(([key, label], i) => {
       const value = values[i];
       const barHeight = (value / maxValue) * plotHeight;
       const slotCenter = x + slotWidth * i + slotWidth / 2;
@@ -1142,7 +1184,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     doc.autoTable({
       startY: 36,
       head: [["Metric", "Total"]],
-      body: SUMMARY_METRIC_LABELS.map(([key, label]) => [label, String(summary.find((r) => r.metric === key)?.value ?? 0)]),
+      body: labelSet.summary.map(([key, label]) => [label, String(summary.find((r) => r.metric === key)?.value ?? 0)]),
       theme: "plain",
       styles: { font: "helvetica", fontSize: 9, cellPadding: 3, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY },
       headStyles: { fillColor: PDF_GOLD, textColor: PDF_NAVY, fontStyle: "bold" },
@@ -1166,13 +1208,13 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     doc.setFontSize(11);
     doc.setTextColor(...PDF_NAVY);
     doc.text("Total outreach since contract signed", 14, y);
-    const totals = CHART_METRIC_LABELS.map(([key]) => sinceSigned.reduce((s, r) => s + (r[key] || 0), 0));
+    const totals = labelSet.chart.map(([key]) => sinceSigned.reduce((s, r) => s + (r[key] || 0), 0));
     doc.autoTable({
       startY: y + 4,
-      head: [["Tab", ...CHART_METRIC_LABELS.map(([, label]) => label)]],
+      head: [["Tab", ...labelSet.chart.map(([, label]) => label)]],
       body: [
         ["Totals", ...totals.map(String)],
-        ...sinceSigned.map((r) => [r.list_name, ...CHART_METRIC_LABELS.map(([key]) => String(r[key] || 0))]),
+        ...sinceSigned.map((r) => [r.list_name, ...labelSet.chart.map(([key]) => String(r[key] || 0))]),
       ],
       theme: "plain",
       styles: { font: "helvetica", fontSize: 7.5, cellPadding: 2.5, lineWidth: 0.1, lineColor: PDF_BORDER, textColor: PDF_NAVY, overflow: "linebreak" },
@@ -1275,10 +1317,10 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       y = doc.lastAutoTable.finalY + 12;
     };
 
-    MILESTONE_TABLE_TITLES.forEach(([type, title]) => {
+    labelSet.milestone.forEach(([type, title]) => {
       addOwnerPdfTable(title, milestoneClients.filter((r) => r.milestone_type === type), SET1_COLUMNS);
     });
-    CONTACTED_TABLE_TITLES.forEach(([category, title]) => {
+    labelSet.contacted.forEach(([category, title]) => {
       addOwnerPdfTable(`${title} for ${periodLabel}`, contactedOwners.filter((r) => r.category === category), SET2_COLUMNS, true);
     });
 

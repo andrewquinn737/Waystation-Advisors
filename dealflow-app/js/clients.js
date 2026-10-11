@@ -148,22 +148,47 @@ const SELLER_PROGRESS_STEPS = [
   { type: "close", label: "Close" },
 ];
 // Buyer order: a longer, 8-step process — Intro call, Contract signed,
-// Client approval, Client meeting, LOI, Secured financing, Due diligence,
+// Client approval, Client meeting, NDA + financials, LOI, Due diligence,
 // Close. (Negotiations was removed as a step — see EVENT_TYPE_LABELS below
 // for why it's still a recognized event_type: existing logged Negotiations
 // events stay visible on the Timeline, just no longer a Progress-tab step
-// or a loggable option going forward.)
+// or a loggable option going forward. Secured financing was replaced by NDA
+// + financials the same way, placed before LOI to match the buyer's real
+// order — see the secured_financing label kept below.)
 const BUYER_PROGRESS_STEPS = [
   { type: "intro_call", label: "Intro call" },
   { type: "contract_signed", label: "Contract signed" },
   { type: "client_approval", label: "Client approval" },
   { type: "client_meeting", label: "Client meeting" },
+  { type: "nda_financials", label: "NDA + financials" },
   { type: "loi", label: "LOI" },
-  { type: "secured_financing", label: "Secured financing" },
   { type: "due_diligence", label: "Due diligence" },
   { type: "close", label: "Close" },
 ];
-function progressStepsFor(clientType) {
+
+// "Questionnaire" tracking flow (clients.tracking_flow = 'questionnaire') —
+// set in the database for ONE buyer only (Arieh Levi) and inherited by every
+// seller attached to him (see the clients_tracking_flow trigger); every other
+// client keeps the lists above. The seller's questionnaire reuses the
+// intro_call event type (so scheduling/confirming/reporting and the
+// "owners agreed" call status all work unchanged) — only its label differs —
+// and "Bid accepted by seller" is a new shared milestone between the two.
+const QUESTIONNAIRE_FLOW = "questionnaire";
+const QUESTIONNAIRE_SELLER_STEPS = [
+  { type: "intro_call", label: "Questionnaire" },
+  { type: "client_approval", label: "Client approval" },
+  { type: "bid_accepted", label: "Bid accepted by seller" },
+  { type: "close", label: "Close" },
+];
+const QUESTIONNAIRE_BUYER_STEPS = [
+  { type: "intro_call", label: "Intro call" },
+  { type: "contract_signed", label: "Contract signed" },
+  { type: "client_approval", label: "Client approval" },
+  { type: "bid_accepted", label: "Bid accepted by seller" },
+  { type: "close", label: "Close" },
+];
+function progressStepsFor(clientType, flow) {
+  if (flow === QUESTIONNAIRE_FLOW) return clientType === "buyer" ? QUESTIONNAIRE_BUYER_STEPS : QUESTIONNAIRE_SELLER_STEPS;
   return clientType === "buyer" ? BUYER_PROGRESS_STEPS : SELLER_PROGRESS_STEPS;
 }
 
@@ -179,14 +204,14 @@ function progressStepsFor(clientType) {
 // ("Negotiations" isn't in the current list on either side (removed as a
 // Progress-tab step) but is included here as it's still a valid, one-side
 // event_type on any pre-existing logged event.)
-const SHARED_EVENT_TYPES = new Set(["client_approval", "client_meeting", "loi", "due_diligence", "close"]);
+const SHARED_EVENT_TYPES = new Set(["client_approval", "client_meeting", "loi", "due_diligence", "close", "bid_accepted"]);
 
 // "general_meeting" and "task" are Timeline-only — they're logged the same
 // way as the PROGRESS_STEPS types, but deliberately excluded from either
 // list above so they never affect the Progress tab's checkmarks. A given
 // event_type string (e.g. "client_approval") always means the same thing on
 // both sides, so one combined label map covers every type from either list.
-const ALL_PROGRESS_STEPS = [...SELLER_PROGRESS_STEPS, ...BUYER_PROGRESS_STEPS].filter(
+const ALL_PROGRESS_STEPS = [...SELLER_PROGRESS_STEPS, ...BUYER_PROGRESS_STEPS, ...QUESTIONNAIRE_SELLER_STEPS].filter(
   (s, i, arr) => arr.findIndex((s2) => s2.type === s.type) === i
 );
 const EVENT_TYPE_LABELS = {
@@ -199,6 +224,9 @@ const EVENT_TYPE_LABELS = {
   // shows a real label on the Timeline instead of falling back to the raw
   // "negotiations" event_type string (see buildTimelineHTML's `|| e.event_type`).
   negotiations: "Negotiations",
+  // Replaced by NDA + financials as a buyer step (see BUYER_PROGRESS_STEPS) —
+  // kept so any already-logged Secured financing event still has a label.
+  secured_financing: "Secured financing",
   ...Object.fromEntries(ALL_PROGRESS_STEPS.map((s) => [s.type, s.label])),
 };
 
@@ -210,7 +238,13 @@ const EVENT_TYPE_LABELS = {
 // loadClientProgressStages() / clientProgressStage() and
 // renderProgressSubmenu() further down.
 function progressStagesFor(clientType) {
-  return [{ value: "no_meetings", label: "No meetings yet" }, ...progressStepsFor(clientType).map((s) => ({ value: s.type, label: s.label }))];
+  const stages = [{ value: "no_meetings", label: "No meetings yet" }, ...progressStepsFor(clientType).map((s) => ({ value: s.type, label: s.label }))];
+  // Questionnaire-flow clients (one buyer and his sellers) have a milestone
+  // the standard lists don't — offered only while at least one is loaded.
+  if (clients.some((c) => c.client_type === clientType && c.tracking_flow === QUESTIONNAIRE_FLOW)) {
+    stages.splice(stages.length - 1, 0, { value: "bid_accepted", label: "Bid accepted by seller" });
+  }
+  return stages;
 }
 const CHECK_SVG = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
 
@@ -263,13 +297,33 @@ const BUYER_MEETING_SUBTYPES = [
   { value: "client_meeting", label: "Client meeting" },
 ];
 const BUYER_CONTRACT_SUBTYPES = BUYER_PROGRESS_STEPS.filter((s) =>
-  ["contract_signed", "client_approval", "loi", "secured_financing", "due_diligence", "close"].includes(s.type)
+  ["contract_signed", "client_approval", "nda_financials", "loi", "due_diligence", "close"].includes(s.type)
 ).map((s) => ({ value: s.type, label: s.label }));
-function meetingSubtypesFor(clientType) {
+// Questionnaire flow (see QUESTIONNAIRE_FLOW): only Questionnaire/Intro call as
+// a meeting type, and the flow's own milestones as contract advancement.
+const QUESTIONNAIRE_SELLER_MEETING_SUBTYPES = [
+  { value: "general_meeting", label: "General" },
+  { value: "intro_call", label: "Questionnaire" },
+];
+const QUESTIONNAIRE_BUYER_MEETING_SUBTYPES = [
+  { value: "general_meeting", label: "General" },
+  { value: "intro_call", label: "Intro call" },
+];
+const QUESTIONNAIRE_SELLER_CONTRACT_SUBTYPES = QUESTIONNAIRE_SELLER_STEPS.filter((s) => s.type !== "intro_call").map((s) => ({ value: s.type, label: s.label }));
+const QUESTIONNAIRE_BUYER_CONTRACT_SUBTYPES = QUESTIONNAIRE_BUYER_STEPS.filter((s) => s.type !== "intro_call").map((s) => ({ value: s.type, label: s.label }));
+function meetingSubtypesFor(clientType, flow) {
+  if (flow === QUESTIONNAIRE_FLOW) return clientType === "buyer" ? QUESTIONNAIRE_BUYER_MEETING_SUBTYPES : QUESTIONNAIRE_SELLER_MEETING_SUBTYPES;
   return clientType === "buyer" ? BUYER_MEETING_SUBTYPES : SELLER_MEETING_SUBTYPES;
 }
-function contractSubtypesFor(clientType) {
+function contractSubtypesFor(clientType, flow) {
+  if (flow === QUESTIONNAIRE_FLOW) return clientType === "buyer" ? QUESTIONNAIRE_BUYER_CONTRACT_SUBTYPES : QUESTIONNAIRE_SELLER_CONTRACT_SUBTYPES;
   return clientType === "buyer" ? BUYER_CONTRACT_SUBTYPES : SELLER_CONTRACT_SUBTYPES;
+}
+
+// A seller's questionnaire IS its intro_call event — same type, relabelled.
+function eventLabelFor(eventType, client) {
+  if (eventType === "intro_call" && client?.client_type === "seller" && client?.tracking_flow === QUESTIONNAIRE_FLOW) return "Questionnaire";
+  return EVENT_TYPE_LABELS[eventType] || eventType;
 }
 
 // "Buyers visible" (see menuBuyersVisibleBtn wiring further down) gets its
@@ -543,7 +597,7 @@ async function loadClients() {
 // OWN side's step list (seller vs buyer), since the two lists differ.
 let clientProgressStages = new Map();
 async function loadClientProgressStages() {
-  const clientTypeById = new Map(clients.map((c) => [c.id, c.client_type]));
+  const clientById = new Map(clients.map((c) => [c.id, c]));
   const { data, error } = await supabase
     .from("client_events")
     .select("client_id, event_type")
@@ -552,7 +606,8 @@ async function loadClientProgressStages() {
   if (error) return; // best-effort — Progress filter just won't narrow anything down
   const next = new Map();
   (data || []).forEach((row) => {
-    const stepIndex = Object.fromEntries(progressStepsFor(clientTypeById.get(row.client_id)).map((s, i) => [s.type, i]));
+    const owner = clientById.get(row.client_id);
+    const stepIndex = Object.fromEntries(progressStepsFor(owner?.client_type, owner?.tracking_flow).map((s, i) => [s.type, i]));
     const idx = stepIndex[row.event_type];
     if (idx === undefined) return; // not one of this client's own side's milestones
     const currentType = next.get(row.client_id);
@@ -1120,7 +1175,7 @@ function buildClientViewHTML(client) {
 // ---------------------------------------------------------------------------
 function buildProgressHTML(events) {
   const doneTypes = new Set(events.filter((e) => e.confirmed).map((e) => e.event_type));
-  const steps = progressStepsFor(currentClient?.client_type);
+  const steps = progressStepsFor(currentClient?.client_type, currentClient?.tracking_flow);
 
   // "Buyers/Sellers met with" — the counterpart names from every CONFIRMED,
   // not-in-the-future Client meeting (see logSharedClientEvent/openCounterpartPicker
@@ -1233,7 +1288,7 @@ function timelineEventDateStr(e) {
 // have several sellers moving through the same stage at once and the plain
 // label alone doesn't say which one this row is about.
 function eventTypeDisplay(e) {
-  const label = EVENT_TYPE_LABELS[e.event_type] || e.event_type;
+  const label = eventLabelFor(e.event_type, currentClient);
   if (e.event_type === "client_meeting" && e.details?.counterpart_name) {
     return `Client meeting with ${e.details.counterpart_name}`;
   }
@@ -1292,7 +1347,7 @@ function compareEventOrder(a, b) {
 // contract advancement on the other's — see meetingSubtypesFor/
 // contractSubtypesFor), so legacy rows of those types default to "meeting"
 // below rather than risk hiding an already-written report.
-const ADVANCEMENT_ONLY_TYPES = new Set(["nda_financials", "contract_signed", "secured_financing"]);
+const ADVANCEMENT_ONLY_TYPES = new Set(["nda_financials", "contract_signed", "secured_financing", "bid_accepted"]);
 function eventCategory(e) {
   if (e.details?.category) return e.details.category;
   if (ADVANCEMENT_ONLY_TYPES.has(e.event_type)) return "contract_advancement";
@@ -1479,7 +1534,7 @@ function wireTimelineTab() {
 // client_events row directly.
 // ---------------------------------------------------------------------------
 function openTimelineAddFlow(category) {
-  openEventDetailsModal(category, currentClient.client_type, ({ eventDate, time, timezone, subtype, taskDescription }) => {
+  openEventDetailsModal(category, currentClient.client_type, currentClient.tracking_flow, ({ eventDate, time, timezone, subtype, taskDescription }) => {
     const details = time ? { time, timezone } : null;
     if (category === "task") {
       logClientEvent("task", eventDate, { ...(details || {}), task_description: taskDescription }, category);
@@ -1508,7 +1563,7 @@ function openTimelineAddFlow(category) {
 // description field. Same show/confirm/cancel/cleanup shape as
 // openConfirmModal-style helpers elsewhere in the app.
 // ---------------------------------------------------------------------------
-function openEventDetailsModal(category, clientType, onConfirm) {
+function openEventDetailsModal(category, clientType, flow, onConfirm) {
   const modal = els.eventDateModal;
   const input = els.eventDateInput;
   const timeWrap = els.eventTimeWrap;
@@ -1539,7 +1594,7 @@ function openEventDetailsModal(category, clientType, onConfirm) {
 
   const showSubtype = category === "meeting" || category === "contract_advancement";
   subtypeWrap.classList.toggle("hidden", !showSubtype);
-  const subtypeOptions = category === "meeting" ? meetingSubtypesFor(clientType) : contractSubtypesFor(clientType);
+  const subtypeOptions = category === "meeting" ? meetingSubtypesFor(clientType, flow) : contractSubtypesFor(clientType, flow);
   if (showSubtype) {
     subtypeSelect.innerHTML = subtypeOptions.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join("");
     subtypeSelect.value = subtypeOptions[0].value;
@@ -2159,7 +2214,7 @@ function openEventReportModal(existingReport, onConfirm) {
 // client_meeting, etc.) is checked against THIS side's own progress list —
 // exactly matching how Progress checkmarks are already computed per-client.
 function firstUnconfirmedPriorStepLabel(eventType) {
-  const steps = progressStepsFor(currentClient.client_type);
+  const steps = progressStepsFor(currentClient.client_type, currentClient.tracking_flow);
   const idx = steps.findIndex((s) => s.type === eventType);
   if (idx <= 0) return null;
   const confirmedTypes = new Set(currentClientEvents.filter((e) => e.confirmed).map((e) => e.event_type));
