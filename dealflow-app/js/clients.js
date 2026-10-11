@@ -180,9 +180,14 @@ const QUESTIONNAIRE_SELLER_STEPS = [
   { type: "bid_accepted", label: "Bid accepted by seller" },
   { type: "close", label: "Close" },
 ];
+// Arieh's own list: his own intro call, then (once questionnaires are coming
+// back from his sellers) a "Questionnaire" step of his own — a one-sided
+// event of its own type (not a mirror of any one seller's intro_call), logged
+// under Meeting like the sellers' is.
 const QUESTIONNAIRE_BUYER_STEPS = [
   { type: "intro_call", label: "Intro call" },
   { type: "contract_signed", label: "Contract signed" },
+  { type: "questionnaire", label: "Questionnaire" },
   { type: "client_approval", label: "Client approval" },
   { type: "bid_accepted", label: "Bid accepted by seller" },
   { type: "close", label: "Close" },
@@ -211,7 +216,7 @@ const SHARED_EVENT_TYPES = new Set(["client_approval", "client_meeting", "loi", 
 // list above so they never affect the Progress tab's checkmarks. A given
 // event_type string (e.g. "client_approval") always means the same thing on
 // both sides, so one combined label map covers every type from either list.
-const ALL_PROGRESS_STEPS = [...SELLER_PROGRESS_STEPS, ...BUYER_PROGRESS_STEPS, ...QUESTIONNAIRE_SELLER_STEPS].filter(
+const ALL_PROGRESS_STEPS = [...SELLER_PROGRESS_STEPS, ...BUYER_PROGRESS_STEPS, ...QUESTIONNAIRE_SELLER_STEPS, ...QUESTIONNAIRE_BUYER_STEPS].filter(
   (s, i, arr) => arr.findIndex((s2) => s2.type === s.type) === i
 );
 const EVENT_TYPE_LABELS = {
@@ -243,6 +248,10 @@ function progressStagesFor(clientType) {
   // the standard lists don't — offered only while at least one is loaded.
   if (clients.some((c) => c.client_type === clientType && c.tracking_flow === QUESTIONNAIRE_FLOW)) {
     stages.splice(stages.length - 1, 0, { value: "bid_accepted", label: "Bid accepted by seller" });
+    if (clientType === "buyer") {
+      const at = stages.findIndex((s) => s.value === "client_approval");
+      stages.splice(at, 0, { value: "questionnaire", label: "Questionnaire" });
+    }
   }
   return stages;
 }
@@ -308,9 +317,10 @@ const QUESTIONNAIRE_SELLER_MEETING_SUBTYPES = [
 const QUESTIONNAIRE_BUYER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
   { value: "intro_call", label: "Intro call" },
+  { value: "questionnaire", label: "Questionnaire" },
 ];
 const QUESTIONNAIRE_SELLER_CONTRACT_SUBTYPES = QUESTIONNAIRE_SELLER_STEPS.filter((s) => s.type !== "intro_call").map((s) => ({ value: s.type, label: s.label }));
-const QUESTIONNAIRE_BUYER_CONTRACT_SUBTYPES = QUESTIONNAIRE_BUYER_STEPS.filter((s) => s.type !== "intro_call").map((s) => ({ value: s.type, label: s.label }));
+const QUESTIONNAIRE_BUYER_CONTRACT_SUBTYPES = QUESTIONNAIRE_BUYER_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "questionnaire").map((s) => ({ value: s.type, label: s.label }));
 function meetingSubtypesFor(clientType, flow) {
   if (flow === QUESTIONNAIRE_FLOW) return clientType === "buyer" ? QUESTIONNAIRE_BUYER_MEETING_SUBTYPES : QUESTIONNAIRE_SELLER_MEETING_SUBTYPES;
   return clientType === "buyer" ? BUYER_MEETING_SUBTYPES : SELLER_MEETING_SUBTYPES;

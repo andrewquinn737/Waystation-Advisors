@@ -1940,6 +1940,7 @@ const UPCOMING_EVENT_TYPE_LABELS = {
   nda_financials: "NDA + financials",
   client_approval: "Client approval",
   bid_accepted: "Bid accepted by seller",
+  questionnaire: "Questionnaire",
   client_meeting: "Client meeting",
   loi: "LOI",
   due_diligence: "Due diligence",
