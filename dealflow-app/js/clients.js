@@ -1284,7 +1284,10 @@ function timelineEventDateStr(e) {
   // already shows it correctly converted to whichever device is viewing it
   // — no separate details.time read needed. A bare date with no time shows
   // "No set time" instead of silently implying midnight/noon.
-  if (!e.details?.time) return `${dateStr}, No set time`;
+  // The auto-inserted "Client created" row is the exception: its event_date is
+  // the exact moment the client was created (see create_client_created_event),
+  // so it always shows that real time instead of "No set time".
+  if (!e.details?.time && e.event_type !== "created") return `${dateStr}, No set time`;
   const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${dateStr}, ${timeStr}`;
 }
