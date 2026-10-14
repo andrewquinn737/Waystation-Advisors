@@ -1220,3 +1220,14 @@ $$;
 -- Buyers' progress list also swapped Secured financing for NDA + financials
 -- (before LOI) — front end only (js/clients.js BUYER_PROGRESS_STEPS).
 -- ============================================================================
+
+-- ============================================================================
+-- INTAKE FORM for the questionnaire-flow buyer's sellers — applied as
+-- migration "questionnaire_intake_form_columns" + edge function intake-submit.
+-- clients.intake_form (jsonb answers), intake_submitted_at, intake_notified_at.
+-- Submitting the form (js/intakeForm.js) completes the client's intro call and
+-- intake-submit posts "New Lead: ..." to Slack via the incoming-webhook URL in
+-- app_secrets ('slack_webhook_url', set by hand in the dashboard — never
+-- through the app). get_questionnaire_buyer_ids() lets Dials recognise tabs
+-- assigned to such a buyer. Airtable push: not wired up yet.
+-- ============================================================================

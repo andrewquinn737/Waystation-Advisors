@@ -20,6 +20,8 @@ import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotic
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
+import { openIntakeForm, intakeDefaults, submitIntakeForm } from "./intakeForm.js";
+import { showNotice } from "./notice.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -244,10 +246,18 @@ const EVENT_TYPE_LABELS = {
 // renderProgressSubmenu() further down.
 function progressStagesFor(clientType) {
   const stages = [{ value: "no_meetings", label: "No meetings yet" }, ...progressStepsFor(clientType).map((s) => ({ value: s.type, label: s.label }))];
-  // Questionnaire-flow clients (one buyer and his sellers) have a milestone
-  // the standard lists don't — offered only while at least one is loaded.
+  // Questionnaire-flow clients (one buyer and his sellers) fit into the same
+  // filter options: a seller's completed questionnaire shows under "Intro
+  // call", and "Bid accepted by seller" takes the place of "LOI" (see
+  // filterStageFor). Labels say so while any such client is loaded; Arieh
+  // himself also gets a Questionnaire option of his own.
   if (clients.some((c) => c.client_type === clientType && c.tracking_flow === QUESTIONNAIRE_FLOW)) {
-    stages.splice(stages.length - 1, 0, { value: "bid_accepted", label: "Bid accepted by seller" });
+    const relabel = (value, label) => {
+      const st = stages.find((s) => s.value === value);
+      if (st) st.label = label;
+    };
+    relabel("loi", "LOI / Bid accepted by seller");
+    if (clientType === "seller") relabel("intro_call", "Intro call / Questionnaire completed");
     if (clientType === "buyer") {
       const at = stages.findIndex((s) => s.value === "client_approval");
       stages.splice(at, 0, { value: "questionnaire", label: "Questionnaire" });
@@ -592,6 +602,9 @@ async function loadClients() {
   cacheSet(cacheKey, clients);
   await loadClientProgressStages();
   await loadSourceDialCompanies();
+  // The filter's option labels depend on which clients are loaded (see
+  // progressStagesFor), so refresh them now that the list has changed.
+  renderProgressSubmenu();
   renderTable();
 }
 
@@ -615,16 +628,25 @@ async function loadClientProgressStages() {
     .in("event_type", ALL_PROGRESS_STEPS.map((s) => s.type));
   if (error) return; // best-effort — Progress filter just won't narrow anything down
   const next = new Map();
+  const furthest = new Map(); // client_id -> furthest milestone type in its OWN list
   (data || []).forEach((row) => {
     const owner = clientById.get(row.client_id);
     const stepIndex = Object.fromEntries(progressStepsFor(owner?.client_type, owner?.tracking_flow).map((s, i) => [s.type, i]));
     const idx = stepIndex[row.event_type];
     if (idx === undefined) return; // not one of this client's own side's milestones
-    const currentType = next.get(row.client_id);
+    const currentType = furthest.get(row.client_id);
     const currentIdx = currentType !== undefined ? stepIndex[currentType] : -1;
-    if (idx > currentIdx) next.set(row.client_id, row.event_type);
+    if (idx > currentIdx) furthest.set(row.client_id, row.event_type);
   });
+  furthest.forEach((type, clientId) => next.set(clientId, filterStageFor(clientById.get(clientId), type)));
   clientProgressStages = next;
+}
+// Which Progress-filter option a questionnaire-flow client's milestone counts
+// under: "Bid accepted by seller" stands in for LOI; everything else keeps its
+// own name (a seller's Questionnaire is the intro_call event, so it already
+// lands under "Intro call").
+function filterStageFor(client, type) {
+  return client?.tracking_flow === QUESTIONNAIRE_FLOW && type === "bid_accepted" ? "loi" : type;
 }
 function clientProgressStage(clientId) {
   return clientProgressStages.get(clientId) || "no_meetings";
@@ -1511,6 +1533,12 @@ function wireTimelineTab() {
         toggleClientEventConfirmed(eventId, false);
       } else {
         const existing = currentClientEvents.find((ev) => ev.id === eventId);
+        // Questionnaire-flow sellers: the intro call is checked off by
+        // completing the form, not by writing a report.
+        if (existing?.event_type === "intro_call" && isIntakeClient(currentClient)) {
+          openClientIntakeForm();
+          return;
+        }
         // Only meeting-category events (see eventIsMeeting) ask for a
         // report — a contract advancement or task just confirms directly,
         // nothing to write up.
@@ -2387,7 +2415,12 @@ function renderSubtabsBar() {
   if (!show) return;
   // Brokers get Profile + Referrals; sellers and buyers get Profile +
   // Progress + Timeline.
-  const tabsForClient = currentClient.client_type === "broker" ? ["profile", "referrals"] : ["profile", "progress", "timeline"];
+  const tabsForClient =
+    currentClient.client_type === "broker"
+      ? ["profile", "referrals"]
+      : isIntakeClient(currentClient)
+        ? ["profile", "progress", "timeline", "form"]
+        : ["profile", "progress", "timeline"];
   els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
     btn.classList.toggle("hidden", !tabsForClient.includes(btn.dataset.tab));
     btn.classList.toggle("active", btn.dataset.tab === currentSubTab);
@@ -2396,10 +2429,61 @@ function renderSubtabsBar() {
 
 els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
   btn.addEventListener("click", () => {
+    // "Form" is a popup, not a tab — the page underneath stays as it was.
+    if (btn.dataset.tab === "form") {
+      openClientIntakeForm();
+      return;
+    }
     currentSubTab = btn.dataset.tab;
     renderModalBody();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Intro call form (questionnaire-flow sellers — see js/intakeForm.js). Opened
+// from the "Form" subtab and from the Timeline: for these sellers an intro
+// call can only be checked off by completing the form, so the confirm circle
+// opens this instead of the usual report box. Submitting completes the intro
+// call (as of now) and posts the lead to Slack.
+// ---------------------------------------------------------------------------
+function isIntakeClient(c) {
+  return !!c && c.client_type === "seller" && c.tracking_flow === QUESTIONNAIRE_FLOW;
+}
+
+function openClientIntakeForm() {
+  const client = currentClient;
+  if (!isIntakeClient(client)) return;
+  openIntakeForm({
+    title: `${client.full_name || "Client"} — intro call form`,
+    note: client.intake_submitted_at
+      ? null
+      : "Completing and submitting this form checks off the intro call. Fill out at least the four key questions to save.",
+    data: intakeDefaults(client, client.intake_form),
+    submittedAt: client.intake_submitted_at,
+    notified: !!client.intake_notified_at,
+    onSave: async (values) => {
+      const { data, error } = await supabase.from("clients").update({ intake_form: values }).eq("id", client.id).select().single();
+      if (error) throw error;
+      Object.assign(currentClient, data);
+    },
+    onSubmit: async (values) => {
+      const result = await submitIntakeForm(client.id, values, profile);
+      const { data } = await supabase.from("clients").select("*").eq("id", client.id).maybeSingle();
+      if (data) Object.assign(currentClient, data);
+      await loadClientEvents();
+      await loadClientProgressStages();
+      renderModalBody();
+      if (result.slack !== "sent" && result.slack !== "already_sent") {
+        showNotice(
+          result.slack === "not_configured"
+            ? "The form was submitted and the intro call completed, but Slack isn't connected yet, so the lead wasn't posted."
+            : `The form was submitted and the intro call completed, but posting to Slack failed: ${result.error || "unknown error"}. Open Form and use "Send to Slack again".`,
+          { title: "Lead not posted to Slack" }
+        );
+      }
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Validation

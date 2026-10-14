@@ -1928,3 +1928,25 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 @media (max-width: 720px) {
   html.is-mobile-device .referral-add-btn { right: 18px; bottom: 60px; }
 }
+
+/* ---- Intro call form (questionnaire-flow sellers) — js/intakeForm.js ---- */
+.intake-form-modal { max-width: 560px; }
+.intake-form-modal .help-text { margin: 2px 0 6px; }
+.intake-section-title { margin: 18px 0 2px; font-size: 14px; border-top: 1px solid var(--border); padding-top: 14px; }
+.intake-form-modal h2 + .help-text + .intake-section-title,
+.intake-form-modal h2 + .intake-section-title { border-top: none; padding-top: 0; }
+.intake-field label { margin: 10px 0 4px; }
+.intake-key {
+  display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: #fff6e0; color: var(--warn, #b7791f); vertical-align: middle;
+}
+.intake-checks { display: flex; flex-direction: column; gap: 2px; }
+.intake-form-modal label.intake-check { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 0; font-weight: 400; font-size: 14px; }
+.intake-form-modal label.intake-check input { width: auto; margin: 0; flex-shrink: 0; }
+.intake-submitted { color: var(--success, #1f8a4c); font-weight: 600; }
+.intake-actions { justify-content: flex-end; }
+.intake-submit-row { justify-content: flex-end; margin-top: 8px; }
+.intake-submit-row .btn { width: 100%; }
+.q-route { margin: 14px 0; }
+.q-route .btn { width: 100%; }
+.q-actions { justify-content: flex-end; }

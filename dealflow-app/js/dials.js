@@ -23,6 +23,8 @@ import { createNotification, wireNotificationsToggle } from "./notifications.js"
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
+import { openIntakeForm, intakeDefaults, meetsMinimum, isIntakeComplete, countMinimum, submitIntakeForm } from "./intakeForm.js";
+import { showNotice } from "./notice.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -341,7 +343,16 @@ wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profil
 // against its own DOM elements, same pattern as wireNotificationsToggle).
 wireAdvancedSettingsPopup({ profile, els, closePageHeaderMenu });
 
-els.introCallPopupClose.addEventListener("click", () => els.introCallPopup.classList.add("hidden"));
+// Set while the Calendly step of the questionnaire intro popup (see
+// openQuestionnaireIntroPopup) is open, so closing it without booking brings
+// that popup back instead of dropping the user on the dial.
+let onIntroCallPopupClosed = null;
+els.introCallPopupClose.addEventListener("click", () => {
+  els.introCallPopup.classList.add("hidden");
+  const back = onIntroCallPopupClosed;
+  onIntroCallPopupClosed = null;
+  if (back) back();
+});
 
 function openConfirmDelete(onConfirm) {
   openConfirmModal(els.confirmDeleteModal, "confirmDeleteYesBtn", "confirmDeleteNoBtn", onConfirm);
@@ -2858,7 +2869,7 @@ function renderDialModal() {
             showScheduleIntroBtn
               ? `
           <div class="dial-schedule-intro-col">
-            <button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">Schedule intro call</button>
+            <button type="button" class="dial-schedule-intro-btn" id="scheduleIntroCallFromDialBtn">${isQuestionnaireDial(dial) ? "Intro call / form" : "Schedule intro call"}</button>
             ${buildContactedTodayDisplayHTML(dial)}
           </div>
           `
@@ -3261,6 +3272,13 @@ async function handleScheduleIntroCallFromDial(dial) {
     return;
   }
 
+  // The questionnaire-flow buyer's tabs work differently: a popup offering
+  // "Schedule intro call" or "Complete the form" before the client is created.
+  if (isQuestionnaireDial(dial)) {
+    openQuestionnaireIntroPopup(dial);
+    return;
+  }
+
   // Team leads/admins/independent leads also get "Intro completed during outreach" under the
   // Open Calendly button — for an intro call they already held live during
   // the outreach call itself, so there's nothing to book (see
@@ -3389,7 +3407,7 @@ async function createClientFromDial(dial) {
 // its own client + intro_call event for what was really only one booking.
 let introCallTimeConfirmCleanup = null;
 
-function openIntroCallTimeConfirmModal(dial) {
+function openIntroCallTimeConfirmModal(dial, { onConfirmed } = {}) {
   introCallTimeConfirmCleanup?.();
   introCallTimeConfirmCleanup = null;
 
@@ -3423,6 +3441,13 @@ function openIntroCallTimeConfirmModal(dial) {
     if (!val || !time) {
       errEl.textContent = "Please enter both a date and time.";
       errEl.classList.remove("hidden");
+      return;
+    }
+    // Questionnaire flow (see openQuestionnaireIntroPopup): just hand the
+    // chosen time back — the client is created later, from that popup.
+    if (onConfirmed) {
+      onConfirmed({ val, time, timezone, eventDate: zonedTimeToUtcIso(val, time, timezone) });
+      cleanup();
       return;
     }
     confirmBtn.disabled = true;
@@ -3463,6 +3488,194 @@ function openIntroCallTimeConfirmModal(dial) {
   };
   confirmBtn.addEventListener("click", onConfirmClick);
   introCallTimeConfirmCleanup = cleanup;
+}
+
+// ---------------------------------------------------------------------------
+// Questionnaire-flow buyer's tabs (the one buyer whose sellers are companies
+// we source DATA from — see clients.tracking_flow in js/clients.js). Instead
+// of the usual Calendly -> confirm time -> client created, "Schedule intro
+// call" opens this popup with two routes — schedule the call, or fill out the
+// form (js/intakeForm.js) — and a "Create client" button at the bottom that
+// turns on once EITHER is done (a call booked, or the form's 4 key questions
+// answered). Nothing exists in the database until "Create client"; until then
+// the chosen time / answers just live in questionnaireDrafts (per dial, in
+// memory). Submitting the form from here is remembered and carried out right
+// after the client is created: that completes the intro call and posts to Slack.
+// ---------------------------------------------------------------------------
+let questionnaireBuyerIds = new Set();
+try {
+  const { data } = await supabase.rpc("get_questionnaire_buyer_ids");
+  questionnaireBuyerIds = new Set(data || []);
+} catch {
+  // best-effort — dials just fall back to the normal intro call flow
+}
+function isQuestionnaireDial(dial) {
+  if (currentType !== "seller" || !questionnaireBuyerIds.size) return false;
+  const buyerId = allLists.find((l) => l.id === dial.list_id)?.buyer_id;
+  return !!buyerId && questionnaireBuyerIds.has(buyerId);
+}
+
+const questionnaireDrafts = new Map(); // dial id -> { schedule, form, submitRequested }
+let questionnairePopupEl = null;
+
+function ensureQuestionnairePopup() {
+  if (questionnairePopupEl) return;
+  questionnairePopupEl = document.createElement("div");
+  questionnairePopupEl.className = "modal-backdrop hidden";
+  questionnairePopupEl.id = "questionnaireIntroPopup";
+  questionnairePopupEl.style.zIndex = "120";
+  questionnairePopupEl.innerHTML = `<div class="modal"></div>`;
+  document.body.appendChild(questionnairePopupEl);
+}
+
+function hideQuestionnairePopup() {
+  questionnairePopupEl.classList.add("hidden");
+  unlockPageScroll();
+}
+
+function openQuestionnaireIntroPopup(dial) {
+  ensureQuestionnairePopup();
+  if (!questionnaireDrafts.has(dial.id)) questionnaireDrafts.set(dial.id, { schedule: null, form: null, submitRequested: false });
+  const state = questionnaireDrafts.get(dial.id);
+  const box = questionnairePopupEl.querySelector(".modal");
+
+  const render = () => {
+    const scheduledText = state.schedule
+      ? `Call scheduled for ${new Date(state.schedule.eventDate).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}.`
+      : "No call scheduled yet.";
+    const formText = !state.form
+      ? "Form not started."
+      : state.submitRequested
+        ? "Form complete — it will be submitted when you create the client."
+        : meetsMinimum(state.form)
+          ? `Form saved (${isIntakeComplete(state.form) ? "all fields filled in" : "key questions answered"}).`
+          : `Form started (${countMinimum(state.form)} of 4 key questions).`;
+    const canCreate = !!state.schedule || (!!state.form && meetsMinimum(state.form));
+    box.innerHTML = `
+      <h2>${escapeHtml(dialDisplayName(dial))}</h2>
+      <p class="help-text">Schedule an intro call, or fill out the form (at least the four key questions). Then create the client.</p>
+      <div class="error-msg hidden" id="qError"></div>
+      <div class="q-route">
+        <button type="button" class="btn yellow" id="qScheduleBtn">Schedule intro call</button>
+        <div class="help-text">${escapeHtml(scheduledText)}</div>
+      </div>
+      <div class="q-route">
+        <button type="button" class="btn" id="qFormBtn">Complete the form</button>
+        <div class="help-text">${escapeHtml(formText)}</div>
+      </div>
+      <div class="form-actions q-actions">
+        <button type="button" class="btn secondary" id="qCloseBtn">Close</button>
+        <button type="button" class="btn" id="qCreateBtn" ${canCreate ? "" : "disabled"}>Create client</button>
+      </div>`;
+    box.querySelector("#qCloseBtn").addEventListener("click", hideQuestionnairePopup);
+    box.querySelector("#qScheduleBtn").addEventListener("click", startSchedule);
+    box.querySelector("#qFormBtn").addEventListener("click", startForm);
+    box.querySelector("#qCreateBtn").addEventListener("click", createClient);
+  };
+
+  const show = () => {
+    render();
+    questionnairePopupEl.classList.remove("hidden");
+    lockPageScroll();
+  };
+
+  // Calendly, then pick the time that was booked, then back here.
+  const startSchedule = () => {
+    hideQuestionnairePopup();
+    els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({});
+    els.introCallPopup.classList.remove("hidden");
+    onIntroCallPopupClosed = show;
+    wireIntroCallForm(els.introCallPopupBody, {
+      profile,
+      prefill: { full_name: dial.full_name || "", email: dial.email || "", client_type: currentType },
+      onCalendlyClosed: async () => {
+        els.introCallPopup.classList.add("hidden");
+        onIntroCallPopupClosed = null;
+        openIntroCallTimeConfirmModal(dial, {
+          onConfirmed: (sched) => {
+            state.schedule = sched;
+            show();
+          },
+        });
+      },
+    });
+  };
+
+  const startForm = () => {
+    hideQuestionnairePopup();
+    openIntakeForm({
+      title: "Intro call form",
+      note: "Fill out at least the four key questions. When everything is filled in, you can submit it.",
+      data: intakeDefaults(
+        { company_name: dial.company_name, website: dial.website, full_name: dial.full_name, email: dial.email },
+        state.form
+      ),
+      onSave: async (values) => {
+        state.form = values;
+        state.submitRequested = false;
+      },
+      onSubmit: async (values) => {
+        state.form = values;
+        state.submitRequested = true;
+      },
+      onClose: show,
+    });
+  };
+
+  const createClient = async () => {
+    const errEl = box.querySelector("#qError");
+    const btn = box.querySelector("#qCreateBtn");
+    btn.disabled = true;
+    errEl.classList.add("hidden");
+    let slackResult = null;
+    try {
+      const client = await createClientFromDial(dial);
+      if (state.form) {
+        const { error } = await supabase.from("clients").update({ intake_form: state.form }).eq("id", client.id);
+        if (error) throw error;
+      }
+      // The client's intro call: the booked slot, or (form only) one dated now
+      // for the form to complete.
+      const { data: existing, error: exErr } = await supabase
+        .from("client_events")
+        .select("id")
+        .eq("client_id", client.id)
+        .eq("event_type", "intro_call");
+      if (exErr) throw exErr;
+      if (!existing?.length) {
+        const row = state.schedule
+          ? { event_date: state.schedule.eventDate, details: { via: "calendly", time: state.schedule.time, timezone: state.schedule.timezone } }
+          : { event_date: new Date().toISOString(), details: { via: "form" } };
+        const { error } = await supabase.from("client_events").insert({ client_id: client.id, event_type: "intro_call", created_by: profile.id, ...row });
+        if (error) throw error;
+        // A booked call was already credited when it was booked (see
+        // wireIntroCallForm); a form-only intro isn't, so credit it here.
+        if (!state.schedule) await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
+      }
+      if (state.submitRequested && state.form && isIntakeComplete(state.form)) {
+        slackResult = await submitIntakeForm(client.id, state.form, profile);
+      }
+    } catch (err) {
+      errEl.textContent = err.message || String(err);
+      errEl.classList.remove("hidden");
+      btn.disabled = false;
+      return;
+    }
+    questionnaireDrafts.delete(dial.id);
+    dial._scheduleIntroCallUsed = true;
+    hideQuestionnairePopup();
+    renderDialModal();
+    if (slackResult && slackResult.slack !== "sent") {
+      showNotice(
+        slackResult.slack === "not_configured"
+          ? "The client was created and the intro call completed, but Slack isn't connected yet, so the lead wasn't posted."
+          : `The client was created and the intro call completed, but posting to Slack failed: ${slackResult.error || "unknown error"}. Open the client's Form to try again.`,
+        { title: "Lead not posted to Slack" }
+      );
+    }
+  };
+
+  show();
 }
 
 // ---------------------------------------------------------------------------
