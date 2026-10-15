@@ -2,6 +2,7 @@
 // dials.js, both in the detailed read-only field rows (rfContact) and in the
 // compact list/card rows (contactActionIcons).
 
+import "./granolaCalling.js";
 import { showConnectEmailNotice } from "./notice.js";
 import { escapeHtml } from "./clientForm.js";
 import { openQuickSend } from "./quickSend.js";

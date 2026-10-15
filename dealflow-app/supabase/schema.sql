@@ -1243,3 +1243,11 @@ $$;
 -- configured destination has it). Secrets, set by hand in app_secrets:
 -- slack_webhook_url, sheet_webhook_url, sheet_webhook_token.
 -- ============================================================================
+
+-- ============================================================================
+-- GRANOLA CALLING — applied as migration "profiles_granola_calling".
+-- profiles.granola_calling_enabled (default false): per-user setting in the
+-- Dials settings menu. When on, call icons copy the number and open Granola
+-- instead of dialing (js/granolaCalling.js). Granola has no way to start a
+-- call from a link, so the user pastes the number in Granola's own dialer.
+-- ============================================================================

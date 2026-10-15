@@ -20,6 +20,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
+import { wireGranolaCallingToggle } from "./granolaCalling.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
@@ -184,6 +185,8 @@ const els = {
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
+  menuGranolaBtn: document.getElementById("menuGranolaBtn"),
+  granolaLabel: document.getElementById("granolaLabel"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -336,6 +339,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+wireGranolaCallingToggle(els.menuGranolaBtn, els.granolaLabel, profile);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
