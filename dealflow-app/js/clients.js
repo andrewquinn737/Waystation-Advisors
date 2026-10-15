@@ -20,7 +20,7 @@ import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotic
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
-import { openIntakeForm, intakeDefaults, submitIntakeForm } from "./intakeForm.js";
+import { openIntakeForm, intakeDefaults, submitIntakeForm, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 
 const session = await requireSession();
@@ -2473,14 +2473,8 @@ function openClientIntakeForm() {
       await loadClientEvents();
       await loadClientProgressStages();
       renderModalBody();
-      if (result.slack !== "sent" && result.slack !== "already_sent") {
-        showNotice(
-          result.slack === "not_configured"
-            ? "The form was submitted and the intro call completed, but Slack isn't connected yet, so the lead wasn't posted."
-            : `The form was submitted and the intro call completed, but posting to Slack failed: ${result.error || "unknown error"}. Open Form and use "Send to Slack again".`,
-          { title: "Lead not posted to Slack" }
-        );
-      }
+      const problem = describeDelivery(result);
+      if (problem) showNotice(`The form was submitted and the intro call completed, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
     },
   });
 }

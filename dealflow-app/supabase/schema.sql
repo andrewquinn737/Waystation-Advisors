@@ -1231,3 +1231,15 @@ $$;
 -- through the app). get_questionnaire_buyer_ids() lets Dials recognise tabs
 -- assigned to such a buyer. Airtable push: not wired up yet.
 -- ============================================================================
+
+-- ============================================================================
+-- INTAKE FORM v2 — applied as migration "intake_form_sheet_destination".
+-- The form's fields are now the columns of the leads Google Sheet (plus the
+-- app-only willing/able-to-sell questions, never published) — see
+-- js/intakeForm.js. The intake-submit edge function sends each submitted lead
+-- to Slack AND to that sheet (through the Apps Script web app in
+-- supabase/google-sheet-lead-intake.gs), stamping each destination separately
+-- (clients.intake_slack_at / intake_sheet_at; intake_notified_at = every
+-- configured destination has it). Secrets, set by hand in app_secrets:
+-- slack_webhook_url, sheet_webhook_url, sheet_webhook_token.
+-- ============================================================================

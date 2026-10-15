@@ -23,7 +23,7 @@ import { createNotification, wireNotificationsToggle } from "./notifications.js"
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
-import { openIntakeForm, intakeDefaults, meetsMinimum, isIntakeComplete, countMinimum, submitIntakeForm } from "./intakeForm.js";
+import { openIntakeForm, intakeDefaults, meetsMinimum, isIntakeComplete, countMinimum, submitIntakeForm, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 
 const session = await requireSession();
@@ -3607,7 +3607,14 @@ function openQuestionnaireIntroPopup(dial) {
       title: "Intro call form",
       note: "Fill out at least the four key questions. When everything is filled in, you can submit it.",
       data: intakeDefaults(
-        { company_name: dial.company_name, website: dial.website, full_name: dial.full_name, email: dial.email },
+        {
+          company_name: dial.company_name,
+          website: dial.website,
+          full_name: dial.full_name,
+          email: dial.email,
+          mobile_phone: dial.mobile_phone,
+          company_phone: dial.company_phone,
+        },
         state.form
       ),
       onSave: async (values) => {
@@ -3665,14 +3672,8 @@ function openQuestionnaireIntroPopup(dial) {
     dial._scheduleIntroCallUsed = true;
     hideQuestionnairePopup();
     renderDialModal();
-    if (slackResult && slackResult.slack !== "sent") {
-      showNotice(
-        slackResult.slack === "not_configured"
-          ? "The client was created and the intro call completed, but Slack isn't connected yet, so the lead wasn't posted."
-          : `The client was created and the intro call completed, but posting to Slack failed: ${slackResult.error || "unknown error"}. Open the client's Form to try again.`,
-        { title: "Lead not posted to Slack" }
-      );
-    }
+    const problem = slackResult && describeDelivery(slackResult);
+    if (problem) showNotice(`The client was created and the intro call completed, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
   };
 
   show();

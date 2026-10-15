@@ -22,80 +22,83 @@ import { escapeHtml } from "./clientForm.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { defaultTimezone } from "./eventTime.js";
 
-const DATA_TYPES = [
-  "Customer and CRM",
-  "Transactions and orders",
-  "Customer support",
-  "Operational or project data",
-  "Email and internal communications",
-  "Proposals and contracts",
-  "Call recordings",
+// Every field below is a column of the leads Google Sheet (same names and
+// dropdown values as its "Answer Options" tab) or an input on
+// https://workingsignaldata.com/intake?full=1 — apart from the two app-only
+// key questions (willing / able to sell), which are NOT published to the
+// sheet. "Date Called" isn't an input: it's stamped when the form is submitted.
+const STATUSES = ["Not Reached", "Left Voicemail", "Callback Scheduled", "Qualified", "Form Submitted", "Not a Fit"];
+const EMPLOYEES = ["1–10", "11–25", "26–50", "51–100", "101–250", "251–500", "500+"];
+const KINDS_OF_DATA = [
+  "Email",
+  "CRM and sales",
+  "Customer service",
+  "Jobs and operations",
+  "Accounting and transactions",
+  "Internal messages",
   "Documents and shared files",
+  "E-commerce",
+  "Images / audio / video",
   "Other",
 ];
+const SYSTEMS = ["Gmail", "Outlook", "Salesforce", "HubSpot", "QuickBooks", "Google Drive", "SharePoint", "Slack", "Shopify", "Zendesk"];
+const WORKFLOW_CATEGORIES = ["Sales", "Customer service", "Jobs or service delivery", "E-commerce orders", "Manufacturing", "Finance", "Other"];
+const ENGLISH = ["Yes", "Mostly", "Mixed", "No", "Unsure"];
+const CAN_LICENSE = ["Yes", "Needs review", "Unsure"];
+const DE_ID = ["Nothing known", "Personal information", "Health information", "Financial information", "Confidential customer information", "Unsure"];
+const EXPORT_SPEED = ["Immediately", "Within 2 weeks", "Within 1 month", "Need help", "Unsure"];
 
-// `minimum` = one of the 4 needed to save; `optional` = not needed to submit.
+// `minimum` = one of the 4 needed to save; `optional` = not needed to submit;
+// `alsoKey` = this field counts as filled if that other field is.
 export const INTAKE_SECTIONS = [
   {
     title: "Key questions",
     note: "Answer at least these four to save.",
     fields: [
-      { key: "data_types", label: "What data do they have?", type: "checkboxes", options: DATA_TYPES, minimum: true },
-      {
-        key: "data_volume",
-        label: "How much of it do they have?",
-        type: "select",
-        options: ["Under 100 GB", "100–500 GB", "500 GB–1 TB", "1–10 TB", "More than 10 TB", "Unsure"],
-        minimum: true,
-      },
-      { key: "willing_to_sell", label: "Are they willing to sell it?", type: "select", options: ["Yes", "Maybe", "No", "Unsure"], minimum: true },
-      { key: "able_to_sell", label: "Are they able to sell it?", type: "select", options: ["Yes", "Needs confirmation", "No", "Unsure"], minimum: true },
+      { key: "data_types", label: "Kinds of Data — what data do they have?", type: "checkboxes", options: KINDS_OF_DATA, minimum: true },
+      { key: "data_amount", label: "Amount of Data — how much do they have?", type: "text", hint: "For example: About 40GB.", minimum: true },
+      { key: "willing_to_sell", label: "Are they willing to sell it?", type: "select", options: ["Yes", "Maybe", "No", "Unsure"], minimum: true, appOnly: true },
+      { key: "able_to_sell", label: "Are they able to sell it?", type: "select", options: ["Yes", "Needs confirmation", "No", "Unsure"], minimum: true, appOnly: true },
     ],
   },
   {
-    title: "Company",
+    title: "About the company",
     fields: [
-      { key: "company_name", label: "Company name", type: "text" },
-      { key: "company_website", label: "Company website", type: "text", optional: true },
-      { key: "contact_name", label: "Contact name", type: "text" },
-      { key: "contact_email", label: "Contact email", type: "email" },
-      { key: "year_founded", label: "Year founded", type: "number" },
-      { key: "employee_count", label: "Approx. employee count", type: "number" },
-      { key: "company_does", label: "What does the company do?", type: "textarea", optional: true, hint: "A sentence or two is plenty." },
+      { key: "status", label: "Status", type: "select", options: STATUSES, optional: true, hint: "Leave blank to publish as Form Submitted." },
+      { key: "company_name", label: "Company Name", type: "text" },
+      { key: "company_website", label: "Website", type: "text" },
+      { key: "contact_name", label: "Contact Name", type: "text" },
+      { key: "contact_email", label: "Business Email", type: "email" },
+      { key: "contact_phone", label: "Phone Number", type: "tel" },
+      { key: "employees", label: "Employees", type: "select", options: EMPLOYEES },
+      { key: "company_does", label: "What does the company do?", type: "textarea", hint: "One or two sentences is enough." },
+      { key: "years_in_business", label: "Years in Business", type: "number" },
     ],
   },
   {
-    title: "Data details",
+    title: "Their data",
     fields: [
-      { key: "systems", label: "Which systems contain the data?", type: "text", hint: "Separate names with commas." },
-      { key: "years_history", label: "Years of history available", type: "text" },
-      { key: "data_central", label: "Is the data held centrally?", type: "select", options: ["Yes", "Mostly", "No", "Unsure"] },
+      { key: "systems", label: "Systems — which systems contain it?", type: "checkboxes", options: SYSTEMS, alsoKey: "other_systems" },
+      { key: "other_systems", label: "Other systems (type them in, separated by commas)", type: "text", optional: true },
+      { key: "workflow", label: "Typical Workflow", type: "textarea", hint: "Give one simple example from start to finish." },
+      { key: "workflow_category", label: "Workflow Category — which workflow is that closest to?", type: "select", options: WORKFLOW_CATEGORIES },
       {
-        key: "data_control",
-        label: "Does the company control the data?",
-        type: "select",
-        options: ["Yes", "Probably, but needs confirmation", "Unsure"],
+        key: "unique_data",
+        label: "Unique or Hard-to-Find Data",
+        type: "textarea",
+        optional: true,
+        hint: "Anything that could be difficult for an AI company to find elsewhere.",
       },
-      {
-        key: "sensitive",
-        label: "Does the data include sensitive information?",
-        type: "checkboxes",
-        options: ["Personal information", "Financial information", "Health information", "Confidential customer information", "None of these", "Unsure"],
-      },
-      { key: "licensing_restrictions", label: "Known restrictions on licensing or reuse?", type: "select", options: ["No", "Yes", "Unsure"] },
-      {
-        key: "stage",
-        label: "Where are they in the process?",
-        type: "select",
-        options: [
-          "Exploring what the data might be worth",
-          "Interested in a preliminary bid",
-          "Ready to discuss a transaction",
-          "Working toward a specific deadline",
-        ],
-      },
-      { key: "timing", label: "Timing or deadline", type: "text", optional: true },
-      { key: "anything_else", label: "Anything else we should know?", type: "textarea", optional: true },
+    ],
+  },
+  {
+    title: "Final checks",
+    fields: [
+      { key: "mostly_english", label: "Mostly English? — is most of the data in English?", type: "select", options: ENGLISH },
+      { key: "can_license", label: "Can License for AI? — can the company license this data for AI use?", type: "select", options: CAN_LICENSE },
+      { key: "deid", label: "Needs Removal / De-ID — what may need to be removed or de-identified?", type: "checkboxes", options: DE_ID },
+      { key: "export_speed", label: "Export Speed — how quickly could they provide an export?", type: "select", options: EXPORT_SPEED },
+      { key: "notes", label: "Notes", type: "textarea", optional: true },
     ],
   },
 ];
@@ -115,22 +118,37 @@ export function meetsMinimum(data) {
   return missingMinimum(data).length === 0;
 }
 export function isIntakeComplete(data) {
-  return ALL_FIELDS.every((f) => f.optional || isFilled(data?.[f.key]));
+  return ALL_FIELDS.every((f) => f.optional || isFilled(data?.[f.key]) || (f.alsoKey && isFilled(data?.[f.alsoKey])));
 }
 export function countMinimum(data) {
   return MINIMUM_FIELDS.length - missingMinimum(data).length;
 }
 
+// Same buckets as the Employees dropdown.
+function employeeRange(n) {
+  const v = Number(n);
+  if (!v || v < 1) return "";
+  if (v <= 10) return EMPLOYEES[0];
+  if (v <= 25) return EMPLOYEES[1];
+  if (v <= 50) return EMPLOYEES[2];
+  if (v <= 100) return EMPLOYEES[3];
+  if (v <= 250) return EMPLOYEES[4];
+  if (v <= 500) return EMPLOYEES[5];
+  return EMPLOYEES[6];
+}
+
 // Company fields the dial/client already knows, so the form starts pre-filled.
 // Anything already saved on the form wins over these.
 export function intakeDefaults(client, saved) {
+  const founded = Number(client?.founded_year);
   return {
     company_name: client?.company_name || "",
     company_website: client?.website || "",
     contact_name: client?.full_name || "",
     contact_email: client?.email || "",
-    year_founded: client?.founded_year || "",
-    employee_count: client?.employee_count || "",
+    contact_phone: client?.mobile_phone || client?.company_phone || client?.phone || "",
+    employees: employeeRange(client?.employee_count),
+    years_in_business: founded > 1800 ? String(new Date().getFullYear() - founded) : "",
     ...(saved || {}),
   };
 }
@@ -140,7 +158,7 @@ export function intakeDefaults(client, saved) {
 export function intakeSummaryLines(data) {
   return ALL_FIELDS.filter((f) => isFilled(data?.[f.key])).map((f) => {
     const v = data[f.key];
-    return `${f.label} ${Array.isArray(v) ? v.join(", ") : v}`;
+    return `${f.label}: ${Array.isArray(v) ? v.join(", ") : v}`;
   });
 }
 
@@ -209,7 +227,7 @@ export function openIntakeForm(opts) {
   const box = modalEl.querySelector(".modal");
   const submittedLine = submittedAt
     ? `<p class="help-text intake-submitted">Submitted ${escapeHtml(new Date(submittedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }))}${
-        notified ? " · sent to Slack" : " · not sent to Slack yet"
+        notified ? " · sent" : " · not fully sent yet"
       }.</p>`
     : "";
   box.innerHTML = `
@@ -229,7 +247,7 @@ export function openIntakeForm(opts) {
     </div>
     <div class="form-actions intake-submit-row ${onSubmit ? "" : "hidden"}" id="intakeSubmitRow">
       <button type="button" class="btn yellow" id="intakeSubmitBtn">${
-        submittedAt && !notified ? "Send to Slack again" : submittedAt ? "Submit again" : "Submit form"
+        submittedAt && !notified ? "Send again" : submittedAt ? "Submit again" : "Submit form"
       }</button>
     </div>`;
 
@@ -297,9 +315,10 @@ export function openIntakeForm(opts) {
 // after the client was created). Saves the answers, completes the client's
 // intro call as of right now (using the existing intro_call event if there is
 // one — otherwise a new one), then asks the intake-submit edge function to
-// post the lead to Slack. Returns { slack: 'sent' | 'not_configured' | 'failed',
-// error? } so the caller can mention a problem; the intro call is completed
-// either way.
+// send the lead to Slack and the leads Google Sheet. Returns
+// { slack, sheet, errors } (each 'sent' | 'already_sent' | 'not_configured' |
+// 'failed') — pass it to describeDelivery() for a message about any problem;
+// the intro call is completed either way.
 // ---------------------------------------------------------------------------
 export async function submitIntakeForm(clientId, data, profile) {
   const now = new Date();
@@ -307,6 +326,10 @@ export async function submitIntakeForm(clientId, data, profile) {
   const mm = String(now.getMinutes()).padStart(2, "0");
   const timezone = defaultTimezone();
   const report = ["Intake form submitted.", ...intakeSummaryLines(data).map((l) => `• ${l}`)].join("\n");
+
+  // "Date Called" column of the leads sheet — the local calendar day of submission.
+  const dateCalled = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  data = { ...data, date_called: dateCalled };
 
   const { error: saveErr } = await supabase
     .from("clients")
@@ -351,7 +374,7 @@ export async function submitIntakeForm(clientId, data, profile) {
     if (error) throw error;
   }
 
-  // Slack (and later Airtable) — never blocks or undoes the completed call.
+  // Slack + Google Sheet — never blocks or undoes the completed call.
   try {
     const { data: res, error } = await supabase.functions.invoke("intake-submit", { body: { client_id: clientId } });
     if (error) {
@@ -361,10 +384,29 @@ export async function submitIntakeForm(clientId, data, profile) {
       } catch {
         // keep the generic message
       }
-      return { slack: "failed", error: msg };
+      return { slack: "failed", sheet: "failed", errors: { slack: msg, sheet: msg } };
     }
-    return { slack: res?.slack || "sent", error: res?.error };
+    return { slack: res?.slack || "failed", sheet: res?.sheet || "failed", errors: res?.errors || {} };
   } catch (err) {
-    return { slack: "failed", error: err?.message || String(err) };
+    const msg = err?.message || String(err);
+    return { slack: "failed", sheet: "failed", errors: { slack: msg, sheet: msg } };
   }
+}
+
+// Returns text explaining what didn't go out, or null when everything that's
+// connected was delivered (and at least one destination is connected).
+export function describeDelivery(result) {
+  const names = { slack: "Slack", sheet: "the Google Sheet" };
+  const failed = Object.keys(names).filter((k) => result[k] === "failed");
+  const missing = Object.keys(names).filter((k) => result[k] === "not_configured");
+  const ok = Object.keys(names).filter((k) => result[k] === "sent" || result[k] === "already_sent");
+  if (!failed.length && !missing.length) return null;
+  if (!failed.length && ok.length) return null; // the connected one(s) worked; the other just isn't set up
+  const parts = [];
+  if (failed.length) parts.push(failed.map((k) => `posting to ${names[k]} failed: ${result.errors?.[k] || "unknown error"}`).join("; "));
+  if (missing.length && !ok.length) {
+    const who = missing.map((k) => names[k]).join(" and ");
+    parts.push(`${who.charAt(0).toUpperCase()}${who.slice(1)} ${missing.length > 1 ? "aren't" : "isn't"} connected yet`);
+  }
+  return `${parts.join(". ")}. Open the client's Form and use "Send again" to retry.`;
 }
