@@ -36,14 +36,16 @@ function doPost(e) {
       return v === undefined || v === null ? '' : v;
     });
 
-    // "Date Called" arrives as YYYY-MM-DD; store it as a real date.
+    // "Date Called" arrives as YYYY-MM-DD; store it as a real date (midnight in
+    // THIS spreadsheet's time zone, shown as yyyy-mm-dd, no time of day).
     var dateCol = headers.indexOf('Date Called');
-    if (dateCol >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(row[dateCol]))) {
-      var p = String(row[dateCol]).split('-');
-      row[dateCol] = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    var hasDate = dateCol >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(row[dateCol]));
+    if (hasDate) {
+      row[dateCol] = Utilities.parseDate(String(row[dateCol]), SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
     }
 
     sheet.appendRow(row);
+    if (hasDate) sheet.getRange(sheet.getLastRow(), dateCol + 1).setNumberFormat('yyyy-mm-dd');
     return reply_({ ok: true });
   } catch (err) {
     return reply_({ ok: false, error: String(err) });
