@@ -79,6 +79,7 @@ const CHART_METRIC_LABELS = [
   ["attempted_contacts", "Attempted contacts"],
   ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
+  ["busy_callback", "Busy, call back"],
   ["no_response", "No response, try again"],
   ["unable_to_contact", "Unable to contact"],
   ["not_interested", "Not interested"],
@@ -96,6 +97,7 @@ const GRAPH_METRIC_LABELS = [
   ["attempted_contacts", "Total number of contacts"],
   ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
+  ["busy_callback", "Busy, call back"],
   ["no_response", "No response, try again"],
   ["unable_to_contact", "Unable to contact"],
   ["not_interested", "Not interested"],
@@ -121,6 +123,7 @@ const MILESTONE_TABLE_TITLES = [
 const CONTACTED_TABLE_TITLES = [
   ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
+  ["busy_callback", "Busy, call back"],
   ["no_response", "No response, try again"],
   ["unable_to_contact", "Unable to contact"],
   ["not_interested", "Not interested"],
@@ -443,7 +446,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   // Same light-mode hex values as CONTACT_STATUS_PDF_COLORS' `dot` shades
-  // in js/dials.js for the 5 category bars, plus the brand navy/gold for the
+  // in js/dials.js for the 6 category bars, plus the brand navy/gold for the
   // 2 non-category bars — used by both the on-screen SVG chart and the
   // PDF's vector-drawn equivalent (see buildReportPdf).
   const CHART_BAR_COLORS = {
@@ -451,6 +454,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     targets_contacted: "#c8a45a",
     intro_call_scheduled: "#6fcf8e",
     callback_interested: "#f2d34b",
+    busy_callback: "#f2bd52",
     no_response: "#f2a65a",
     unable_to_contact: "#9ca3af",
     not_interested: "#e0776d",

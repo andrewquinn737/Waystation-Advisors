@@ -1260,3 +1260,10 @@ $$;
 -- get_buyer_outreach_since_signed / get_buyer_contacted_owners) it is folded
 -- into the "No response, try again" bucket.
 -- ============================================================================
+
+-- "Busy, call back" now has its OWN report column/bar/owner table (migration
+-- "reports_busy_callback_own_column"): get_buyer_outreach_chart returns a
+-- 'busy_callback' metric, get_buyer_outreach_since_signed gained a
+-- busy_callback column (after no_response), and get_buyer_contacted_owners
+-- lists busy dials under their own 'busy_callback' category. js/reports.js
+-- shows it between "Callback, interested" and "No response, try again".
