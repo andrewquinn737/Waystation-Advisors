@@ -1251,3 +1251,12 @@ $$;
 -- instead of dialing (js/granolaCalling.js). Granola has no way to start a
 -- call from a link, so the user pastes the number in Granola's own dialer.
 -- ============================================================================
+
+-- ============================================================================
+-- "BUSY, CALL BACK" dial category — applied as migration
+-- "dials_busy_callback_status". contact_status 'busy_callback' (sits between
+-- 'no_response' and 'callback_interested'). Not a real contact: never counts as
+-- "owners talked to". In the buyer reports (get_buyer_outreach_chart /
+-- get_buyer_outreach_since_signed / get_buyer_contacted_owners) it is folded
+-- into the "No response, try again" bucket.
+-- ============================================================================

@@ -26,6 +26,7 @@ const STATUS_TINTS = {
   unable_to_contact: { bg: "var(--status-unable-bg)", border: "var(--status-unable-border)" },
   not_interested: { bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)" },
   no_response: { bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)" },
+  busy_callback: { bg: "var(--status-busy-bg)", border: "var(--status-busy-border)" },
   callback_interested: { bg: "var(--status-callback-bg)", border: "var(--status-callback-border)" },
   intro_call_scheduled: { bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)" },
 };

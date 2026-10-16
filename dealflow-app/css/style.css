@@ -54,6 +54,9 @@
   --status-no-response-bg: #ffeede;
   --status-no-response-border: #f7d9b8;
   --status-no-response-dot: #f2a65a;
+  --status-busy-bg: #fff2d6;
+  --status-busy-border: #f6e0b2;
+  --status-busy-dot: #f2bd52;
   --status-callback-bg: #fff6e0;
   --status-callback-border: #f3e6b8;
   --status-callback-dot: #f2d34b;
@@ -130,6 +133,9 @@
     --status-no-response-bg: #3a2a14;
     --status-no-response-border: #5c4020;
     --status-no-response-dot: #f5b673;
+    --status-busy-bg: #362b11;
+    --status-busy-border: #54421e;
+    --status-busy-dot: #eebf5e;
     --status-callback-bg: #332c0f;
     --status-callback-border: #4d431c;
     --status-callback-dot: #e8c94a;

@@ -78,6 +78,9 @@ const CONTACT_STATUSES = [
   { value: "unable_to_contact", label: "Unable to contact", bg: "var(--status-unable-bg)", border: "var(--status-unable-border)", dot: "var(--status-unable-dot)" },
   { value: "not_interested", label: "Not interested", bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)", dot: "var(--status-not-interested-dot)" },
   { value: "no_response", label: "No response, try again", bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)", dot: "var(--status-no-response-dot)" },
+  // Between "No response" (orange) and "Callback, interested" (yellow): the owner
+  // had no time, so it wasn't a real contact — never counts as "owners talked to".
+  { value: "busy_callback", label: "Busy, call back", bg: "var(--status-busy-bg)", border: "var(--status-busy-border)", dot: "var(--status-busy-dot)" },
   { value: "callback_interested", label: "Callback, interested", bg: "var(--status-callback-bg)", border: "var(--status-callback-border)", dot: "var(--status-callback-dot)" },
   { value: "intro_call_scheduled", label: "Accepted intro call", bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)", dot: "var(--status-scheduled-dot)" },
 ];
@@ -587,6 +590,9 @@ const CSV_STATUS_VALUE_MAP = {
   "call unanswered": "no_response",
   "not a fit": "not_interested",
   "completed outreach": "unable_to_contact",
+  "busy, call back": "busy_callback",
+  "busy call back": "busy_callback",
+  "busy": "busy_callback",
   "follow-up": "no_response",
   "follow up": "no_response",
 };
