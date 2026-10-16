@@ -3064,6 +3064,11 @@ async function updateDialStatus(newStatus) {
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) Object.assign(dials[idx], data);
   await syncTodaysCallLogSnapshot({ contact_status_at_call: newStatus });
+  // Also corrects the dial's most recent call(s) even when that call was on an
+  // earlier day or was logged by someone else (a team lead re-categorizing an
+  // intern's dial) — otherwise the buyer reports keep the old category for it.
+  const { error: syncErr } = await supabase.rpc("sync_latest_call_status", { p_dial_id: currentDial.id, p_status: newStatus });
+  if (syncErr) console.error("sync_latest_call_status failed", syncErr);
 
   renderDialModal();
   renderDialsTable();

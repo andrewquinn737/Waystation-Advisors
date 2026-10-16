@@ -1267,3 +1267,9 @@ $$;
 -- busy_callback column (after no_response), and get_buyer_contacted_owners
 -- lists busy dials under their own 'busy_callback' category. js/reports.js
 -- shows it between "Callback, interested" and "No response, try again".
+
+-- sync_latest_call_status(p_dial_id, p_status) — migration
+-- "sync_latest_call_status_on_recategorize". Called when a dial is re-categorized
+-- (js/dials.js updateDialStatus): updates the status snapshot on the dial's most
+-- recent call(s) (same person, same day as the latest call) so the buyer reports
+-- follow the new category even for an earlier-day call or another person's call.
