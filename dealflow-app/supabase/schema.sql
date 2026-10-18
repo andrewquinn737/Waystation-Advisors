@@ -1297,3 +1297,13 @@ $$;
 -- get_buyer_contacted_owners shows the latest call's transcript summary in the notes
 -- column when there is one, otherwise the call notes.
 -- ============================================================================
+
+-- ============================================================================
+-- BUSY, CALL BACK = TALKED TO THE OWNER; AUTODIAL — migration
+-- "busy_callback_counts_as_owner_talked_and_autodial_setting". 'busy_callback' now counts toward
+-- "owners talked to" everywhere (compute_report_rollups, get_buyer_progress_summary, Profile
+-- stats in js/profile.js) — this supersedes the earlier note that it was not a real contact.
+-- profiles.autodial_enabled: Dials setting (js/autodial.js). When on, choosing a category jumps to
+-- the next uncontacted dial with a phone and calls its first number (autodialTarget/runAutodial in
+-- js/dials.js); not for "Accepted intro call", "Uncontacted", or while a call is in progress.
+-- ============================================================================

@@ -20,7 +20,8 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
-import { startCall } from "./callSession.js";
+import { startCall, isCallActive, primeAudio } from "./callSession.js";
+import { wireAutodialToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
@@ -79,7 +80,7 @@ const CONTACT_STATUSES = [
   { value: "not_interested", label: "Not interested", bg: "var(--status-not-interested-bg)", border: "var(--status-not-interested-border)", dot: "var(--status-not-interested-dot)" },
   { value: "no_response", label: "No response, try again", bg: "var(--status-no-response-bg)", border: "var(--status-no-response-border)", dot: "var(--status-no-response-dot)" },
   // Between "No response" (orange) and "Callback, interested" (yellow): the owner
-  // had no time, so it wasn't a real contact — never counts as "owners talked to".
+  // was reached but had no time to talk — it counts as having talked to the owner.
   { value: "busy_callback", label: "Busy, call back", bg: "var(--status-busy-bg)", border: "var(--status-busy-border)", dot: "var(--status-busy-dot)" },
   { value: "callback_interested", label: "Callback, interested", bg: "var(--status-callback-bg)", border: "var(--status-callback-border)", dot: "var(--status-callback-dot)" },
   { value: "intro_call_scheduled", label: "Accepted intro call", bg: "var(--status-scheduled-bg)", border: "var(--status-scheduled-border)", dot: "var(--status-scheduled-dot)" },
@@ -188,6 +189,8 @@ const els = {
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
+  menuAutodialBtn: document.getElementById("menuAutodialBtn"),
+  autodialLabel: document.getElementById("autodialLabel"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -339,6 +342,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+wireAutodialToggle(els.menuAutodialBtn, els.autodialLabel, profile);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -2875,7 +2879,13 @@ function renderDialModal() {
     });
     document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
     statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
-      btn.addEventListener("click", () => updateDialStatus(btn.dataset.value));
+      btn.addEventListener("click", async () => {
+        const value = btn.dataset.value;
+        const target = autodialTarget(value); // decided before the save so the right "next" dial is used
+        if (target) primeAudio(); // unlock call audio inside this tap
+        const saved = await updateDialStatus(value);
+        if (saved && target) runAutodial(target);
+      });
     });
   }
 
@@ -3023,6 +3033,35 @@ async function updateDialStatus(newStatus) {
 
   renderDialModal();
   renderDialsTable();
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Autodial (setting in the Dials menu, js/autodial.js): the moment a category is chosen, jump to the
+// next "uncontacted" (white) dial in the list being worked — skipping any with no phone number —
+// and start the call to its first listed number (mobile, else company). Not for "Accepted intro
+// call" (the form may still be open) or "Uncontacted", and not while a call is still in progress.
+// ---------------------------------------------------------------------------
+function autodialTarget(newStatus) {
+  if (!profile.autodial_enabled || !currentDial || dialMode !== "view") return null;
+  if (newStatus === "intro_call_scheduled" || newStatus === "uncontacted" || isCallActive()) return null;
+  const list = visibleDials();
+  const i = list.findIndex((d) => d.id === currentDial.id);
+  const after = i >= 0 ? [...list.slice(i + 1), ...list.slice(0, i)] : list; // then wrap around
+  const next = after.find((d) => (d.contact_status || "uncontacted") === "uncontacted" && (d.mobile_phone || d.company_phone));
+  return next ? { dial: next } : { none: true };
+}
+
+function runAutodial(target) {
+  if (target.none) {
+    showNotice("There are no more uncontacted dials with a phone number in this list.", { title: "Autodial" });
+    return;
+  }
+  const d = target.dial;
+  const idx = visibleDials().findIndex((x) => x.id === d.id);
+  if (idx < 0) return;
+  openDialModal(idx);
+  placeCall(d, d.mobile_phone || d.company_phone, d.mobile_phone ? "mobile" : "company");
 }
 
 function handleDeleteDial() {

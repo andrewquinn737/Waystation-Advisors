@@ -2200,7 +2200,7 @@ async function openWeeklySurveyModal() {
       .select("id, dial_lists!inner(deleted_at)", { count: "exact", head: true })
       .is("dial_lists.deleted_at", null)
       .eq("created_by", profile.id)
-      .in("contact_status", ["not_interested", "callback_interested", "intro_call_scheduled"])
+      .in("contact_status", ["not_interested", "callback_interested", "busy_callback", "intro_call_scheduled"])
       .gte("called_today_date", dateStart)
       .lte("called_today_date", dateEnd),
   ]);

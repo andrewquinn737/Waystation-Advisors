@@ -13,6 +13,21 @@ import { startTranscript } from "./callTranscript.js";
 
 const TELNYX_SDK = "https://cdn.jsdelivr.net/npm/@telnyx/webrtc@2.27.10/lib/bundle.mjs";
 let active = false;
+let primed = null; // an AudioContext unlocked inside a tap, for a call that starts a moment later (autodial)
+
+export function isCallActive() {
+  return active;
+}
+// Autodial starts its call right after a database save, i.e. a beat after the tap that chose the
+// category — so the audio context is created/unlocked inside that tap and reused by startCall.
+export function primeAudio() {
+  try {
+    if (!primed || primed.state === "closed") primed = new AudioContext({ sampleRate: 16000 });
+    primed.resume().catch(() => {});
+  } catch {
+    primed = null;
+  }
+}
 
 const withTimeout = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + " timed out")), ms))]);
 
@@ -44,7 +59,7 @@ export async function startCall(opts) {
   // Created inside the tap so iOS lets the audio run.
   let ctx = null, mic = null, client = null, call = null, wake = null, transcript = null, stopAudio = null;
   let callId = null, transcribe = false, answeredAt = null, finished = false, ringing = false;
-  try { ctx = new AudioContext({ sampleRate: 16000 }); await ctx.resume(); } catch { ctx = null; }
+  try { ctx = primed && primed.state !== "closed" ? primed : new AudioContext({ sampleRate: 16000 }); primed = null; await ctx.resume(); } catch { ctx = null; }
   const remoteAudio = Object.assign(document.createElement("audio"), { autoplay: true });
   remoteAudio.setAttribute("playsinline", "");
   document.body.appendChild(remoteAudio);
