@@ -1,22 +1,15 @@
-// Google Apps Script that lets the app add a lead to this spreadsheet's
-// "Leads" tab. Whoever has EDIT access to the sheet sets it up once:
+// Google Apps Script that lets the app add — or UPDATE — a lead on this spreadsheet's "Leads" tab.
+// Whoever has EDIT access to the sheet sets it up once:
+//  1. In the sheet: Extensions > Apps Script. Delete the sample code and paste everything in this file. Save.
+//  2. Project Settings (gear icon) > Script properties: LEAD_TOKEN = a long random password you make up.
+//  3. Deploy > Manage deployments > pencil icon > Version: New version > Deploy (or New deployment > Web app,
+//     Execute as: Me, Who has access: Anyone) — copy the Web app URL.
+//  4. In the Supabase dashboard, table app_secrets: sheet_webhook_url = that URL, sheet_webhook_token = the
+//     same password as LEAD_TOKEN.
 //
-//  1. In the sheet: Extensions > Apps Script. Delete the sample code and paste
-//     everything in this file. Save.
-//  2. Project Settings (gear icon) > Script properties > Add script property:
-//       name  LEAD_TOKEN
-//       value a long random password you make up (e.g. 30+ letters/numbers)
-//  3. Deploy > New deployment > type "Web app":
-//       Execute as: Me      Who has access: Anyone
-//     Deploy, approve the permissions it asks for, and copy the "Web app URL".
-//  4. In the Supabase dashboard, table app_secrets, put:
-//       sheet_webhook_url    -> the Web app URL
-//       sheet_webhook_token  -> the same random password as LEAD_TOKEN
-//
-// The app sends one row per submitted lead, keyed by the exact column names in
-// row 1 — columns are matched by NAME, so reordering columns is fine; a column
-// the app doesn't send stays blank, and anything the sheet doesn't have is
-// ignored. Requests without the right token are refused.
+// Every submission is an upsert: the row whose "Company Name" matches (ignoring case and punctuation) is
+// UPDATED — only cells whose value changed, never "Date Called" — and a new row is added only when no row
+// matches. Columns are matched by the names in row 1; a column the app doesn't send stays as it is.
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
@@ -31,27 +24,50 @@ function doPost(e) {
 
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var data = body.row || {};
+    var nameCol = headers.indexOf('Company Name');
+    var wanted = norm_(body.match || data['Company Name']);
+
+    // 1) existing row for this company? (newest match wins)
+    var rowIdx = -1;
+    var last = sheet.getLastRow();
+    if (wanted && nameCol >= 0 && last >= 2) {
+      var names = sheet.getRange(2, nameCol + 1, last - 1, 1).getValues();
+      for (var i = names.length - 1; i >= 0; i--) {
+        if (norm_(names[i][0]) === wanted) { rowIdx = i + 2; break; }
+      }
+    }
+
+    if (rowIdx > 0) {
+      var current = sheet.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
+      var changed = 0;
+      headers.forEach(function (h, c) {
+        var key = String(h).trim();
+        if (key === 'Date Called') return;
+        var v = data[key];
+        if (v === undefined || v === null || String(v) === '') return;
+        if (String(current[c]).trim() === String(v).trim()) return;
+        sheet.getRange(rowIdx, c + 1).setValue(v);
+        changed++;
+      });
+      return reply_({ ok: true, action: 'updated', row: rowIdx, changed: changed });
+    }
+
+    // 2) none found: add a new row ("Date Called" arrives as a date string and is read as a plain date)
     var row = headers.map(function (h) {
       var v = data[String(h).trim()];
       return v === undefined || v === null ? '' : v;
     });
-
-    // "Date Called" arrives as YYYY-MM-DD; store it as a real date (midnight in
-    // THIS spreadsheet's time zone, shown as yyyy-mm-dd, no time of day).
-    var dateCol = headers.indexOf('Date Called');
-    var hasDate = dateCol >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(row[dateCol]));
-    if (hasDate) {
-      row[dateCol] = Utilities.parseDate(String(row[dateCol]), SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
-    }
-
     sheet.appendRow(row);
-    if (hasDate) sheet.getRange(sheet.getLastRow(), dateCol + 1).setNumberFormat('yyyy-mm-dd');
-    return reply_({ ok: true });
+    return reply_({ ok: true, action: 'added' });
   } catch (err) {
     return reply_({ ok: false, error: String(err) });
   } finally {
     lock.releaseLock();
   }
+}
+
+function norm_(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 function reply_(obj) {

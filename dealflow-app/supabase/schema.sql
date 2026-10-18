@@ -1244,13 +1244,6 @@ $$;
 -- slack_webhook_url, sheet_webhook_url, sheet_webhook_token.
 -- ============================================================================
 
--- ============================================================================
--- GRANOLA CALLING — applied as migration "profiles_granola_calling".
--- profiles.granola_calling_enabled (default false): per-user setting in the
--- Dials settings menu. When on, call icons copy the number and open Granola
--- instead of dialing (js/granolaCalling.js). Granola has no way to start a
--- call from a link, so the user pastes the number in Granola's own dialer.
--- ============================================================================
 
 -- ============================================================================
 -- "BUSY, CALL BACK" dial category — applied as migration
@@ -1273,3 +1266,22 @@ $$;
 -- (js/dials.js updateDialStatus): updates the status snapshot on the dial's most
 -- recent call(s) (same person, same day as the latest call) so the buyer reports
 -- follow the new category even for an earlier-day call or another person's call.
+
+-- ============================================================================
+-- IN-APP CALLING (Telnyx WebRTC + Deepgram) — migrations "in_app_calling_core",
+-- "fix_pick_from_number_column_conflict", "remove_granola_add_sheet_match".
+-- Replaces the Granola calling setting (profiles.granola_calling_enabled dropped).
+-- Tables: area_codes, state_centroids, caller_numbers (the 3-number pool),
+-- telnyx_credentials (service role only), calls, call_lines, inbound_calls,
+-- callback_tasks. Functions: to_e164, norm_state, call_consent (record / no_record /
+-- native), pick_from_number (sticky -> same state -> nearest), match_callback,
+-- callback_tasks_escalate (pg_cron every minute). Edge functions: telnyx-token,
+-- deepgram-token, call-summary, telnyx-webhook (no JWT; ed25519 signature).
+-- Rules: unless a state is CONFIRMED all-party (dial state or area code) the call is
+-- recorded; all-party -> placed in the app but never recorded/transcribed; state
+-- unknown even after the area code -> the phone's own dialer. profiles.phone is the
+-- cell (kept +1XXXXXXXXXX by the profiles_normalize_phone trigger).
+-- Keys live in app_secrets: TELNYX_API_KEY, TELNYX_SIP_CONNECTION_ID, TELNYX_PUBLIC_KEY,
+-- DEEPGRAM_API_KEY, DEEPGRAM_PROJECT_ID, TELNYX_CALLBACK_APP_ID (callbacks).
+-- clients.intake_sheet_match: company name a lead was last written to the sheet under.
+-- ============================================================================

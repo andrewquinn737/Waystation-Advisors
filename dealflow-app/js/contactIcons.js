@@ -2,7 +2,6 @@
 // dials.js, both in the detailed read-only field rows (rfContact) and in the
 // compact list/card rows (contactActionIcons).
 
-import "./granolaCalling.js";
 import { showConnectEmailNotice } from "./notice.js";
 import { escapeHtml } from "./clientForm.js";
 import { openQuickSend } from "./quickSend.js";
@@ -231,11 +230,11 @@ export function rfContact(label, value, kind, extra = "", personalizedEmailBody,
 // rfContact's comment above. `personalizedTextingBody` (optional) — same
 // resolved text for either number (the template doesn't vary by which phone
 // it's sent to), see buildPhoneNumbersHTML's own comment.
-function phoneNumberRow(number, kind, extra = "", personalizedTextingBody) {
+function phoneNumberRow(number, kind, extra = "", personalizedTextingBody, callDialId, method) {
   return `
     <div class="rf-value-row" style="margin-bottom: 8px;">
       <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
-      ${contactActionIcons({ phone: number, extra, personalizedTextingBody })}
+      ${contactActionIcons({ phone: number, extra, personalizedTextingBody, dialId: callDialId, method })}
     </div>`;
 }
 
@@ -253,13 +252,13 @@ function phoneNumberRow(number, kind, extra = "", personalizedTextingBody) {
 // icon's message body on BOTH numbers (mobile and company) instead of
 // leaving it blank. Omitted everywhere else, same as
 // personalizedEmailBody/-Subject on rfContact above.
-export function buildPhoneNumbersHTML(entity, extraFor, personalizedTextingBody) {
+export function buildPhoneNumbersHTML(entity, extraFor, personalizedTextingBody, callDialId) {
   const rows = [];
   // mobile_phone_unsure (dials only — see rowsToDials in js/dials.js): a
   // CSV listed the same number as both mobile and company, so it's saved
   // once here but not confirmed as either. Clients never have the flag.
-  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, entity.mobile_phone_unsure ? "Unsure" : "Mobile", extraFor ? extraFor("mobile") : "", personalizedTextingBody));
-  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company", extraFor ? extraFor("company") : "", personalizedTextingBody));
+  if (entity.mobile_phone) rows.push(phoneNumberRow(entity.mobile_phone, entity.mobile_phone_unsure ? "Unsure" : "Mobile", extraFor ? extraFor("mobile") : "", personalizedTextingBody, callDialId, "mobile"));
+  if (entity.company_phone) rows.push(phoneNumberRow(entity.company_phone, "Company", extraFor ? extraFor("company") : "", personalizedTextingBody, callDialId, "company"));
   return `
     <div class="readonly-field">
       <div class="rf-label">Phone numbers</div>
@@ -285,13 +284,19 @@ export function buildPhoneNumbersHTML(entity, extraFor, personalizedTextingBody)
 // the "Personalized texting" advanced setting — pre-fills the Text icon's
 // message body the same way. Every other caller (Clients, and Dials' own
 // detail-modal phone rows) omits these, so their output is unchanged.
-export function contactActionIcons({ phone, email, linkedin, personalizedEmailBody, personalizedEmailSubject, personalizedTextingBody, extra = "" } = {}) {
+export function contactActionIcons({ phone, email, linkedin, personalizedEmailBody, personalizedEmailSubject, personalizedTextingBody, extra = "", dialId, method } = {}) {
   const parts = [];
   if (phone) {
     parts.push(`<a class="contact-action-btn" href="${escapeHtml(buildSmsHref(phone, personalizedTextingBody))}" title="Text">${CONTACT_ICONS.sms}</a>`);
     // contact-action-tel: hidden on desktop via CSS (html.is-desktop-device)
     // since a computer can't actually place a phone call through a tel: link.
-    parts.push(`<a class="contact-action-btn contact-action-tel" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);
+    // Owner dials (dialId given) place the call inside the app (js/callSession.js, wired in
+    // js/dials.js); everything else (clients, team members) keeps the plain tel: link.
+    if (dialId) {
+      parts.push(`<button type="button" class="contact-action-btn contact-action-tel contact-action-call" data-dial-id="${escapeHtml(dialId)}" data-tel="${escapeHtml(phone)}" data-method="${method || "mobile"}" title="Call">${CONTACT_ICONS.tel}</button>`);
+    } else {
+      parts.push(`<a class="contact-action-btn contact-action-tel" href="tel:${escapeHtml(phone)}" title="Call">${CONTACT_ICONS.tel}</a>`);
+    }
   }
   if (email) {
     parts.push(

@@ -399,7 +399,7 @@ export function describeDelivery(result) {
   const names = { slack: "Slack", sheet: "the Google Sheet" };
   const failed = Object.keys(names).filter((k) => result[k] === "failed");
   const missing = Object.keys(names).filter((k) => result[k] === "not_configured");
-  const ok = Object.keys(names).filter((k) => result[k] === "sent" || result[k] === "already_sent");
+  const ok = Object.keys(names).filter((k) => result[k] === "sent" || result[k] === "already_sent" || result[k] === "updated");
   if (!failed.length && !missing.length) return null;
   if (!failed.length && ok.length) return null; // the connected one(s) worked; the other just isn't set up
   const parts = [];

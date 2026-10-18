@@ -1,3 +1,4 @@
+import { toE164 } from "./phoneUtil.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
 import { mountEmailList, unmountEmailList } from "./profileEmails.js";
@@ -483,7 +484,7 @@ async function exitProfileEditMode() {
   profileEditInputs = null;
 
   const newName = nameInput.value.trim() || profile.full_name;
-  const newPhone = phoneInput.value.trim();
+  const newPhone = toE164(phoneInput.value.trim()) || phoneInput.value.trim();
   const newEmail = emailInput ? emailInput.value.trim() : profile.email || "";
   const newCalendlyLink = calendlyInput ? calendlyInput.value.trim() : null;
   // Re-derived from the final link value rather than reusing a flag

@@ -20,7 +20,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
-import { wireGranolaCallingToggle } from "./granolaCalling.js";
+import { startCall } from "./callSession.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
@@ -188,8 +188,6 @@ const els = {
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
-  menuGranolaBtn: document.getElementById("menuGranolaBtn"),
-  granolaLabel: document.getElementById("granolaLabel"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -342,7 +340,6 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
-wireGranolaCallingToggle(els.menuGranolaBtn, els.granolaLabel, profile);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -1004,6 +1001,108 @@ async function commitContactCheck(method, checking) {
   } finally {
     contactCheckToggleInFlight = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// In-app calling (js/callSession.js). Tapping an owner dial's call icon places the call inside the
+// app; starting it checks that number's "Contacted today" circle automatically, and a finished
+// call's summary shows in the "Transcript" box right under the call notes.
+// ---------------------------------------------------------------------------
+async function autoMarkContacted(dial, method) {
+  const col = CONTACT_METHOD_DATE_COLUMNS[method];
+  const today = todayDateStr();
+  if (!col || dial[col] === today) return; // already checked today
+  const { error } = await supabase.from("dials").update({ [col]: today }).eq("id", dial.id);
+  if (error) return;
+  const list = allLists.find((l) => l.id === dial.list_id);
+  await supabase.from("call_status_changes").insert({
+    user_id: profile.id, dial_id: dial.id, dial_type: currentType, list_id: dial.list_id, contact_status_at_call: dial.contact_status,
+    contact_method: method, buyer_id: list?.buyer_id || null, company_name: dial.company_name || null, contact_name: dial.full_name || null,
+    website: dial.website || null, city: dial.city || null, state: dial.state || null, industry: dial.industry || null, call_notes: dial.call_notes || null,
+  });
+  dial[col] = today;
+  const idx = dials.findIndex((d) => d.id === dial.id);
+  if (idx !== -1) dials[idx][col] = today;
+  if (currentDial?.id === dial.id) { Object.assign(currentDial, { [col]: today }); renderDialModal(); }
+}
+
+function placeCall(dial, phone, method) {
+  startCall({
+    dial, phone, method, profile,
+    onDialed: () => autoMarkContacted(dial, method),
+    onOpenDial: () => {
+      const i = visibleDials().findIndex((d) => d.id === dial.id);
+      if (i >= 0) openDialModal(i);
+    },
+    onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
+    fallbackTel: (num) => { window.location.href = `tel:${num}`; },
+  });
+}
+document.addEventListener(
+  "click",
+  (e) => {
+    const btn = e.target.closest?.(".contact-action-call");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dial = dials.find((d) => d.id === btn.dataset.dialId) || (currentDial?.id === btn.dataset.dialId ? currentDial : null);
+    if (dial) placeCall(dial, btn.dataset.tel, btn.dataset.method || "mobile");
+  },
+  true
+);
+
+function buildDialTranscriptHTML() {
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">Transcript</div>
+      <div id="dialTranscriptBody" class="dial-transcript"><div class="help-text">Loading…</div></div>
+    </div>`;
+}
+
+async function loadDialTranscript() {
+  const box = document.getElementById("dialTranscriptBody");
+  if (!box || !currentDial) return;
+  const dialId = currentDial.id;
+  const { data, error } = await supabase
+    .from("calls")
+    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary")
+    .eq("dial_id", dialId)
+    .eq("direction", "outbound")
+    .eq("mode", "in_app")
+    .order("started_at", { ascending: false })
+    .limit(5);
+  const el = document.getElementById("dialTranscriptBody");
+  if (!el || currentDial?.id !== dialId) return;
+  if (error || !data?.length) {
+    el.innerHTML = `<div class="help-text">${error ? "Couldn't load calls." : "No in-app calls yet."}</div>`;
+    return;
+  }
+  el.innerHTML = data
+    .map((c) => {
+      const when = new Date(c.started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const dur = c.duration_sec ? ` · ${Math.floor(c.duration_sec / 60)}:${String(c.duration_sec % 60).padStart(2, "0")}` : "";
+      const body = c.summary
+        ? escapeHtml(c.summary)
+        : !c.answered
+          ? "Not answered."
+          : c.skip_reason
+            ? "Not recorded (call-recording rules for this state)."
+            : "No summary (call was too short).";
+      const lines = c.transcribed && c.answered ? `<details data-call-id="${c.id}"><summary>Full transcript</summary><div class="dial-transcript-lines"></div></details>` : "";
+      return `<div class="dial-transcript-call"><div class="dial-transcript-when">${escapeHtml(when + dur)}</div><div>${body}</div>${lines}</div>`;
+    })
+    .join("");
+  el.querySelectorAll("details[data-call-id]").forEach((d) => {
+    d.addEventListener("toggle", async () => {
+      const target = d.querySelector(".dial-transcript-lines");
+      if (!d.open || target.dataset.loaded) return;
+      target.dataset.loaded = "1";
+      const { data: lines } = await supabase.from("call_lines").select("speaker, text").eq("call_id", d.dataset.callId).order("start_ms");
+      target.innerHTML = (lines || []).length
+        ? lines.map((l) => `<div><b>${l.speaker === "intern" ? "You" : "Owner"}:</b> ${escapeHtml(l.text)}</div>`).join("")
+        : `<div class="help-text">No transcript lines.</div>`;
+    });
+  });
 }
 
 // Call notes are only ever shown in display mode, where they're directly
@@ -2667,6 +2766,8 @@ function renderDialsTable() {
             selectMode
               ? selectCircleHTML(d)
               : contactActionIcons({
+                  dialId: d.id,
+                  method: d.mobile_phone ? "mobile" : "company",
                   phone: d.mobile_phone || d.company_phone,
                   email: d.email,
                   linkedin: d.linkedin,
@@ -2743,12 +2844,13 @@ function resolveEmailSubject(dial) {
 function buildDialViewHTML(dial) {
   return `
     ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolveEmailBody(dial), resolveEmailSubject(dial))}
-    ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial), resolvePersonalizedTextingBody(profile, dial))}
+    ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial), resolvePersonalizedTextingBody(profile, dial), dial.id)}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
     ${buildCallNotesLiveHTML(dial)}
+    ${buildDialTranscriptHTML()}
   `;
 }
 
@@ -2961,6 +3063,7 @@ function renderDialModal() {
     if (delBtn) delBtn.addEventListener("click", handleDeleteDial);
   } else {
     wireCallNotesAutosave();
+    loadDialTranscript();
   }
 }
 
@@ -3036,17 +3139,8 @@ async function updateDialStatus(newStatus) {
         message: "Dial had never been marked as contacted. Please press one of the circles on the right side of the page to mark a contact.",
       });
     }
-    // Same reasoning as the contact-history guard above, one level further:
-    // a category is a claimed OUTCOME of a call, and an empty notes box
-    // means there's no record of what actually happened on it. Checked
-    // AFTER flushCallNotes() above, so currentDial.call_notes already
-    // reflects whatever's currently sitting in the textarea, not a stale
-    // pre-edit value.
-    if (!(currentDial.call_notes || "").trim()) {
-      return showError(els.dialModalError, {
-        message: "Add call notes before changing the category.",
-      });
-    }
+    // (Call notes are no longer required to pick a category — an in-app call
+    // is transcribed/summarized automatically and checks its own contact circle.)
   }
   // A fresh arrival at "Accepted intro call" (switching in from some other
   // category — not just re-saving while already sitting in it) re-shows the
