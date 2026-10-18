@@ -37,6 +37,9 @@ export async function startCall(opts) {
     return;
   }
   active = true;
+  // Starting the call (in the app, or via the phone's own dialer if it falls back) records this
+  // number's contact for today right away — there is no manual "contacted" circle anymore.
+  opts.onDialed?.();
 
   // Created inside the tap so iOS lets the audio run.
   let ctx = null, mic = null, client = null, call = null, wake = null, transcript = null, stopAudio = null;
@@ -109,7 +112,6 @@ export async function startCall(opts) {
     }).select("id").single();
     if (re) throw re;
     callId = row.id;
-    opts.onDialed?.(); // checks this number's "contacted today" circle the moment the call starts
 
     const { TelnyxRTC } = await withTimeout(import(TELNYX_SDK), 10000, "calling library");
     client = new TelnyxRTC({ login_token: t.login_token });

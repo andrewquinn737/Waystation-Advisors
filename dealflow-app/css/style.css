@@ -951,17 +951,6 @@ tr.skeleton-row, .skeleton-card { cursor: default; }
    html.is-desktop-device further down (device-detection block). */
 html.is-desktop-device .contact-action-tel:not(.contact-action-call) { display: none; }
 /* In-app call button on owner dials works from a computer too (headset + browser). */
-/* Per-contact-method "contacted today" check circle (Dials only, see
-   contactCheckCircleHTML in js/dials.js) — one more item inside the same
-   .contact-actions row as the instant-call/text/email icons above, so it
-   picks up their exact size (28px) and spacing (6px gap) for free just by
-   sharing .contact-action-btn. White/empty until checked, green with a
-   checkmark once it is — same on/off shape as .timeline-confirm-btn in
-   js/clients.js's Timeline. */
-.dial-contact-check { color: #fff; }
-@media (hover: hover) { .dial-contact-check:hover { border-color: var(--success); } }
-.dial-contact-check.checked { background: var(--success); border-color: var(--success); }
-
 .edit-icon-btn {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border);
   background: var(--surface); cursor: pointer; font-size: 14px; color: var(--text-muted);

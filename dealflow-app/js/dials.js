@@ -224,7 +224,6 @@ const els = {
   newListCreateBtn: document.getElementById("newListCreateBtn"),
   newListCancelBtn: document.getElementById("newListCancelBtn"),
   confirmDeleteModal: document.getElementById("confirmDeleteModal"),
-  emailReplyConfirmModal: document.getElementById("emailReplyConfirmModal"),
   introCallPopup: document.getElementById("introCallPopup"),
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
@@ -785,7 +784,7 @@ function todayDateStr() {
 
 // The real UTC instants a LOCAL calendar date (as produced by todayDateStr)
 // starts and ends at — for filtering call_status_changes.changed_at
-// (timestamptz) by "today" in commitContactCheck/syncTodaysCallLogSnapshot.
+// (timestamptz) by "today" in autoMarkContacted/syncTodaysCallLogSnapshot.
 // `new Date(\`${dateStr}T00:00:00\`)` (no offset suffix) parses as LOCAL
 // midnight per the JS Date spec, same fix as formatDateOnly in
 // js/reports.js; .toISOString() then carries the correct UTC offset.
@@ -808,7 +807,7 @@ function localDayBoundsIso(dateStr) {
 }
 
 // Which `dials` date column tracks "checked today" for each contact
-// method's white circle (see contactCheckCircleHTML/toggleContactCheck
+// method's white circle (see autoMarkContacted
 // below) — one independent daily toggle per method, replacing the old
 // single "Called today" button/called_today_date. Each resets the same way
 // called_today_date used to: it's just a date, compared against
@@ -830,7 +829,7 @@ function contactedTodayCount(dial) {
 
 // Keeps today's already-logged call_status_changes row(s) in sync with the
 // dial's own info as it gets filled in during/after the same call —
-// toggleContactCheck() only snapshots once, at the exact moment a circle is
+// autoMarkContacted() only snapshots once, at the exact moment a circle is
 // checked, which in practice is often BEFORE the outcome is known (status is
 // set and notes are typed once the call has actually happened). Confirmed as
 // a real bug in production: freshly-logged calls were coming through with
@@ -838,7 +837,7 @@ function contactedTodayCount(dial) {
 // had all of it, because those fields hadn't been filled in yet at the
 // instant a circle was checked. Only ever UPDATEs row(s) that already exist
 // for today (there can be up to 3 now, one per checked circle) — never
-// inserts one (that stays toggleContactCheck's job alone), and never touches
+// inserts one (that stays autoMarkContacted's job alone), and never touches
 // a PAST day's already-frozen snapshot.
 async function syncTodaysCallLogSnapshot(fields) {
   if (!currentDial || contactedTodayCount(currentDial) === 0) return;
@@ -852,155 +851,14 @@ async function syncTodaysCallLogSnapshot(fields) {
     .lt("changed_at", endIso);
 }
 
-// ---------------------------------------------------------------------------
-// Per-contact-method "contacted today" check circles — one next to each
-// listed contact method's instant-action icons (mobile/company phone,
-// email), white/unchecked by default, green with a checkmark once checked.
-// Same size and spacing as the instant-call/text/email icons they sit next
-// to (see .dial-contact-check reusing .contact-action-btn's sizing/gap in
-// css/style.css) since they're rendered as one more item inside that same
-// .contact-actions row — see contactIcons.js's `extra` param.
-// ---------------------------------------------------------------------------
-const CONTACT_CHECK_SVG = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
-
-function contactCheckCircleHTML(method, dial) {
-  const checked = dial[CONTACT_METHOD_DATE_COLUMNS[method]] === todayDateStr();
-  return `<button type="button" class="contact-action-btn dial-contact-check ${checked ? "checked" : ""}" data-method="${method}" title="Mark contacted">${checked ? CONTACT_CHECK_SVG : ""}</button>`;
-}
-
-// Wires every .dial-contact-check circle currently in the dial modal body —
-// called once per render, right after els.dialModalBody.innerHTML is set
-// (same pattern as stopContactActionPropagation next to it).
-function wireContactCheckCircles() {
-  els.dialModalBody.querySelectorAll(".dial-contact-check[data-method]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleContactCheck(btn.dataset.method);
-    });
-  });
-}
-
 // Non-interactive "Contacted today xN" display — white at 0, green
-// otherwise. Replaces the old clickable "Called today" button; the circles
-// above are the only way to change this now (see toggleContactCheck).
+// otherwise. Updated automatically (no manual circles anymore): starting a call
+// records that number's contact (autoMarkContacted), and an email sent through the app
+// records the email contact (email_messages_mark_dials trigger) — up to 3 a day
+// (mobile call, company call, email).
 function buildContactedTodayDisplayHTML(dial) {
   const count = contactedTodayCount(dial);
   return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}">Contacted today x${count}</div>`;
-}
-
-// Checking/unchecking one of the 3 per-contact-method circles — the same
-// underlying mechanic as the old single "Called today" toggle (a date column
-// compared against todayDateStr(), naturally resetting each day), just split
-// three ways so up to 3 can be checked independently the same day instead of
-// only 1. Each checked circle logs its own call_status_changes row, tagged
-// with which method it was (contact_method) so unchecking that ONE circle
-// later the same day can delete exactly that row instead of guessing among
-// however many others are also logged today for this dial.
-//
-// Email is the one exception: checking it (mobile/company check instantly)
-// first asks "Have they replied to an email?" via els.emailReplyConfirmModal
-// — only a "Yes" there actually checks the circle and logs the contact.
-// Unchecking an already-checked email circle is instant either way, same as
-// mobile/company.
-let contactCheckToggleInFlight = false;
-async function toggleContactCheck(method) {
-  if (contactCheckToggleInFlight) return;
-  const col = CONTACT_METHOD_DATE_COLUMNS[method];
-  const today = todayDateStr();
-  const isChecked = currentDial[col] === today;
-
-  if (!isChecked && method === "email") {
-    openConfirmModal(els.emailReplyConfirmModal, "emailReplyConfirmYesBtn", "emailReplyConfirmNoBtn", () => commitContactCheck(method, true));
-    return;
-  }
-  await commitContactCheck(method, !isChecked);
-}
-
-// Network blips during this write were previously surfacing the raw fetch
-// error text ("TypeError: Load failed" etc.) straight into the modal via
-// showError — every other read/write path in the app already routes a
-// connectivity failure through isNetworkError() for a friendly message
-// instead (see loadLists() above for the pattern this mirrors).
-function showContactCheckError(err) {
-  if (isNetworkError(err)) return showError(els.dialModalError, { message: "No internet connection — try again." });
-  showError(els.dialModalError, err);
-}
-
-async function commitContactCheck(method, checking) {
-  if (contactCheckToggleInFlight) return;
-  contactCheckToggleInFlight = true;
-  try {
-    // Same reasoning as updateDialStatus — flush any pending notes edit
-    // before this re-renders the popup.
-    await flushCallNotes();
-    const col = CONTACT_METHOD_DATE_COLUMNS[method];
-    const today = todayDateStr();
-    const newValue = checking ? today : null;
-
-    // currentDial/dials are only mutated once, at the very end, after BOTH
-    // writes below are confirmed to have succeeded — previously the first
-    // write's success alone drove an immediate in-memory mutation, so a
-    // failure of the SECOND write (which went entirely unchecked) could
-    // leave currentDial silently out of sync with what the circle still
-    // displayed on screen.
-    // withNetworkRetry — see its own comment in offlineCache.js. Absorbs the
-    // exact class of blip a user reported: "No internet connection" on a
-    // device that genuinely had wifi, most likely the PWA's first request
-    // right after resuming from background.
-    const { error } = await withNetworkRetry(() => supabase.from("dials").update({ [col]: newValue }).eq("id", currentDial.id));
-    if (error) return showContactCheckError(error);
-
-    if (!checking) {
-      const { startIso, endIso } = localDayBoundsIso(today);
-      const { error: logError } = await withNetworkRetry(() =>
-        supabase
-          .from("call_status_changes")
-          .delete()
-          .eq("dial_id", currentDial.id)
-          .eq("user_id", profile.id)
-          .eq("contact_method", method)
-          .gte("changed_at", startIso)
-          .lt("changed_at", endIso)
-      );
-      if (logError) return showContactCheckError(logError);
-    } else {
-      // Permanent, FK-less snapshot for the Reports feature (see
-      // js/reports.js) — dial_lists rows are hard-deleted (cascading to
-      // their dials) when a tab is removed, so this is the only place these
-      // facts survive that deletion. contact_method tags which circle logged
-      // this row so a later uncheck of that SAME circle can find and delete
-      // only this one row, even if other circles also logged rows today.
-      const currentListForBuyer = allLists.find((l) => l.id === currentDial.list_id);
-      const { error: logError } = await withNetworkRetry(() =>
-        supabase.from("call_status_changes").insert({
-          user_id: profile.id,
-          dial_id: currentDial.id,
-          dial_type: currentType,
-          list_id: currentDial.list_id,
-          contact_status_at_call: currentDial.contact_status,
-          contact_method: method,
-          buyer_id: currentListForBuyer?.buyer_id || null,
-          company_name: currentDial.company_name || null,
-          contact_name: currentDial.full_name || null,
-          website: currentDial.website || null,
-          city: currentDial.city || null,
-          state: currentDial.state || null,
-          industry: currentDial.industry || null,
-          call_notes: currentDial.call_notes || null,
-        })
-      );
-      if (logError) return showContactCheckError(logError);
-    }
-
-    currentDial[col] = newValue;
-    const idx = dials.findIndex((d) => d.id === currentDial.id);
-    if (idx !== -1) dials[idx][col] = newValue;
-    renderDialModal();
-  } catch (err) {
-    showContactCheckError(err);
-  } finally {
-    contactCheckToggleInFlight = false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1126,7 +984,7 @@ function buildCallNotesLiveHTML(dial) {
 // those happens before blur would have fired on its own, and so a
 // status-button click can no longer race a still-in-flight notes save into
 // overwriting the just-typed text with stale data on the next render (see
-// goToDial/updateDialStatus/commitContactCheck, all of which now `await`
+// goToDial/updateDialStatus/autoMarkContacted, all of which now `await`
 // this before doing anything else).
 async function flushCallNotes() {
   const notesEl = document.getElementById("d_call_notes_live");
@@ -2843,8 +2701,8 @@ function resolveEmailSubject(dial) {
 // narrower scope than this dial-level change.
 function buildDialViewHTML(dial) {
   return `
-    ${rfContact("Email", dial.email, "email", contactCheckCircleHTML("email", dial), resolveEmailBody(dial), resolveEmailSubject(dial))}
-    ${buildPhoneNumbersHTML(dial, (kind) => contactCheckCircleHTML(kind, dial), resolvePersonalizedTextingBody(profile, dial), dial.id)}
+    ${rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial))}
+    ${buildPhoneNumbersHTML(dial, null, resolvePersonalizedTextingBody(profile, dial), dial.id)}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
@@ -3028,7 +2886,6 @@ function renderDialModal() {
   els.dialModalBody.innerHTML = fieldsHTML;
   stopContactActionPropagation(els.dialModalBody);
   wireQuickSendButtons(els.dialModalBody);
-  if (isViewingExisting) wireContactCheckCircles();
 
   if (dialMode === "edit" || isCreate) {
     els.dialModalActions.innerHTML = `
@@ -3087,7 +2944,7 @@ async function handleEditDialSave() {
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
   // See syncTodaysCallLogSnapshot's comment — these are the same snapshot
-  // fields commitContactCheck() captures, kept in sync if they're corrected
+  // fields autoMarkContacted() captures, kept in sync if they're corrected
   // through the edit form later the same day a call was already logged.
   await syncTodaysCallLogSnapshot({
     company_name: data.company_name,
@@ -3106,7 +2963,7 @@ async function handleEditDialSave() {
 // this is a standalone dropdown in the popup's header row that autosaves
 // immediately, same pattern as the Call notes autosave. Changing this no
 // longer affects the weekly call count — that's the separate per-contact-
-// method check circles (see toggleContactCheck).
+// method check circles (see autoMarkContacted).
 async function updateDialStatus(newStatus) {
   // Flush any pending call-notes edit FIRST and wait for it to finish before
   // touching contact_status or re-rendering — without this await, the notes
@@ -3455,7 +3312,7 @@ async function createClientFromDial(dial) {
   });
   data.assigned_to = profile.id;
   // Which dial list this seller client was sourced from — a permanent,
-  // FK-less snapshot (see the matching comment in commitContactCheck())
+  // FK-less snapshot (see the matching comment in autoMarkContacted())
   // so it survives the tab later being deleted. Prospective-only: this
   // is the one and only place a client's origin gets captured, so
   // clients created before this existed have no way to backfill it.

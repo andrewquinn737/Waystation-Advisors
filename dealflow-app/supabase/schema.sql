@@ -1285,3 +1285,15 @@ $$;
 -- DEEPGRAM_API_KEY, DEEPGRAM_PROJECT_ID, TELNYX_CALLBACK_APP_ID (callbacks).
 -- clients.intake_sheet_match: company name a lead was last written to the sheet under.
 -- ============================================================================
+
+-- ============================================================================
+-- CONTACT TRACKING IS AUTOMATIC — migration
+-- "email_sent_tracks_dial_contact_and_report_transcript_notes". The three manual
+-- "contacted today" circles on dials are gone. Starting a call from a dial records
+-- that number's contact (js/dials.js autoMarkContacted); an email SENT THROUGH THE APP
+-- to a dial's address records the email contact (email_messages_mark_dials trigger:
+-- contacted_email_date + a call_status_changes row, once per dial per day). "Contacted
+-- today" = mobile call + company call + email, max 3. The buyer reports'
+-- get_buyer_contacted_owners shows the latest call's transcript summary in the notes
+-- column when there is one, otherwise the call notes.
+-- ============================================================================
