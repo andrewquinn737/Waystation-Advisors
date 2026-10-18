@@ -126,12 +126,6 @@
         <span class="menu-item-label" id="notificationsLabel">Notifications: On</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line class="notif-slash" x1="3" y1="3" x2="21" y2="21"/></svg></span>
       </button>
-      <!-- Autodial: when On, choosing a category jumps to the next uncontacted dial and calls it
-           (see js/autodial.js / autodialTarget in js/dials.js). -->
-      <button type="button" class="page-header-menu-item" id="menuAutodialBtn">
-        <span class="menu-item-label" id="autodialLabel">Autodial: Off</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></span>
-      </button>
       <!-- 4th settings option — opens #advancedSettingsPopup (see
            js/dials.js). Available to every role, same as Notifications
            above, since the one setting it holds so far (Personalized
@@ -360,6 +354,14 @@
         </button>
       </div>
       <p class="help-text">Only one email option can be on at a time — it decides what the instant Email icon pre-fills. Recommended first/second email (team leads) use each dial's own Email 1/Email 2 from the imported CSV.</p>
+      <!-- Autodial (js/autodial.js): separate from the email options above. -->
+      <div class="advanced-settings-list" style="margin-top: 14px;">
+        <button type="button" class="advanced-settings-row" id="autodialRow">
+          <span class="advanced-settings-row-label">Autodial</span>
+          <span class="toggle-switch" id="autodialToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
+        </button>
+      </div>
+      <p class="help-text">After you choose a category, jump to the next uncontacted dial and start calling it (not for "Accepted intro call").</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
       </div>

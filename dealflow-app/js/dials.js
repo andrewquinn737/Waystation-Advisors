@@ -189,8 +189,8 @@ const els = {
   accountsVisibleClose: document.getElementById("accountsVisibleClose"),
   menuNotificationsBtn: document.getElementById("menuNotificationsBtn"),
   notificationsLabel: document.getElementById("notificationsLabel"),
-  menuAutodialBtn: document.getElementById("menuAutodialBtn"),
-  autodialLabel: document.getElementById("autodialLabel"),
+  autodialRow: document.getElementById("autodialRow"),
+  autodialToggle: document.getElementById("autodialToggle"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -342,7 +342,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // unlike Import/Transfer/Accounts visible above which stay admin/team-lead
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
-wireAutodialToggle(els.menuAutodialBtn, els.autodialLabel, profile);
+wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -3037,7 +3037,7 @@ async function updateDialStatus(newStatus) {
 }
 
 // ---------------------------------------------------------------------------
-// Autodial (setting in the Dials menu, js/autodial.js): the moment a category is chosen, jump to the
+// Autodial (setting in Dials > Advanced, js/autodial.js): the moment a category is chosen, jump to the
 // next "uncontacted" (white) dial in the list being worked — skipping any with no phone number —
 // and start the call to its first listed number (mobile, else company). Not for "Accepted intro
 // call" (the form may still be open) or "Uncontacted", and not while a call is still in progress.
