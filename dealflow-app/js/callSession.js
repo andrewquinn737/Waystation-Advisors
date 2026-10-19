@@ -71,6 +71,19 @@ export async function startCall(opts) {
     onOpenDial: () => opts.onOpenDial?.(),
   });
 
+  // Plays the call's incoming audio. Safe to call repeatedly: it (re)attaches the stream if it changed,
+  // restarts playback if the browser paused it, and follows tracks that get added late.
+  const attachRemote = (c) => {
+    const rs = c?.remoteStream;
+    if (!rs) return;
+    if (remoteAudio.srcObject !== rs) {
+      remoteAudio.srcObject = rs;
+      try { rs.addEventListener("addtrack", () => remoteAudio.play?.().catch(() => {})); } catch { /* ignore */ }
+    }
+    remoteAudio.muted = false;
+    if (remoteAudio.paused) remoteAudio.play?.().catch(() => {});
+  };
+
   const cleanupMedia = () => {
     try { stopAudio?.(); } catch { /* ignore */ }
     mic?.getTracks().forEach((t) => t.stop());
@@ -151,11 +164,14 @@ export async function startCall(opts) {
     client.on("telnyx.notification", async (n) => {
       const c = n.call; if (n.type !== "callUpdate" || !c) return;
       const st = c.state;
+      attachRemote(c); // as early as the carrier sends audio (ringback, greeting), not only once "active"
       if (st === "ringing" || st === "early" || st === "trying") { ringing = true; panel.state("Ringing…"); }
       if (st === "active" && !answeredAt) {
         answeredAt = new Date(); ringing = true;
         panel.state(transcribe ? "Connected · transcribing" : "Connected"); panel.startTimer();
-        if (c.remoteStream) { remoteAudio.srcObject = c.remoteStream; remoteAudio.play?.().catch(() => {}); }
+        // The owner's first words can arrive a beat after "active": keep nudging playback for a few seconds.
+        let nudges = 0;
+        const nudge = setInterval(() => { attachRemote(c); if (++nudges >= 20 || finished) clearInterval(nudge); }, 250);
         const sess = c.telnyxIDs?.telnyxSessionId;
         supabase.from("calls").update({ answered: true, answered_at: answeredAt.toISOString(), ...(sess ? { telnyx_call_id: sess } : {}) }).eq("id", callId).then(() => {}, () => {});
         if (transcribe && ctx && c.remoteStream) {
