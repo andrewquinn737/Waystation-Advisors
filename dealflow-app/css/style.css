@@ -1485,6 +1485,13 @@ html.is-mobile-device .modal { padding: 18px; }
    continuous color regardless of how short the card is — no gap to see. */
 html.is-mobile-device #dialModalBackdrop { background: var(--surface); }
 
+/* Tighter margins around the dial popup (about half the old white space) so its information shows
+   larger: less space between the screen edge and the card, and less padding inside the card. */
+#dialModalBackdrop { padding: 30px 8px; }
+#dialModalBackdrop .dial-modal { padding: 12px; }
+html.is-mobile-device #dialModalBackdrop { padding: 12px 6px; }
+html.is-mobile-device #dialModalBackdrop .dial-modal { padding: 8px; }
+
 /* Dials toolbar: tighten the gap under the "Dials" heading slightly. */
 html.is-mobile-device .page-header { margin-bottom: 10px; }
 html.is-mobile-device .dials-toolbar { gap: 8px; margin-bottom: 8px; }
