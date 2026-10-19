@@ -36,7 +36,13 @@ export function openCallPanel({ name, company, onHangup, onMute, onOpenDial }) {
     btn.addEventListener("click", run);
   };
   onTap(el.querySelector('[data-act="hangup"]'), () => onHangup?.());
-  onTap(el.querySelector('[data-act="dial"]'), () => onOpenDial?.());
+  const dialBtn = el.querySelector('[data-act="dial"]');
+  onTap(dialBtn, () => {
+    // Visible proof the tap registered (and a hint when the dial was already on screen behind the bar).
+    const ok = onOpenDial?.();
+    dialBtn.textContent = ok === false ? "Couldn't open" : "Dial open ✓";
+    setTimeout(() => { dialBtn.textContent = "Open dial"; }, 1500);
+  });
   el.querySelector('[data-act="mute"]').addEventListener("click", (e) => {
     muted = !muted;
     e.currentTarget.textContent = muted ? "Unmute" : "Mute";
