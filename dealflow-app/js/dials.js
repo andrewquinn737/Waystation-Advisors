@@ -888,14 +888,27 @@ async function autoMarkContacted(dial, method) {
   if (currentDial?.id === dial.id) { Object.assign(currentDial, { [col]: today }); renderDialModal(); }
 }
 
+// "Open dial" in the call bar. Works even if the dial is no longer in the
+// displayed list (Categories filter, search, or another tab/list opened
+// mid-call) by showing it on its own instead of silently doing nothing.
+function openDialFromCall(dial) {
+  const i = visibleDials().findIndex((d) => d.id === dial.id);
+  if (i >= 0) return openDialModal(i);
+  const live = dials.find((d) => d.id === dial.id) || dial;
+  currentDialSet = [live];
+  currentDialIndex = 0;
+  currentDial = live;
+  dialMode = "view";
+  els.dialModalBackdrop.classList.remove("hidden");
+  lockPageScroll();
+  renderDialModal();
+}
+
 function placeCall(dial, phone, method) {
   startCall({
     dial, phone, method, profile,
     onDialed: () => autoMarkContacted(dial, method),
-    onOpenDial: () => {
-      const i = visibleDials().findIndex((d) => d.id === dial.id);
-      if (i >= 0) openDialModal(i);
-    },
+    onOpenDial: () => openDialFromCall(dial),
     onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     fallbackTel: (num) => { window.location.href = `tel:${num}`; },
   });
