@@ -1341,3 +1341,8 @@ $$;
 -- get_buyer_contacted_owners: when the report falls back to call summaries (no typed notes), it now lists the
 -- latest summary per phone line separately, labeled "Mobile: …" / "Company line: …" (was: one summary only).
 -- call-summary edge function: tells the summarizer which line was dialed (company line vs mobile).
+
+-- dials_follow_list_owner (migration dials_follow_their_list_owner): a BEFORE UPDATE OF list_id trigger on dials
+-- sets dials.created_by to the owner of the tab the dial was moved into. Row-level security on dials goes by
+-- created_by, so dials moved into someone else's tab used to be invisible to that tab's owner. Existing
+-- mismatches (37 dials) were backfilled so created_by = the tab owner.

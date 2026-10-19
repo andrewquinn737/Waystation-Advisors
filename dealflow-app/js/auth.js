@@ -4,6 +4,13 @@ import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError, withTimeout } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
 
+// Why the app is sending someone back to the login page — shown there (login.html reads it) so a bounce is
+// never silent, and so login.html knows NOT to auto-forward into the app again (that was the endless loop).
+function goToLogin(reason) {
+  try { sessionStorage.setItem("login_reason", reason || "Please sign in again."); } catch { /* storage blocked */ }
+  window.location.href = "login.html";
+}
+
 function hidePageLoadingOverlay() {
   document.getElementById("pageLoadingOverlay")?.classList.add("hidden");
 }
@@ -34,12 +41,12 @@ export async function requireSession() {
     try {
       ({ data: { session } } = await withTimeout(supabase.auth.getSession()));
     } catch {
-      window.location.href = "login.html";
+      goToLogin("Couldn't check your sign-in (the connection timed out). Please try again.");
       return null;
     }
   }
   if (!session) {
-    window.location.href = "login.html";
+    goToLogin("This device doesn't have your sign-in saved any more. Please sign in again.");
     return null;
   }
 
@@ -55,11 +62,25 @@ export async function requireSession() {
         .single()
     ));
   } catch (timeoutErr) {
+    // One more try before giving up (a slow phone connection right after sign-in is the usual cause).
+    try {
+      ({ data: profile, error } = await withTimeout(
+        supabase
+          .from("profiles")
+          .select(
+            "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
+          )
+          .eq("id", session.user.id)
+          .single()
+      ));
+    } catch (retryErr) {
+      profile = null;
+      error = retryErr;
+    }
     // Falls straight into the exact same cached-profile fallback a real
     // network error already takes below — isNetworkError() recognizes
     // withTimeout's own error message.
-    profile = null;
-    error = timeoutErr;
+    if (!profile) error = error || timeoutErr;
   }
 
   // A plain network hiccup fetching the profile used to be treated exactly
@@ -80,7 +101,7 @@ export async function requireSession() {
       // clear it, otherwise login.html sees it, sends us straight back here,
       // and the two pages bounce forever.
       if (!isNetworkError(error)) await supabase.auth.signOut({ scope: "local" });
-      window.location.href = "login.html";
+      goToLogin(`Couldn't load your profile (${error?.message || "unknown error"}). Please sign in again; if this repeats, tell an admin.`);
       return null;
     }
     resolvedProfile = cached;

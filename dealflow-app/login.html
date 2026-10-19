@@ -73,8 +73,17 @@
     // login <-> app loop with no way to reach the form. So confirm it with the
     // server first, and clear a rejected session so the form is usable. (A
     // dropped connection says nothing about the session, so it's left alone.)
+    // If the app just sent us back here it left the reason behind — show it and do NOT auto-forward again.
+    let bounceReason = "";
+    try { bounceReason = sessionStorage.getItem("login_reason") || ""; sessionStorage.removeItem("login_reason"); } catch { /* ignore */ }
+    if (bounceReason) {
+      errorBox.classList.remove("hidden");
+      errorBox.style.background = "#fdecec";
+      errorBox.style.color = "#d1453b";
+      errorBox.textContent = bounceReason;
+    }
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return;
+      if (!session || bounceReason) return;
       const { data, error } = await supabase.auth.getUser();
       if (data?.user && !error) {
         window.location.href = "profile.html";
