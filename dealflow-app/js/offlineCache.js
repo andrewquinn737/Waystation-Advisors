@@ -10,9 +10,27 @@
 
 const PREFIX = "waystation_cache_";
 
+// Frees every cached copy of list data (never the sign-in, which lives under Supabase's own "sb-…" keys).
+export function purgeCache() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIX)) localStorage.removeItem(k);
+    }
+  } catch { /* storage unavailable */ }
+}
+
 export function cacheSet(key, data) {
   try {
-    localStorage.setItem(PREFIX + key, JSON.stringify(data));
+    const json = JSON.stringify(data);
+    if (json.length > 400000) return; // too big to be worth keeping — never let the cache crowd out the sign-in
+    try {
+      localStorage.setItem(PREFIX + key, json);
+    } catch {
+      // Storage full: free the old cached copies and try once more.
+      purgeCache();
+      localStorage.setItem(PREFIX + key, json);
+    }
   } catch {
     // Storage full/unavailable (private browsing, quota) — caching is a
     // nice-to-have, never worth breaking the app over.

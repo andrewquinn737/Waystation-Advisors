@@ -59,6 +59,8 @@
 
   <script type="module">
     import { supabase } from "./js/supabaseClient.js";
+    import { purgeCache } from "./js/offlineCache.js";
+    purgeCache(); // old cached list data can fill a phone's storage and stop the sign-in from being saved
 
     const form = document.getElementById("authForm");
     const errorBox = document.getElementById("errorBox");
@@ -103,6 +105,15 @@
           password: password.value,
         });
         if (error) throw error;
+        // Make sure the sign-in was really saved on this device before leaving (a full or blocked browser
+        // storage makes the next page think nobody is signed in and bounce straight back here).
+        let saved = (await supabase.auth.getSession()).data.session;
+        if (!saved) {
+          purgeCache();
+          await supabase.auth.signInWithPassword({ email: email.value.trim(), password: password.value });
+          saved = (await supabase.auth.getSession()).data.session;
+        }
+        if (!saved) throw new Error("This device can't save your sign-in (its browser storage is full or blocked). Close other tabs, clear this site's data in Settings, and try again.");
         window.location.href = "profile.html";
       } catch (err) {
         errorBox.classList.remove("hidden");
