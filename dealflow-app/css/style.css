@@ -1956,7 +1956,7 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 
 /* ---- In-app call bar (js/callPanel.js) + dial "Transcript" box ---- */
 .call-panel {
-  position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 140;
+  position: fixed; left: 12px; right: 12px; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 140;
   max-width: 560px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
   box-shadow: 0 8px 28px rgba(0,0,0,.28); padding: 12px 14px;
 }
@@ -1969,6 +1969,18 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .call-panel-captions .interim { color: var(--text-muted); font-style: italic; }
 .call-panel-summary { margin: 8px 0; font-size: 13px; line-height: 1.4; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
 .call-panel-actions { display: flex; gap: 8px; }
+.call-panel-actions .btn.active { background: var(--gold-soft); border-color: var(--gold); }
+/* Number pad attached to the top edge of the call bar (shares its border/background, no gap). */
+.call-keypad {
+  position: absolute; left: -1px; right: -1px; bottom: 100%; padding: 10px 12px 12px;
+  background: var(--surface); border: 1px solid var(--border); border-bottom: none; border-radius: 14px 14px 0 0;
+  box-shadow: 0 -6px 18px rgba(0,0,0,.14);
+}
+.call-keypad.hidden { display: none; }
+.call-keypad-digits { min-height: 20px; margin-bottom: 6px; text-align: center; font-size: 17px; letter-spacing: .12em; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.call-keypad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 300px; margin: 0 auto; }
+.call-key { padding: 11px 0; font-size: 20px; font-weight: 600; font-family: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; touch-action: manipulation; }
+.call-key:active { background: var(--gold-soft); }
 .call-panel-actions .btn { flex: 1; padding: 9px 8px; }
 .call-panel .call-hangup { background: #d1453b; border-color: #d1453b; color: #fff; }
 .dial-transcript-call { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; line-height: 1.45; }

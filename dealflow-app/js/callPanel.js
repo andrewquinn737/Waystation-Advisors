@@ -5,11 +5,15 @@ import { escapeHtml } from "./clientForm.js";
 
 let el = null;
 
-export function openCallPanel({ name, company, onHangup, onMute, onOpenDial }) {
+export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
   el?.remove();
   el = document.createElement("div");
   el.className = "call-panel";
   el.innerHTML = `
+    <div class="call-keypad hidden">
+      <div class="call-keypad-digits"></div>
+      <div class="call-keypad-grid">${["1","2","3","4","5","6","7","8","9","*","0","#"].map((k) => `<button type="button" class="call-key" data-key="${k}">${k}</button>`).join("")}</div>
+    </div>
     <div class="call-panel-top">
       <div class="call-panel-who"><strong>${escapeHtml(name || "Call")}</strong>${company ? `<span>${escapeHtml(company)}</span>` : ""}</div>
       <div class="call-panel-meta"><span class="call-panel-state">Preparing…</span><span class="call-panel-timer"></span></div>
@@ -18,7 +22,7 @@ export function openCallPanel({ name, company, onHangup, onMute, onOpenDial }) {
     <div class="call-panel-summary hidden"></div>
     <div class="call-panel-actions">
       <button type="button" class="btn secondary" data-act="mute">Mute</button>
-      <button type="button" class="btn secondary" data-act="dial">Open dial</button>
+      <button type="button" class="btn secondary" data-act="keypad">Keypad</button>
       <button type="button" class="btn call-hangup" data-act="hangup">Hang up</button>
     </div>`;
   document.body.appendChild(el);
@@ -28,21 +32,27 @@ export function openCallPanel({ name, company, onHangup, onMute, onOpenDial }) {
 
   // Fire on the finger lifting (pointerup) as well as on click: the page-wide double-tap-zoom
   // blocker (noZoom.js) cancels the click of any tap that comes within 300 ms of another, which on a
-  // phone could swallow this button. Both paths are de-duplicated.
+  // phone could swallow a button. The click that follows a touch is skipped so nothing fires twice.
   const onTap = (btn, fn) => {
-    let last = 0;
-    const run = () => { const now = Date.now(); if (now - last < 600) return; last = now; fn(); };
-    btn.addEventListener("pointerup", (e) => { if (e.pointerType === "touch") run(); });
-    btn.addEventListener("click", run);
+    let lastTouch = 0;
+    btn.addEventListener("pointerup", (e) => { if (e.pointerType === "touch") { lastTouch = Date.now(); fn(); } });
+    btn.addEventListener("click", () => { if (Date.now() - lastTouch > 700) fn(); });
   };
   onTap(el.querySelector('[data-act="hangup"]'), () => onHangup?.());
-  const dialBtn = el.querySelector('[data-act="dial"]');
-  onTap(dialBtn, () => {
-    // Visible proof the tap registered (and a hint when the dial was already on screen behind the bar).
-    const ok = onOpenDial?.();
-    dialBtn.textContent = ok === false ? "Couldn't open" : "Dial open ✓";
-    setTimeout(() => { dialBtn.textContent = "Open dial"; }, 1500);
+
+  // Keypad (for phone menus / extensions): sits attached to the top of the bar; each key sends a tone.
+  const pad = $(".call-keypad"), typed = $(".call-keypad-digits"), padBtn = el.querySelector('[data-act="keypad"]');
+  let digits = "";
+  onTap(padBtn, () => {
+    const show = pad.classList.contains("hidden");
+    pad.classList.toggle("hidden", !show);
+    padBtn.classList.toggle("active", show);
   });
+  pad.querySelectorAll(".call-key").forEach((k) => onTap(k, () => {
+    digits = (digits + k.dataset.key).slice(-24);
+    typed.textContent = digits;
+    onDtmf?.(k.dataset.key);
+  }));
   el.querySelector('[data-act="mute"]').addEventListener("click", (e) => {
     muted = !muted;
     e.currentTarget.textContent = muted ? "Unmute" : "Mute";

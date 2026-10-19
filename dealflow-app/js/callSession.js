@@ -39,7 +39,7 @@ async function logNative(profile, dial, to, owner_state, skip_reason, method) {
   }).then(() => {}, () => {});
 }
 
-// opts: { dial, phone, method ('mobile'|'company'), profile, onDialed(), onOpenDial(), onSummary(callId), fallbackTel(phone) }
+// opts: { dial, phone, method ('mobile'|'company'), profile, onDialed(), onSummary(callId), fallbackTel(phone) }
 export async function startCall(opts) {
   const { dial, phone, method, profile } = opts;
   if (active) { showNotice("You're already on a call. Hang up first.", { title: "Call in progress" }); return; }
@@ -68,7 +68,7 @@ export async function startCall(opts) {
     name: dial.full_name || dial.company_name, company: dial.company_name,
     onHangup: () => { try { call?.hangup(); } catch { /* ignore */ } if (!call) finish("Call cancelled"); },
     onMute: (m) => { try { m ? call?.muteAudio() : call?.unmuteAudio(); } catch { /* ignore */ } },
-    onOpenDial: () => opts.onOpenDial?.(),
+    onDtmf: (d) => { try { call?.dtmf(d); } catch { /* call not connected yet */ } },
   });
 
   // Plays the call's incoming audio. Safe to call repeatedly: it (re)attaches the stream if it changed,

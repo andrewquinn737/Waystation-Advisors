@@ -888,43 +888,10 @@ async function autoMarkContacted(dial, method) {
   if (currentDial?.id === dial.id) { Object.assign(currentDial, { [col]: today }); renderDialModal(); }
 }
 
-// "Open dial" in the call bar. Works even if the dial is no longer in the
-// displayed list (Categories filter, search, or another tab/list opened
-// mid-call) by showing it on its own instead of silently doing nothing.
-function openDialFromCall(dial) {
-  try {
-    const i = visibleDials().findIndex((d) => d.id === dial.id);
-    if (i >= 0) openDialModal(i);
-    else {
-      const live = dials.find((d) => d.id === dial.id) || dial;
-      currentDialSet = [live];
-      currentDialIndex = 0;
-      currentDial = live;
-      dialMode = "view";
-      els.dialModalBackdrop.classList.remove("hidden");
-      lockPageScroll();
-      renderDialModal();
-    }
-    els.dialModalBackdrop.scrollTop = 0;
-    // Some phones don't repaint a popup that opens in response to a tap on the call bar until something else
-    // redraws the screen (the earlier debug popup is what made it show) — force a repaint.
-    const bd = els.dialModalBackdrop;
-    bd.style.transform = "translateZ(0)";
-    void bd.offsetHeight;
-    requestAnimationFrame(() => { requestAnimationFrame(() => { bd.style.transform = ""; }); });
-    return !els.dialModalBackdrop.classList.contains("hidden");
-  } catch (e) {
-    console.error("open dial failed", e);
-    showNotice(`Couldn't open the dial: ${e?.message || e}`, { title: "Open dial" });
-    return false;
-  }
-}
-
 function placeCall(dial, phone, method) {
   startCall({
     dial, phone, method, profile,
     onDialed: () => autoMarkContacted(dial, method),
-    onOpenDial: () => openDialFromCall(dial),
     onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     fallbackTel: (num) => { window.location.href = `tel:${num}`; },
   });
