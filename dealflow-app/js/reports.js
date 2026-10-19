@@ -59,7 +59,7 @@ const UNATTACHED_BUYER_LABEL = "Not attached to buyer";
 // get_buyer_progress_summary()'s `metric` column exactly.
 const SUMMARY_METRIC_LABELS = [
   ["approved_targets", "Approved targets"],
-  ["targets_contacted", "Targets contacted"],
+  ["targets_contacted", "Companies contacted"],
   ["owners_talked", "Owners talked to"],
   ["owners_agreed", "Owners agreed to intro call"],
   ["intro_calls_completed", "Intro calls completed (confirmed leads)"],
@@ -75,7 +75,7 @@ const SUMMARY_METRIC_LABELS = [
 // key matches get_buyer_outreach_since_signed()'s columns exactly.
 const CHART_METRIC_LABELS = [
   ["approved_targets", "Approved targets"],
-  ["targets_contacted", "Targets contacted"],
+  ["targets_contacted", "Companies contacted"],
   ["attempted_contacts", "Attempted contacts"],
   ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
@@ -93,8 +93,7 @@ const CHART_METRIC_LABELS = [
 // then the 5 category breakdown bars. Key matches
 // get_buyer_outreach_chart()'s columns.
 const GRAPH_METRIC_LABELS = [
-  ["targets_contacted", "Targets contacted"],
-  ["attempted_contacts", "Total number of contacts"],
+  ["targets_contacted", "Companies contacted"],
   ["intro_call_scheduled", "Accepted intro call"],
   ["callback_interested", "Callback, interested"],
   ["busy_callback", "Busy, call back"],
@@ -147,7 +146,7 @@ const STANDARD_LABEL_SET = {
 const QUESTIONNAIRE_LABEL_SET = {
   summary: [
     ["approved_targets", "Approved targets"],
-    ["targets_contacted", "Targets contacted"],
+    ["targets_contacted", "Companies contacted"],
     ["owners_talked", "Owners talked to"],
     ["owners_agreed", "Owners agreed to questionnaire"],
     ["intro_calls_completed", "Questionnaire completed"],
@@ -221,9 +220,11 @@ function formatDateOnly(dateStr) {
 function formatOutreachCountCell(row) {
   const calls = row.calls_count || 0;
   const emails = row.email_count || 0;
+  const linkedin = row.linkedin_count || 0;
   const parts = [];
   if (calls > 0) parts.push(`${calls} call${calls === 1 ? "" : "s"}`);
   if (emails > 0) parts.push(`${emails} email${emails === 1 ? "" : "s"}`);
+  if (linkedin > 0) parts.push(`${linkedin} LinkedIn`);
   return parts.join("\n");
 }
 
@@ -725,7 +726,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   function renderOutreachTable(rows) {
-    const callsLabel = periodType === "month" ? "Targets contacted this month" : "Targets contacted this week";
+    const callsLabel = periodType === "month" ? "Companies contacted this month" : "Companies contacted this week";
     // Attempted contacts counts every logged call (repeat attempts on the
     // same target included), unlike Targets contacted's distinct-people
     // count — shown alongside it so it lines up with what interns actually

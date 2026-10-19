@@ -1307,3 +1307,17 @@ $$;
 -- the next uncontacted dial with a phone and calls its first number (autodialTarget/runAutodial in
 -- js/dials.js); not for "Accepted intro call", "Uncontacted", or while a call is in progress.
 -- ============================================================================
+
+-- ============================================================================
+-- COMPANIES CONTACTED + LINKEDIN TRACKING — migration "linkedin_tracking_and_companies_contacted".
+-- Profile stats (and the weekly survey's "calls made") now count COMPANIES contacted: distinct dials
+-- via profile_companies_contacted(user_ids, dial_type, starts[], ends[]); past weeks recompute from
+-- the same call_status_changes log. The buyer report graph drops "Total number of contacts".
+-- LinkedIn (js/linkedin.js): the dial's LinkedIn message button copies the (Company name)/(Seller name)/
+-- (Your name) template (profiles.linkedin_template), opens the profile and logs a PENDING
+-- linkedin_touches row that counts for nothing. record_linkedin_sends() — fed from the user's own
+-- LinkedIn export (messages.csv, read in the browser) — is the only thing that counts a message:
+-- call_status_changes row (contact_method 'linkedin', dated when sent) + dials.contacted_linkedin_date.
+-- "Contacted today" is now max 4 (mobile call, company call, email, LinkedIn).
+-- get_buyer_contacted_owners returns linkedin_count (calls_count excludes LinkedIn).
+-- ============================================================================

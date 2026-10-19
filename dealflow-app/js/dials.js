@@ -2,7 +2,8 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
+import { rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML, linkedinMessageButton } from "./contactIcons.js";
+import { onLinkedInTap, openLinkedInTemplateEditor, openLinkedInVerify, normalizeLinkedInUrl } from "./linkedin.js";
 import {
   wireAdvancedSettingsPopup,
   resolvePersonalizedEmailBody,
@@ -343,6 +344,8 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
+document.getElementById("linkedinTemplateRow")?.addEventListener("click", () => openLinkedInTemplateEditor(profile));
+document.getElementById("linkedinVerifyRow")?.addEventListener("click", () => openLinkedInVerify(profile));
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -408,6 +411,21 @@ function rfWebsite(label, value) {
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
       <div class="rf-value ${v ? "" : "empty"}">${v ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v)}</a>` : "Not provided"}</div>
+    </div>`;
+}
+
+// LinkedIn row: the profile link as before, plus the instant-contact button next to it.
+function rfLinkedIn(dial) {
+  const v = dial.linkedin ? String(dial.linkedin) : "";
+  const href = v && !/^https?:\/\//i.test(v) ? `https://${v}` : v;
+  const button = normalizeLinkedInUrl(v) ? `<div class="contact-actions">${linkedinMessageButton(dial.id)}</div>` : "";
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">LinkedIn</div>
+      <div class="rf-value-row">
+        <div class="rf-value ${v ? "" : "empty"}">${v ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v)}</a>` : "Not provided"}</div>
+        ${button}
+      </div>
     </div>`;
 }
 
@@ -821,6 +839,7 @@ const CONTACT_METHOD_DATE_COLUMNS = {
   mobile: "contacted_mobile_date",
   company: "contacted_company_date",
   email: "contacted_email_date",
+  linkedin: "contacted_linkedin_date", // only set once LinkedIn's own export confirms a send (js/linkedin.js)
 };
 
 // How many of the 3 circles are checked today — drives the "Contacted today
@@ -903,6 +922,14 @@ function placeCall(dial, phone, method) {
 document.addEventListener(
   "click",
   (e) => {
+    const li = e.target.closest?.(".contact-action-linkedin");
+    if (li) {
+      e.preventDefault();
+      e.stopPropagation();
+      const d = dials.find((x) => x.id === li.dataset.dialId) || (currentDial?.id === li.dataset.dialId ? currentDial : null);
+      if (d) onLinkedInTap(d, profile);
+      return;
+    }
     const btn = e.target.closest?.(".contact-action-call");
     if (!btn) return;
     e.preventDefault();
@@ -2629,10 +2656,10 @@ function renderDialsTable() {
               ? selectCircleHTML(d)
               : contactActionIcons({
                   dialId: d.id,
+                  linkedin: normalizeLinkedInUrl(d.linkedin) ? d.linkedin : "",
                   method: d.mobile_phone ? "mobile" : "company",
                   phone: d.mobile_phone || d.company_phone,
                   email: d.email,
-                  linkedin: d.linkedin,
                   personalizedEmailBody: resolveEmailBody(d),
                   personalizedEmailSubject: resolveEmailSubject(d),
                   personalizedTextingBody: resolvePersonalizedTextingBody(profile, d),
@@ -2707,7 +2734,7 @@ function buildDialViewHTML(dial) {
   return `
     ${rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial))}
     ${buildPhoneNumbersHTML(dial, null, resolvePersonalizedTextingBody(profile, dial), dial.id)}
-    ${rfWebsite("LinkedIn", dial.linkedin)}
+    ${rfLinkedIn(dial)}
     ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}

@@ -1803,7 +1803,7 @@ async function loadCallsChart() {
   const startOfTomorrow = new Date(startOfToday);
   startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
 
-  const cacheKey = `calls_${getDealSide()}_${ids.join(",")}`;
+  const cacheKey = `companies_${getDealSide()}_${ids.join(",")}`;
   // One selected account is easy; several (especially "every account", the
   // admin default) can rack up thousands of call_status_changes rows across
   // 6 weeks — well past PostgREST's row cap on a plain .select(), which
@@ -1822,20 +1822,19 @@ async function loadCallsChart() {
       return [ws, we];
     });
     bounds.push([startOfToday, startOfTomorrow]);
-    const results = await Promise.all(
-      bounds.map(([from, to]) =>
-        supabase
-          .from("call_status_changes")
-          .select("id", { count: "exact", head: true })
-          .in("user_id", ids)
-          .eq("dial_type", getDealSide())
-          .gte("changed_at", from.toISOString())
-          .lt("changed_at", to.toISOString())
-      )
-    );
-    const err = results.find((r) => r.error)?.error;
-    if (err) return { failed: err };
-    return { counts: results.slice(0, weekStarts.length).map((r) => r.count || 0), todayCount: results[results.length - 1].count || 0 };
+    // COMPANIES contacted (distinct dials per bucket), not raw contact attempts — one company called
+    // three times, or called and emailed, is still one company. Computed in the database from the
+    // same contact log as before, so past weeks change to match.
+    const { data, error } = await supabase.rpc("profile_companies_contacted", {
+      p_user_ids: ids,
+      p_dial_type: getDealSide(),
+      p_starts: bounds.map((b) => b[0].toISOString()),
+      p_ends: bounds.map((b) => b[1].toISOString()),
+    });
+    if (error) return { failed: error };
+    const byBucket = new Array(bounds.length).fill(0);
+    (data || []).forEach((r) => (byBucket[r.bucket - 1] = Number(r.n) || 0));
+    return { counts: byBucket.slice(0, weekStarts.length), todayCount: byBucket[bounds.length - 1] };
   })();
   let finalCounts, finalToday;
   if (failed) {
@@ -1861,9 +1860,9 @@ async function loadCallsChart() {
         const remaining = quota - thisWeekCount;
         return remaining <= 0
           ? `<div class="profile-quota-status profile-quota-met">(Quota met)</div>`
-          : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more contact${remaining === 1 ? "" : "s"} to reach quota)</div>`;
+          : `<div class="profile-quota-status profile-quota-remaining">(${remaining} more ${remaining === 1 ? "company" : "companies"} to reach quota)</div>`;
       })();
-  els.callsThisWeekText.innerHTML = `${thisWeekCount} attempted contact${thisWeekCount === 1 ? "" : "s"} this week, ${todayCount_} today${quotaHTML}`;
+  els.callsThisWeekText.innerHTML = `${thisWeekCount} ${thisWeekCount === 1 ? "company" : "companies"} contacted this week, ${todayCount_} today${quotaHTML}`;
   renderCallsChart(els.callsChart, weekStarts, counts_, quota);
 }
 
@@ -2173,13 +2172,10 @@ async function openWeeklySurveyModal() {
   const dateEnd = periodEnd.toISOString().slice(0, 10);
 
   const [callsRes, introRes, dialsRes] = await Promise.all([
+    // companies contacted this period (distinct dials), same measure as the Outreach chart
     supabase
-      .from("call_status_changes")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", profile.id)
-      .eq("dial_type", getDealSide())
-      .gte("changed_at", boundStart)
-      .lt("changed_at", boundEnd),
+      .rpc("profile_companies_contacted", { p_user_ids: [profile.id], p_dial_type: getDealSide(), p_starts: [boundStart], p_ends: [boundEnd] })
+      .then(({ data, error }) => ({ count: Number(data?.[0]?.n) || 0, error })),
     supabase
       .from("intro_call_log")
       .select("id", { count: "exact", head: true })

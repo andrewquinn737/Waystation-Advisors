@@ -453,7 +453,7 @@ function firstNameOf(fullName) {
 // contacted — profile is optional (personalized email/texting don't pass
 // it, since neither has a drag chip for this token) and just resolves to
 // empty text rather than throwing if omitted.
-function substitutePersonalizedTokens(text, dial, profile) {
+export function substitutePersonalizedTokens(text, dial, profile) {
   return text
     .split("(Company name)")
     .join(dial.company_name || "")

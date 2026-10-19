@@ -1970,3 +1970,10 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .dial-transcript-call details { margin-top: 6px; font-size: 13px; }
 .dial-transcript-call summary { cursor: pointer; color: var(--accent); }
 .dial-transcript-lines { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+
+/* LinkedIn message button (js/linkedin.js) + its confirmation toast */
+.contact-action-linkedin .linkedin-glyph { color: #0a66c2; }
+.linkedin-toast {
+  position: fixed; left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); z-index: 300; max-width: 520px; margin: 0 auto;
+  background: #15213a; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.4; box-shadow: 0 6px 20px rgba(0,0,0,.3);
+}
