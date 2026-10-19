@@ -99,7 +99,17 @@ export async function startCall(opts) {
       if (transcribe && lines >= 4) {
         panel.summary("Summarizing the call…");
         const { data } = await supabase.functions.invoke("call-summary", { body: { call_id: callId } });
-        if (data?.summary) { panel.summary(data.summary); opts.onSummary?.(callId); } else panel.summary("No summary (call too short).");
+        if (data?.summary) { panel.summary(data.summary); opts.onSummary?.(callId); }
+        else if (data?.skipped === "too_short") panel.summary("No summary (call too short).");
+        else {
+          // The request failed or timed out — a background job retries every minute, so look again shortly.
+          panel.summary("Summary is still being prepared — it will appear in the dial's Transcript box in about a minute.");
+          const id = callId;
+          setTimeout(async () => {
+            const { data: row } = await supabase.from("calls").select("summary").eq("id", id).maybeSingle();
+            if (row?.summary) { try { panel.summary(row.summary); } catch { /* panel closed */ } opts.onSummary?.(id); }
+          }, 75000);
+        }
       }
     }
   }

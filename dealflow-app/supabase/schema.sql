@@ -1327,3 +1327,8 @@ $$;
 -- (get_buyer_contacted_owners is back to calls/emails). Left in place: linkedin_touches (2 logged
 -- taps, unused) and profiles.linkedin_template (unused, empty). The companies-contacted Profile
 -- stats (profile_companies_contacted) and the reports-graph change remain.
+
+-- call_summary_catchup (migration call_summary_catchup_cron): every minute, calls that ended 30 s–3 h ago,
+-- were transcribed (>= 4 lines) and still have no summary are sent to the call-summary edge function with
+-- the app_secrets key CALL_SUMMARY_INTERNAL_KEY (x-internal-key header), so a missed summary self-heals.
+-- cron job: 'call-summary-catchup'.

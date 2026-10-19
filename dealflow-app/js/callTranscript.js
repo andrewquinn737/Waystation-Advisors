@@ -19,13 +19,19 @@ export function startTranscript({ callId, onLine, onInterim, onFailed }) {
   const pending = []; // finished lines waiting to be saved
   let flushTimer = null, keepAlive = null;
 
-  const flush = async () => {
+  // Flushes run one after another, so stop() can wait for any batch already on its way to the
+  // database (otherwise the summary could be requested before the last lines were saved).
+  let saving = Promise.resolve();
+  const flush = () => {
     clearTimeout(flushTimer); flushTimer = null;
-    if (!pending.length) return;
+    if (!pending.length) return saving;
     const rows = pending.splice(0).map((l) => ({ call_id: callId, speaker: l.speaker, text: l.text, start_ms: l.start_ms, end_ms: l.end_ms, confidence: l.confidence }));
-    const { error } = await supabase.from("call_lines").insert(rows);
-    if (!error) savedCount += rows.length;
-    else console.error("call_lines insert failed", error);
+    saving = saving.then(async () => {
+      const { error } = await supabase.from("call_lines").insert(rows);
+      if (!error) savedCount += rows.length;
+      else console.error("call_lines insert failed", error);
+    });
+    return saving;
   };
 
   const onMessage = (ev) => {

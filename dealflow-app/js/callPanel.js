@@ -26,8 +26,17 @@ export function openCallPanel({ name, company, onHangup, onMute, onOpenDial }) {
   const caps = $(".call-panel-captions");
   let timer = null, startedAt = 0, muted = false, lines = [];
 
-  el.querySelector('[data-act="hangup"]').addEventListener("click", () => onHangup?.());
-  el.querySelector('[data-act="dial"]').addEventListener("click", () => onOpenDial?.());
+  // Fire on the finger lifting (pointerup) as well as on click: the page-wide double-tap-zoom
+  // blocker (noZoom.js) cancels the click of any tap that comes within 300 ms of another, which on a
+  // phone could swallow this button. Both paths are de-duplicated.
+  const onTap = (btn, fn) => {
+    let last = 0;
+    const run = () => { const now = Date.now(); if (now - last < 600) return; last = now; fn(); };
+    btn.addEventListener("pointerup", (e) => { if (e.pointerType === "touch") run(); });
+    btn.addEventListener("click", run);
+  };
+  onTap(el.querySelector('[data-act="hangup"]'), () => onHangup?.());
+  onTap(el.querySelector('[data-act="dial"]'), () => onOpenDial?.());
   el.querySelector('[data-act="mute"]').addEventListener("click", (e) => {
     muted = !muted;
     e.currentTarget.textContent = muted ? "Unmute" : "Mute";
