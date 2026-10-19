@@ -220,11 +220,9 @@ function formatDateOnly(dateStr) {
 function formatOutreachCountCell(row) {
   const calls = row.calls_count || 0;
   const emails = row.email_count || 0;
-  const linkedin = row.linkedin_count || 0;
   const parts = [];
   if (calls > 0) parts.push(`${calls} call${calls === 1 ? "" : "s"}`);
   if (emails > 0) parts.push(`${emails} email${emails === 1 ? "" : "s"}`);
-  if (linkedin > 0) parts.push(`${linkedin} LinkedIn`);
   return parts.join("\n");
 }
 

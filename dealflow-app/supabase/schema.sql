@@ -1321,3 +1321,9 @@ $$;
 -- "Contacted today" is now max 4 (mobile call, company call, email, LinkedIn).
 -- get_buyer_contacted_owners returns linkedin_count (calls_count excludes LinkedIn).
 -- ============================================================================
+
+-- LinkedIn tracking REMOVED (migration "undo_linkedin_tracking_build") — shelved for now. Dropped:
+-- record_linkedin_sends(), dials.contacted_linkedin_date, the linkedin_count report column
+-- (get_buyer_contacted_owners is back to calls/emails). Left in place: linkedin_touches (2 logged
+-- taps, unused) and profiles.linkedin_template (unused, empty). The companies-contacted Profile
+-- stats (profile_companies_contacted) and the reports-graph change remain.

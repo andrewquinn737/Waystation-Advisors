@@ -353,7 +353,6 @@
           <span class="toggle-switch" id="personalizedTextingToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
       </div>
-      <p class="help-text">Only one email option can be on at a time — it decides what the instant Email icon pre-fills. Recommended first/second email (team leads) use each dial's own Email 1/Email 2 from the imported CSV.</p>
       <!-- Autodial (js/autodial.js): separate from the email options above. -->
       <div class="advanced-settings-list" style="margin-top: 14px;">
         <button type="button" class="advanced-settings-row" id="autodialRow">
@@ -361,16 +360,6 @@
           <span class="toggle-switch" id="autodialToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
         </button>
       </div>
-      <p class="help-text">After you choose a category, jump to the next uncontacted dial and start calling it (not for "Accepted intro call").</p>
-      <div class="advanced-settings-list" style="margin-top: 14px;">
-        <button type="button" class="advanced-settings-row" id="linkedinTemplateRow">
-          <span class="advanced-settings-row-label">LinkedIn message</span>
-        </button>
-        <button type="button" class="advanced-settings-row" id="linkedinVerifyRow">
-          <span class="advanced-settings-row-label">Verify LinkedIn messages</span>
-        </button>
-      </div>
-      <p class="help-text">A LinkedIn message only counts once your LinkedIn data export (messages.csv) confirms it was sent.</p>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
       </div>
@@ -390,7 +379,6 @@
         <h2>About us email</h2>
         <span class="toggle-switch" id="aboutUsEmailEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
       </div>
-      <p class="help-text">This fills in the mail app's subject and message body when you tap the Email icon on a dial. Mutually exclusive with Personalized email — turning this on turns that off.</p>
       <label for="aboutUsEmailSubjectInput">Subject (optional)</label>
       <input type="text" id="aboutUsEmailSubjectInput" placeholder="About us" />
       <textarea id="aboutUsEmailTextarea" class="personalized-email-textarea" placeholder="Hey (Seller name), here is a little information about our company..."></textarea>
@@ -420,7 +408,6 @@
         <h2>Personalized texting</h2>
         <span class="toggle-switch" id="personalizedTextingEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
       </div>
-      <p class="help-text">This fills in the message body when you tap the Text icon on a dial.</p>
       <textarea id="personalizedTextingTextarea" class="personalized-email-textarea" placeholder="Hi (Seller name), I wanted to reach out about (Company name)..."></textarea>
       <div class="personalized-email-tokens">
         <button type="button" class="personalized-email-token" id="personalizedTextingTokenCompany">(Company name)</button>
@@ -448,7 +435,6 @@
         <h2>Personalized email</h2>
         <span class="toggle-switch" id="personalizedEmailEditorToggle" role="switch" aria-checked="false"><span class="toggle-switch-thumb"></span></span>
       </div>
-      <p class="help-text">This fills in the mail app's subject and message body when you tap the Email icon on a dial.</p>
       <label for="personalizedEmailSubjectInput">Subject (optional)</label>
       <input type="text" id="personalizedEmailSubjectInput" placeholder="Quick question for (Company name)" />
       <textarea id="personalizedEmailTextarea" class="personalized-email-textarea" placeholder="Hi (Seller name), I wanted to reach out about (Company name)..."></textarea>

@@ -284,11 +284,6 @@ export function buildPhoneNumbersHTML(entity, extraFor, personalizedTextingBody,
 // the "Personalized texting" advanced setting — pre-fills the Text icon's
 // message body the same way. Every other caller (Clients, and Dials' own
 // detail-modal phone rows) omits these, so their output is unchanged.
-// The LinkedIn "instant contact" button on a dial (js/dials.js wires the click -> js/linkedin.js).
-export function linkedinMessageButton(dialId) {
-  return `<button type="button" class="contact-action-btn contact-action-linkedin" data-dial-id="${escapeHtml(dialId)}" title="LinkedIn message"><span class="linkedin-glyph">in</span></button>`;
-}
-
 export function contactActionIcons({ phone, email, linkedin, personalizedEmailBody, personalizedEmailSubject, personalizedTextingBody, extra = "", dialId, method } = {}) {
   const parts = [];
   if (phone) {
@@ -308,8 +303,7 @@ export function contactActionIcons({ phone, email, linkedin, personalizedEmailBo
       emailActionHTML(email, personalizedEmailBody, personalizedEmailSubject)
     );
   }
-  if (dialId && linkedin) parts.push(linkedinMessageButton(dialId));
-  if (!dialId && !phone && !email && linkedin) {
+  if (!phone && !email && linkedin) {
     const href = /^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`;
     // The LinkedIn wordmark's own lowercase "in" lettermark, as plain text
     // rather than a hand-drawn SVG — more recognizable than an invented
