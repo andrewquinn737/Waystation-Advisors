@@ -906,24 +906,12 @@ function openDialFromCall(dial) {
       renderDialModal();
     }
     els.dialModalBackdrop.scrollTop = 0;
-    // TEMPORARY diagnostics (remove once "Open dial" is confirmed working on phones).
-    setTimeout(() => {
-      try {
-        const bd = els.dialModalBackdrop, box = bd.querySelector(".dial-modal");
-        const r = box.getBoundingClientRect(), br = bd.getBoundingClientRect();
-        const cs = getComputedStyle(bd), bs = getComputedStyle(box);
-        const top = document.elementFromPoint(innerWidth / 2, innerHeight / 3);
-        const lines = [
-          `hidden=${bd.classList.contains("hidden")} display=${cs.display} vis=${cs.visibility} z=${cs.zIndex}`,
-          `backdrop ${Math.round(br.x)},${Math.round(br.y)} ${Math.round(br.width)}x${Math.round(br.height)}`,
-          `box ${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)} op=${bs.opacity} tf=${bs.transform}`,
-          `win ${innerWidth}x${innerHeight} scrollY=${Math.round(scrollY)} bodyPos=${getComputedStyle(document.body).position}`,
-          `top=${top?.id || top?.className || top?.tagName}`,
-          `dial=${currentDial?.id ? "set" : "none"} name=${currentDial?.full_name || ""}`,
-        ];
-        showNotice(lines.join("  |  "), { title: "Open dial (debug)" });
-      } catch (e) { showNotice(String(e), { title: "Open dial (debug)" }); }
-    }, 400);
+    // Some phones don't repaint a popup that opens in response to a tap on the call bar until something else
+    // redraws the screen (the earlier debug popup is what made it show) — force a repaint.
+    const bd = els.dialModalBackdrop;
+    bd.style.transform = "translateZ(0)";
+    void bd.offsetHeight;
+    requestAnimationFrame(() => { requestAnimationFrame(() => { bd.style.transform = ""; }); });
     return !els.dialModalBackdrop.classList.contains("hidden");
   } catch (e) {
     console.error("open dial failed", e);
