@@ -91,6 +91,7 @@ export async function startCall(opts) {
     try { wake?.release(); } catch { /* ignore */ }
     try { client?.disconnect(); } catch { /* ignore */ }
     remoteAudio.srcObject = null; remoteAudio.remove();
+    clearInterval(guard); guard = null;
     document.removeEventListener("visibilitychange", onVis); document.removeEventListener("visibilitychange", onVisWake); clearTimeout(micTimer);
     active = false;
   };
@@ -123,6 +124,24 @@ export async function startCall(opts) {
       watchMic();
       panel.warn("");
     } catch { panel.warn("Your microphone stopped working — hang up and call again."); }
+  };
+  // iPhones pause the call's audio and cut the microphone when something interrupts the audio session (a
+  // notification sound, Siri, a message tone) and do NOT resume either by themselves. While a call is live,
+  // every 1.5 s: restart the incoming audio if it was paused, wake the audio engine if it was suspended, and
+  // re-open the microphone if it stayed muted/ended for ~3 s.
+  let guard = null, micBadSince = 0;
+  const startGuard = () => {
+    if (guard) return;
+    guard = setInterval(() => {
+      if (finished) return;
+      try { if (remoteAudio.srcObject && remoteAudio.paused) remoteAudio.play().catch(() => {}); } catch { /* ignore */ }
+      try { if (ctx && ctx.state !== "running" && ctx.state !== "closed") ctx.resume().catch(() => {}); } catch { /* ignore */ }
+      const t = mic?.getAudioTracks?.()[0];
+      const bad = !t || t.readyState === "ended" || t.muted;
+      if (!bad) { micBadSince = 0; return; }
+      if (!micBadSince) micBadSince = Date.now();
+      else if (Date.now() - micBadSince > 3000) { micBadSince = Date.now() + 8000; recoverMic(); } // then give it 8 s before trying again
+    }, 1500);
   };
   const onVis = async () => {
     if (document.visibilityState === "visible" && !finished) {
@@ -204,7 +223,7 @@ export async function startCall(opts) {
       attachRemote(c); // as early as the carrier sends audio (ringback, greeting), not only once "active"
       if (st === "ringing" || st === "early" || st === "trying") { ringing = true; panel.state("Ringing…"); }
       if (st === "active" && !answeredAt) {
-        answeredAt = new Date(); ringing = true;
+        answeredAt = new Date(); ringing = true; startGuard();
         panel.state(transcribe ? "Connected · transcribing" : "Connected"); panel.startTimer();
         // The owner's first words can arrive a beat after "active": keep nudging playback for a few seconds.
         let nudges = 0;
