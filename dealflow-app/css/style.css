@@ -1970,12 +1970,9 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .call-panel-summary { margin: 8px 0; font-size: 13px; line-height: 1.4; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
 .call-panel-actions { display: flex; gap: 8px; }
 .call-panel-actions .btn.active { background: var(--gold-soft); border-color: var(--gold); }
-/* Number pad attached to the top edge of the call bar (shares its border/background, no gap). */
-.call-keypad {
-  position: absolute; left: -1px; right: -1px; bottom: 100%; padding: 10px 12px 12px;
-  background: var(--surface); border: 1px solid var(--border); border-bottom: none; border-radius: 14px 14px 0 0;
-  box-shadow: 0 -6px 18px rgba(0,0,0,.14);
-}
+/* Number pad: the first block INSIDE the call bar, so it shares the bar's one background, border and
+   rounded corners and reads as the same card (the bar grows upward when it opens). */
+.call-keypad { padding: 0 0 10px; margin-bottom: 8px; }
 .call-keypad.hidden { display: none; }
 .call-keypad-digits { min-height: 20px; margin-bottom: 6px; text-align: center; font-size: 17px; letter-spacing: .12em; font-variant-numeric: tabular-nums; color: var(--text-muted); }
 .call-keypad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 300px; margin: 0 auto; }
