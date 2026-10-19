@@ -1332,3 +1332,8 @@ $$;
 -- were transcribed (>= 4 lines) and still have no summary are sent to the call-summary edge function with
 -- the app_secrets key CALL_SUMMARY_INTERNAL_KEY (x-internal-key header), so a missed summary self-heals.
 -- cron job: 'call-summary-catchup'.
+
+-- get_buyer_contacted_owners: the report's Call notes column now prefers the dial's own typed call notes and
+-- only falls back to the call summary when there are none (was: summary first).
+-- call-summary edge function: uses Claude (app_secrets/function secret ANTHROPIC_API_KEY, model claude-haiku-5-5)
+-- with context about who is calling and why; falls back to Deepgram text summarization when no key is set.
