@@ -12,7 +12,7 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
   el.innerHTML = `
     <div class="call-keypad hidden">
       <div class="call-keypad-digits"></div>
-      <div class="call-keypad-grid">${["1","2","3","4","5","6","7","8","9","*","0","#"].map((k) => `<button type="button" class="call-key" data-key="${k}">${k}</button>`).join("")}</div>
+      <div class="call-keypad-grid">${[["1",""],["2","ABC"],["3","DEF"],["4","GHI"],["5","JKL"],["6","MNO"],["7","PQRS"],["8","TUV"],["9","WXYZ"],["*",""],["0",""],["#",""]].map(([k, l]) => `<button type="button" class="call-key" data-key="${k}"><span class="call-key-num">${k}</span><span class="call-key-letters">${l || "&nbsp;"}</span></button>`).join("")}</div>
     </div>
     <div class="call-panel-top">
       <div class="call-panel-who"><strong>${escapeHtml(name || "Call")}</strong>${company ? `<span>${escapeHtml(company)}</span>` : ""}</div>
