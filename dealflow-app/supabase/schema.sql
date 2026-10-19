@@ -1337,3 +1337,7 @@ $$;
 -- only falls back to the call summary when there are none (was: summary first).
 -- call-summary edge function: uses Claude (app_secrets/function secret ANTHROPIC_API_KEY, model claude-haiku-5-5)
 -- with context about who is calling and why; falls back to Deepgram text summarization when no key is set.
+
+-- get_buyer_contacted_owners: when the report falls back to call summaries (no typed notes), it now lists the
+-- latest summary per phone line separately, labeled "Mobile: …" / "Company line: …" (was: one summary only).
+-- call-summary edge function: tells the summarizer which line was dialed (company line vs mobile).

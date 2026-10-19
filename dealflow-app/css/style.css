@@ -1968,6 +1968,11 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .call-panel-captions { margin: 8px 0; font-size: 13px; line-height: 1.4; max-height: 86px; overflow: hidden; }
 .call-panel-captions .interim { color: var(--text-muted); font-style: italic; }
 .call-panel-summary { margin: 8px 0; font-size: 13px; line-height: 1.4; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
+.call-panel-warn { margin: 8px 0; padding: 7px 10px; border-radius: 8px; background: #fdecea; color: #b3261e; font-size: 13px; font-weight: 600; line-height: 1.35; }
+.call-panel-warn.hidden { display: none; }
+/* Muted: unmistakable, so an accidental tap on Mute is noticed straight away. */
+.call-panel.is-muted { border-color: #d1453b; }
+.call-panel-actions .btn.is-muted { background: #d1453b; border-color: #d1453b; color: #fff; }
 .call-panel-actions { display: flex; gap: 8px; }
 .call-panel-actions .btn.active { background: var(--gold-soft); border-color: var(--gold); }
 /* Number pad: the first block INSIDE the call bar, so it shares the bar's one background, border and

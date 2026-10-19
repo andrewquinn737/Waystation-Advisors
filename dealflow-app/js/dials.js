@@ -923,7 +923,7 @@ async function loadDialTranscript() {
   const dialId = currentDial.id;
   const { data, error } = await supabase
     .from("calls")
-    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary")
+    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary, dial_method")
     .eq("dial_id", dialId)
     .eq("direction", "outbound")
     .eq("mode", "in_app")
@@ -947,7 +947,8 @@ async function loadDialTranscript() {
             ? "Not recorded (call-recording rules for this state)."
             : "No summary (call was too short).";
       const lines = c.transcribed && c.answered ? `<details data-call-id="${c.id}"><summary>Full transcript</summary><div class="dial-transcript-lines"></div></details>` : "";
-      return `<div class="dial-transcript-call"><div class="dial-transcript-when">${escapeHtml(when + dur)}</div><div>${body}</div>${lines}</div>`;
+      const line = c.dial_method === "company" ? "Company line" : c.dial_method === "mobile" ? "Mobile" : "Call";
+      return `<div class="dial-transcript-call"><div class="dial-transcript-when"><b>${line}</b> · ${escapeHtml(when + dur)}</div><div>${body}</div>${lines}</div>`;
     })
     .join("");
   el.querySelectorAll("details[data-call-id]").forEach((d) => {
@@ -957,7 +958,7 @@ async function loadDialTranscript() {
       target.dataset.loaded = "1";
       const { data: lines } = await supabase.from("call_lines").select("speaker, text").eq("call_id", d.dataset.callId).order("start_ms");
       target.innerHTML = (lines || []).length
-        ? lines.map((l) => `<div><b>${l.speaker === "intern" ? "You" : "Owner"}:</b> ${escapeHtml(l.text)}</div>`).join("")
+        ? lines.map((l) => `<div><b>${l.speaker === "intern" ? "You" : "Them"}:</b> ${escapeHtml(l.text)}</div>`).join("")
         : `<div class="help-text">No transcript lines.</div>`;
     });
   });

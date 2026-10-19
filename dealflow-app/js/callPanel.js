@@ -20,6 +20,7 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
     </div>
     <div class="call-panel-captions"></div>
     <div class="call-panel-summary hidden"></div>
+    <div class="call-panel-warn hidden"></div>
     <div class="call-panel-actions">
       <button type="button" class="btn secondary" data-act="mute">Mute</button>
       <button type="button" class="btn secondary" data-act="keypad">Keypad</button>
@@ -53,19 +54,27 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
     typed.textContent = digits;
     onDtmf?.(k.dataset.key);
   }));
-  el.querySelector('[data-act="mute"]').addEventListener("click", (e) => {
+  const muteBtn = el.querySelector('[data-act="mute"]');
+  const showMuted = () => {
+    muteBtn.textContent = muted ? "Unmute" : "Mute";
+    muteBtn.classList.toggle("is-muted", muted);
+    el.classList.toggle("is-muted", muted);
+  };
+  muteBtn.addEventListener("click", () => {
     muted = !muted;
-    e.currentTarget.textContent = muted ? "Unmute" : "Mute";
+    showMuted();
     onMute?.(muted);
   });
 
   const drawCaptions = (interim) => {
-    const shown = lines.slice(-3).map((l) => `<div><b>${l.speaker === "intern" ? "You" : "Owner"}:</b> ${escapeHtml(l.text)}</div>`);
-    if (interim) shown.push(`<div class="interim"><b>${interim.speaker === "intern" ? "You" : "Owner"}:</b> ${escapeHtml(interim.text)}</div>`);
+    const shown = lines.slice(-3).map((l) => `<div><b>${l.speaker === "intern" ? "You" : "Them"}:</b> ${escapeHtml(l.text)}</div>`);
+    if (interim) shown.push(`<div class="interim"><b>${interim.speaker === "intern" ? "You" : "Them"}:</b> ${escapeHtml(interim.text)}</div>`);
     caps.innerHTML = shown.join("");
   };
 
   return {
+    // A red line above the buttons (e.g. the phone interrupted the microphone); '' clears it.
+    warn(text) { const w = $(".call-panel-warn"); w.textContent = text || ""; w.classList.toggle("hidden", !text); },
     state(text) { $(".call-panel-state").textContent = text; },
     startTimer() {
       startedAt = Date.now();

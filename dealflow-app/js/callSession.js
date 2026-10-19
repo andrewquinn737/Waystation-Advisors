@@ -91,10 +91,46 @@ export async function startCall(opts) {
     try { wake?.release(); } catch { /* ignore */ }
     try { client?.disconnect(); } catch { /* ignore */ }
     remoteAudio.srcObject = null; remoteAudio.remove();
-    document.removeEventListener("visibilitychange", onVis);
+    document.removeEventListener("visibilitychange", onVis); document.removeEventListener("visibilitychange", onVisWake); clearTimeout(micTimer);
     active = false;
   };
-  const onVis = async () => { if (document.visibilityState === "visible" && !finished && navigator.wakeLock) { try { wake = await navigator.wakeLock.request("screen"); } catch { /* ignore */ } } };
+  // The phone or browser can silence the microphone mid-call (another app or notification grabbing audio, a
+  // Bluetooth switch, the page being backgrounded). Say so on screen, and re-open the mic if it was cut off.
+  let micTimer = null;
+  const watchMic = () => {
+    const track = mic?.getAudioTracks?.()[0];
+    if (!track) return;
+    const clear = () => { clearTimeout(micTimer); if (!finished) panel.warn(""); };
+    track.addEventListener("mute", () => {
+      clearTimeout(micTimer);
+      micTimer = setTimeout(() => { if (!finished && track.muted) panel.warn("Your phone interrupted the microphone — they may not hear you."); }, 1200);
+    });
+    track.addEventListener("unmute", clear);
+    track.addEventListener("ended", () => recoverMic());
+  };
+  const recoverMic = async () => {
+    if (finished) return;
+    panel.warn("Microphone was cut off — reconnecting it…");
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const t = fresh.getAudioTracks()[0];
+      const pc = call?.peer?.instance;
+      const sender = pc?.getSenders?.().find((s) => s.track?.kind === "audio" || (!s.track && s.dtmf));
+      if (!sender) throw new Error("no sender");
+      await sender.replaceTrack(t);
+      mic?.getTracks().forEach((x) => x.stop());
+      mic = fresh;
+      watchMic();
+      panel.warn("");
+    } catch { panel.warn("Your microphone stopped working — hang up and call again."); }
+  };
+  const onVis = async () => {
+    if (document.visibilityState === "visible" && !finished) {
+      const t = mic?.getAudioTracks?.()[0];
+      if (t && t.readyState === "ended") recoverMic();
+    }
+  };
+  const onVisWake = async () => { if (document.visibilityState === "visible" && !finished && navigator.wakeLock) { try { wake = await navigator.wakeLock.request("screen"); } catch { /* ignore */ } } };
 
   async function finish(label) {
     if (finished) return;
@@ -137,7 +173,8 @@ export async function startCall(opts) {
   try {
     try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
     catch { await logNative(profile, dial, to, dial.state, "mic_denied", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
-    document.addEventListener("visibilitychange", onVis); onVis();
+    document.addEventListener("visibilitychange", onVis); document.addEventListener("visibilitychange", onVisWake); onVisWake();
+    watchMic();
 
     const { data: t, error: te } = await withTimeout(supabase.functions.invoke("telnyx-token", { body: { to_number: to, owner_state: dial.state || null } }), 8000, "token");
     if (te || !t) throw new Error("token");
