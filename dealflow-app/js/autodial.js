@@ -27,3 +27,26 @@ export function wireAutodialToggle(rowBtn, switchEl, profile) {
     }
   });
 }
+
+// Generic on/off row for a boolean profiles column (used for "Transcript calling", which defaults to ON).
+export function wireProfileToggle(rowBtn, switchEl, profile, column, defaultOn = false) {
+  if (!rowBtn || !switchEl) return;
+  const isOn = () => (profile[column] === undefined || profile[column] === null ? defaultOn : profile[column] === true);
+  const render = () => {
+    const on = isOn();
+    switchEl.classList.toggle("on", on);
+    switchEl.setAttribute("aria-checked", String(on));
+  };
+  render();
+  rowBtn.addEventListener("click", async () => {
+    const next = !isOn();
+    profile[column] = next;
+    render();
+    const { error } = await supabase.from("profiles").update({ [column]: next }).eq("id", profile.id);
+    if (error) {
+      console.error(`Failed to update ${column}`, error);
+      profile[column] = !next;
+      render();
+    }
+  });
+}

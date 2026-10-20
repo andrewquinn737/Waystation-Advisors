@@ -1346,3 +1346,7 @@ $$;
 -- sets dials.created_by to the owner of the tab the dial was moved into. Row-level security on dials goes by
 -- created_by, so dials moved into someone else's tab used to be invisible to that tab's owner. Existing
 -- mismatches (37 dials) were backfilled so created_by = the tab owner.
+
+-- profiles.transcript_calling_enabled (migration profiles_transcript_calling_enabled): boolean, default true.
+-- Dials > Advanced "Transcript calling": on = calls run in the app with a live transcript; off = calls open the
+-- phone's own dialer (the contact is still recorded).

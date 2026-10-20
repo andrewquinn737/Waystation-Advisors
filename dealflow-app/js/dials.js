@@ -21,7 +21,7 @@ import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
 import { startCall, isCallActive, primeAudio } from "./callSession.js";
-import { wireAutodialToggle } from "./autodial.js";
+import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
@@ -191,6 +191,8 @@ const els = {
   notificationsLabel: document.getElementById("notificationsLabel"),
   autodialRow: document.getElementById("autodialRow"),
   autodialToggle: document.getElementById("autodialToggle"),
+  transcriptCallingRow: document.getElementById("transcriptCallingRow"),
+  transcriptCallingToggle: document.getElementById("transcriptCallingToggle"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -343,6 +345,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
+wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", true);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -889,6 +892,12 @@ async function autoMarkContacted(dial, method) {
 }
 
 function placeCall(dial, phone, method) {
+  // "Transcript calling" off (Dials > Advanced): plain calling through the phone's own dialer, no in-app call.
+  if (profile.transcript_calling_enabled === false) {
+    autoMarkContacted(dial, method);
+    window.location.href = `tel:${phone}`;
+    return;
+  }
   startCall({
     dial, phone, method, profile,
     onDialed: () => autoMarkContacted(dial, method),
