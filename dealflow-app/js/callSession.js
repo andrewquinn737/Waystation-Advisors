@@ -52,9 +52,11 @@ export async function startCall(opts) {
     return;
   }
   active = true;
-  // Starting the call (in the app, or via the phone's own dialer if it falls back) records this
-  // number's contact for today right away — there is no manual "contacted" circle anymore.
-  opts.onDialed?.();
+  // The contact is recorded for today once the call is REALLY going — ringing or answered in the app, or the
+  // moment the phone's own dialer takes over (there is no manual "contacted" circle). A call that never got
+  // out (phone service down, number rejected) must not count as contact.
+  let dialedMarked = false;
+  const markDialed = () => { if (!dialedMarked) { dialedMarked = true; opts.onDialed?.(); } };
 
   // Created inside the tap so iOS lets the audio run.
   let ctx = null, mic = null, client = null, call = null, wake = null, transcript = null, stopAudio = null;
@@ -181,23 +183,34 @@ export async function startCall(opts) {
       }
     }
   }
+  async function notConnected(c) {
+    if (finished) return;
+    finished = true;
+    const cause = [c?.cause, c?.causeCode ?? c?.sipCode].filter((x) => x != null && x !== "").join(" ");
+    if (callId) await supabase.from("calls").update({ ended_at: new Date().toISOString(), transcribed: false, skip_reason: ("not_connected " + cause).trim().slice(0, 80) }).eq("id", callId);
+    cleanupMedia(); panel.close();
+    showNotice("The in-app call couldn't connect, so nothing was recorded for this contact. You can call from your phone instead.", {
+      title: "Call didn't connect", actionLabel: "Call from my phone",
+      onAction: () => { markDialed(); opts.fallbackTel(phone); },
+    });
+  }
   async function fail(reason, label) { // before it rang: use the phone's own dialer instead
     if (finished) return;
     finished = true;
     if (callId) await supabase.from("calls").update({ skip_reason: ringing ? null : reason, transcribed: false, ended_at: new Date().toISOString() }).eq("id", callId);
     cleanupMedia(); panel.close();
-    if (!ringing) opts.fallbackTel(phone); else showNotice(label || "The call couldn't connect.", { title: "Call failed" });
+    if (!ringing) { markDialed(); opts.fallbackTel(phone); } else showNotice(label || "The call couldn't connect.", { title: "Call failed" });
   }
 
   try {
     try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-    catch { await logNative(profile, dial, to, dial.state, "mic_denied", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
+    catch { await logNative(profile, dial, to, dial.state, "mic_denied", method); cleanupMedia(); panel.close(); markDialed(); opts.fallbackTel(phone); return; }
     document.addEventListener("visibilitychange", onVis); document.addEventListener("visibilitychange", onVisWake); onVisWake();
     watchMic();
 
     const { data: t, error: te } = await withTimeout(supabase.functions.invoke("telnyx-token", { body: { to_number: to, owner_state: dial.state || null } }), 8000, "token");
     if (te || !t) throw new Error("token");
-    if (t.decision === "native") { await logNative(profile, dial, to, dial.state, "unknown_state", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
+    if (t.decision === "native") { await logNative(profile, dial, to, dial.state, "unknown_state", method); cleanupMedia(); panel.close(); markDialed(); opts.fallbackTel(phone); return; }
     transcribe = t.decision === "record";
 
     const { data: row, error: re } = await supabase.from("calls").insert({
@@ -221,9 +234,10 @@ export async function startCall(opts) {
       const c = n.call; if (n.type !== "callUpdate" || !c) return;
       const st = c.state;
       attachRemote(c); // as early as the carrier sends audio (ringback, greeting), not only once "active"
-      if (st === "ringing" || st === "early" || st === "trying") { ringing = true; panel.state("Ringing…"); }
+      if (st === "trying" || st === "requesting") panel.state("Dialing…");
+      if (st === "ringing" || st === "early") { ringing = true; panel.state("Ringing…"); markDialed(); }
       if (st === "active" && !answeredAt) {
-        answeredAt = new Date(); ringing = true; startGuard();
+        answeredAt = new Date(); ringing = true; startGuard(); markDialed();
         panel.state(transcribe ? "Connected · transcribing" : "Connected"); panel.startTimer();
         // The owner's first words can arrive a beat after "active": keep nudging playback for a few seconds.
         let nudges = 0;
@@ -237,7 +251,12 @@ export async function startCall(opts) {
           } catch { panel.note("Live transcript unavailable — the call continues."); }
         }
       }
-      if (st === "hangup" || st === "destroy" || st === "purge") finish(answeredAt ? "Call ended" : "No answer");
+      if (st === "hangup" || st === "destroy" || st === "purge") {
+        // Ended without ever ringing or being answered = the call never got out (phone service problem, number
+        // refused). Say so and offer the phone's own dialer instead of calling it "No answer".
+        if (!answeredAt && !ringing && !finished) { await notConnected(c); return; }
+        finish(answeredAt ? "Call ended" : "No answer");
+      }
     });
     client.connect();
   } catch (e) {
