@@ -720,14 +720,26 @@ async function loadTeams() {
     tempPasswordsByMemberId[row.profile_id] = row.temp_password;
   });
 
-  allMembers = profiles || [];
+  const everyone = profiles || [];
   customTeams = teamsData || [];
 
   // Recompute from the freshly-loaded data (not the possibly-stale session
   // profile) so an admin who just got promoted/demoted sees the +/edit
   // controls appear/disappear without having to reload the whole page.
-  const me = allMembers.find((m) => m.id === profile.id);
+  const me = everyone.find((m) => m.id === profile.id);
   isAdmin = me?.role === "admin";
+
+  // Who the Teams popup shows: admins see everyone; a team lead sees their own team plus the admins;
+  // interns and independent leads see only the team they're under (never the admins or other teams).
+  // (Display only — the profiles table itself stays readable app-wide for names, mailboxes, reports.)
+  const myTeam = me?.team_id || null;
+  allMembers = isAdmin
+    ? everyone
+    : everyone.filter((m) => {
+        if (m.id === profile.id) return true;
+        if (me?.role === "team_lead" && m.role === "admin") return true;
+        return m.role !== "admin" && !!myTeam && m.team_id === myTeam;
+      });
   els.teamsAddBtn.classList.toggle("hidden", !isAdmin);
   els.teamsEditBtn.classList.toggle("hidden", !isAdmin);
   if (!isAdmin) editMode = false;
@@ -766,7 +778,8 @@ async function loadTeams() {
 }
 
 function renderTeams() {
-  const groups = buildGroupDefs();
+  // Non-admins only get the groups that actually contain someone they're allowed to see.
+  const groups = buildGroupDefs().filter((g) => isAdmin || (teamMembersByGroup[g.key] || []).length);
   els.teamsEditBtn.classList.toggle("active", editMode);
 
   els.teamsWrap.innerHTML = groups
