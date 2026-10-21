@@ -1350,3 +1350,8 @@ $$;
 -- profiles.transcript_calling_enabled (migration profiles_transcript_calling_enabled): boolean, default true.
 -- Dials > Advanced "Transcript calling": on = calls run in the app with a live transcript; off = calls open the
 -- phone's own dialer (the contact is still recorded).
+
+-- set_client_tracking_flow (migration tracking_flow_trigger_security_definer): now SECURITY DEFINER. It looked
+-- up the buyer's tracking_flow through row-level security, so sellers created by an intern / independent lead
+-- (who can't read other people's buyer clients) got a NULL flow and never showed the Form section. Existing
+-- sellers on a flow buyer were re-fired and repaired (John Barclay).
