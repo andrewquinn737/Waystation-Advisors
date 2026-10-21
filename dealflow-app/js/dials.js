@@ -345,7 +345,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
-wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", true);
+wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", false);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -920,7 +920,7 @@ window.addEventListener("pagehide", () => { if (pendingNative) { pendingNative.l
 
 function placeCall(dial, phone, method) {
   // "Transcript calling" off (Dials > Advanced): plain calling through the phone's own dialer, no in-app call.
-  if (profile.transcript_calling_enabled === false) {
+  if (profile.transcript_calling_enabled !== true) {
     dialViaPhone(dial, method, phone);
     return;
   }
@@ -3018,15 +3018,10 @@ async function updateDialStatus(newStatus) {
   // dial.contact_status while currentDial briefly held stale/partial data
   // from the race.
   await flushCallNotes();
-  // Guards against exactly the gap that let a category get set with no
-  // outreach ever logged for it (confirmed in production — a whole tab of
-  // dials sat at real-looking statuses like "Unable to contact" with zero
-  // call_status_changes rows behind them, because the intern working it only
-  // ever used this dropdown and never checked a contact circle). Checks for
-  // ANY call log row ever, not just today's — once a dial has been marked
-  // contacted even once, re-categorizing it later (same day or long after)
-  // needs no fresh circle check. "uncontacted" itself is always allowed with
-  // no history, since it asserts nothing about having reached anyone.
+  // Picking a category no longer requires the dial to have been marked contacted first (interns calling from
+  // their own phone often had no contact recorded yet). If it has no contact on record, one is recorded now
+  // — on the number that would have been called — so the reports still count this company as contacted.
+  // "uncontacted" itself asserts nothing, so it never records anything.
   if (newStatus !== "uncontacted") {
     const { count, error: historyError } = await supabase
       .from("call_status_changes")
@@ -3034,12 +3029,9 @@ async function updateDialStatus(newStatus) {
       .eq("dial_id", currentDial.id);
     if (historyError) return showError(els.dialModalError, historyError);
     if (!count) {
-      return showError(els.dialModalError, {
-        message: "Dial had never been marked as contacted. Please press one of the circles on the right side of the page to mark a contact.",
-      });
+      const method = currentDial.mobile_phone ? "mobile" : currentDial.company_phone ? "company" : currentDial.email ? "email" : "mobile";
+      await autoMarkContacted(currentDial, method);
     }
-    // (Call notes are no longer required to pick a category — an in-app call
-    // is transcribed/summarized automatically and checks its own contact circle.)
   }
   // A fresh arrival at "Accepted intro call" (switching in from some other
   // category — not just re-saving while already sitting in it) re-shows the

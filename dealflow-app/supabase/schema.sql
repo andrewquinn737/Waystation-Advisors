@@ -1355,3 +1355,8 @@ $$;
 -- up the buyer's tracking_flow through row-level security, so sellers created by an intern / independent lead
 -- (who can't read other people's buyer clients) got a NULL flow and never showed the Form section. Existing
 -- sellers on a flow buyer were re-fired and repaired (John Barclay).
+
+-- profiles.transcript_calling_enabled default is now FALSE (migration transcript_calling_default_off) and every
+-- existing profile was set to false: calls default to the user's own phone (phone dialer); Transcript calling
+-- (in-app, company number) is opt-in. Picking a dial category no longer requires a prior contact record — if the
+-- dial has none, the app records one (mobile/company/email) at that moment so reports still count it.
