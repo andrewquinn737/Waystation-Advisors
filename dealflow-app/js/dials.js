@@ -876,9 +876,10 @@ function buildContactedTodayDisplayHTML(dial) {
 async function autoMarkContacted(dial, method) {
   const col = CONTACT_METHOD_DATE_COLUMNS[method];
   const today = todayDateStr();
-  if (!col || dial[col] === today) return; // already checked today
+  if (!col) return false;
+  if (dial[col] === today) return true; // already checked today
   const { error } = await supabase.from("dials").update({ [col]: today }).eq("id", dial.id);
-  if (error) return;
+  if (error) return false;
   const list = allLists.find((l) => l.id === dial.list_id);
   await supabase.from("call_status_changes").insert({
     user_id: profile.id, dial_id: dial.id, dial_type: currentType, list_id: dial.list_id, contact_status_at_call: dial.contact_status,
@@ -889,20 +890,45 @@ async function autoMarkContacted(dial, method) {
   const idx = dials.findIndex((d) => d.id === dial.id);
   if (idx !== -1) dials[idx][col] = today;
   if (currentDial?.id === dial.id) { Object.assign(currentDial, { [col]: today }); renderDialModal(); }
+  return true;
 }
+
+// Calling through the phone's own dialer (Transcript calling off, or the in-app call fell back). The phone
+// asks "Call …?" first, so the contact must NOT be recorded when the button is tapped — only once the phone
+// has really taken over, which shows up as this page going into the background. (Cancelling the prompt
+// leaves the page in front, so nothing is recorded; a pending tap expires after 45 s.)
+let pendingNative = null;
+function dialViaPhone(dial, method, phone) {
+  pendingNative = { dial, method, at: Date.now(), left: false, busy: false };
+  window.location.href = `tel:${phone}`;
+}
+async function commitPendingNative() {
+  const p = pendingNative;
+  if (!p || p.busy) return;
+  if (Date.now() - p.at > 45000) { pendingNative = null; return; }
+  p.busy = true;
+  const ok = await autoMarkContacted(p.dial, p.method);
+  p.busy = false;
+  if (ok && pendingNative === p) pendingNative = null;
+}
+document.addEventListener("visibilitychange", () => {
+  if (!pendingNative) return;
+  if (document.visibilityState === "hidden") { pendingNative.left = true; commitPendingNative(); }
+  else if (pendingNative.left) { pendingNative.at = Date.now(); commitPendingNative(); } // back from the call: retry if the first save was cut off
+});
+window.addEventListener("pagehide", () => { if (pendingNative) { pendingNative.left = true; commitPendingNative(); } });
 
 function placeCall(dial, phone, method) {
   // "Transcript calling" off (Dials > Advanced): plain calling through the phone's own dialer, no in-app call.
   if (profile.transcript_calling_enabled === false) {
-    autoMarkContacted(dial, method);
-    window.location.href = `tel:${phone}`;
+    dialViaPhone(dial, method, phone);
     return;
   }
   startCall({
     dial, phone, method, profile,
     onDialed: () => autoMarkContacted(dial, method),
     onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
-    fallbackTel: (num) => { window.location.href = `tel:${num}`; },
+    fallbackTel: (num) => dialViaPhone(dial, method, num),
   });
 }
 document.addEventListener(

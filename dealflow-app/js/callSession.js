@@ -191,7 +191,7 @@ export async function startCall(opts) {
     cleanupMedia(); panel.close();
     showNotice("The in-app call couldn't connect, so nothing was recorded for this contact. You can call from your phone instead.", {
       title: "Call didn't connect", actionLabel: "Call from my phone",
-      onAction: () => { markDialed(); opts.fallbackTel(phone); },
+      onAction: () => { opts.fallbackTel(phone); },
     });
   }
   async function fail(reason, label) { // before it rang: use the phone's own dialer instead
@@ -199,18 +199,18 @@ export async function startCall(opts) {
     finished = true;
     if (callId) await supabase.from("calls").update({ skip_reason: ringing ? null : reason, transcribed: false, ended_at: new Date().toISOString() }).eq("id", callId);
     cleanupMedia(); panel.close();
-    if (!ringing) { markDialed(); opts.fallbackTel(phone); } else showNotice(label || "The call couldn't connect.", { title: "Call failed" });
+    if (!ringing) { opts.fallbackTel(phone); } else showNotice(label || "The call couldn't connect.", { title: "Call failed" });
   }
 
   try {
     try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-    catch { await logNative(profile, dial, to, dial.state, "mic_denied", method); cleanupMedia(); panel.close(); markDialed(); opts.fallbackTel(phone); return; }
+    catch { await logNative(profile, dial, to, dial.state, "mic_denied", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
     document.addEventListener("visibilitychange", onVis); document.addEventListener("visibilitychange", onVisWake); onVisWake();
     watchMic();
 
     const { data: t, error: te } = await withTimeout(supabase.functions.invoke("telnyx-token", { body: { to_number: to, owner_state: dial.state || null } }), 8000, "token");
     if (te || !t) throw new Error("token");
-    if (t.decision === "native") { await logNative(profile, dial, to, dial.state, "unknown_state", method); cleanupMedia(); panel.close(); markDialed(); opts.fallbackTel(phone); return; }
+    if (t.decision === "native") { await logNative(profile, dial, to, dial.state, "unknown_state", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
     transcribe = t.decision === "record";
 
     const { data: row, error: re } = await supabase.from("calls").insert({
