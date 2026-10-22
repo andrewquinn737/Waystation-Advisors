@@ -1372,3 +1372,12 @@ $$;
 -- submit). Sends company info + employees, years in business, email to the leads sheet, and the same plus
 -- willing/able to sell to Slack. "Not talking to other brokers" is never sent. Employees ranges are mapped to
 -- the sheet's own buckets (26–40 / 41–50 -> 26–50). Needs only clients.intake_form (no submitted flag).
+
+-- INBOUND CALLBACK FIXES (migration inbound_screening_and_hours + telnyx-webhook v2). match_callback_today(): only a
+-- caller we dialed EARLIER TODAY (Mountain time) is accepted — an outbound call to that number today, else a dial
+-- with that phone contacted today; anyone else is rejected (USER_BUSY) and logged with answered_leg 'rejected'
+-- (the check constraint now allows it). owner_after_hours(state): before 8am / from 7pm in the owner's time zone ->
+-- straight to voicemail + callback task (inbound_calls.after_hours). Reps are rung on profiles.phone (all 24 are
+-- E.164). The Telnyx "Waystation Callbacks" Call Control application (webhook = telnyx-webhook, outbound profile
+-- "Waystation Interns") now owns the three pool numbers; its id is app_secrets.TELNYX_CALLBACK_APP_ID. To undo,
+-- point the numbers back at the "Waystation PWA WebRTC" connection in the Telnyx portal.
