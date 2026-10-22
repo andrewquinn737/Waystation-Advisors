@@ -1360,3 +1360,10 @@ $$;
 -- existing profile was set to false: calls default to the user's own phone (phone dialer); Transcript calling
 -- (in-app, company number) is opt-in. Picking a dial category no longer requires a prior contact record — if the
 -- dial has none, the app records one (mobile/company/email) at that moment so reports still count it.
+
+-- ARIEH PROCESS REBUILD (migration dials_intake_form): dials.intake_form jsonb holds the short pre-call form
+-- (employees > 40, willing to sell, able to sell, not talking to other brokers, email on record, years in
+-- business > 10). When it passes, "Schedule intro call" opens https://calendar.app.google/gmYHvw8YPyeqEutG8,
+-- the booked time is entered like any intro call, and the client is created with the intro call scheduled (the
+-- form is copied to clients.intake_form for the record). The client profile no longer has a Form section, and
+-- nothing is posted to Slack / the leads sheet any more (the intake-submit edge function is now unused).

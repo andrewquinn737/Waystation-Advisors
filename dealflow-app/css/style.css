@@ -1948,6 +1948,10 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .intake-form-modal label.intake-check input { width: auto; margin: 0; flex-shrink: 0; }
 .intake-submitted { color: var(--success, #1f8a4c); font-weight: 600; }
 .intake-actions { justify-content: flex-end; }
+.intake-status { margin: 14px 0 4px; padding: 9px 12px; border-radius: 8px; font-size: 13px; line-height: 1.4; }
+.intake-status.pass { background: #e8f6ee; color: #1f6b3d; font-weight: 600; }
+.intake-status.fail { background: var(--bg); color: var(--text-muted); }
+.intake-status ul { margin: 4px 0 0; padding-left: 18px; }
 .intake-submit-row { justify-content: flex-end; margin-top: 8px; }
 .intake-submit-row .btn { width: 100%; }
 .q-route { margin: 14px 0; }

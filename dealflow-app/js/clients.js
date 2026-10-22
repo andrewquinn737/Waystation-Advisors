@@ -20,7 +20,6 @@ import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotic
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
-import { openIntakeForm, intakeDefaults, submitIntakeForm, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 
 const session = await requireSession();
@@ -1533,12 +1532,6 @@ function wireTimelineTab() {
         toggleClientEventConfirmed(eventId, false);
       } else {
         const existing = currentClientEvents.find((ev) => ev.id === eventId);
-        // Questionnaire-flow sellers: the intro call is checked off by
-        // completing the form, not by writing a report.
-        if (existing?.event_type === "intro_call" && isIntakeClient(currentClient)) {
-          openClientIntakeForm();
-          return;
-        }
         // Only meeting-category events (see eventIsMeeting) ask for a
         // report — a contract advancement or task just confirms directly,
         // nothing to write up.
@@ -2418,9 +2411,7 @@ function renderSubtabsBar() {
   const tabsForClient =
     currentClient.client_type === "broker"
       ? ["profile", "referrals"]
-      : isIntakeClient(currentClient)
-        ? ["profile", "progress", "timeline", "form"]
-        : ["profile", "progress", "timeline"];
+      : ["profile", "progress", "timeline"];
   els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
     btn.classList.toggle("hidden", !tabsForClient.includes(btn.dataset.tab));
     btn.classList.toggle("active", btn.dataset.tab === currentSubTab);
@@ -2429,55 +2420,10 @@ function renderSubtabsBar() {
 
 els.clientSubtabs.querySelectorAll("button").forEach((btn) => {
   btn.addEventListener("click", () => {
-    // "Form" is a popup, not a tab — the page underneath stays as it was.
-    if (btn.dataset.tab === "form") {
-      openClientIntakeForm();
-      return;
-    }
     currentSubTab = btn.dataset.tab;
     renderModalBody();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Intro call form (questionnaire-flow sellers — see js/intakeForm.js). Opened
-// from the "Form" subtab and from the Timeline: for these sellers an intro
-// call can only be checked off by completing the form, so the confirm circle
-// opens this instead of the usual report box. Submitting completes the intro
-// call (as of now) and posts the lead to Slack.
-// ---------------------------------------------------------------------------
-function isIntakeClient(c) {
-  return !!c && c.client_type === "seller" && c.tracking_flow === QUESTIONNAIRE_FLOW;
-}
-
-function openClientIntakeForm() {
-  const client = currentClient;
-  if (!isIntakeClient(client)) return;
-  openIntakeForm({
-    title: `${client.full_name || "Client"} — intro call form`,
-    note: client.intake_submitted_at
-      ? null
-      : "Completing and submitting this form checks off the intro call. Fill out at least the four key questions to save.",
-    data: intakeDefaults(client, client.intake_form),
-    submittedAt: client.intake_submitted_at,
-    notified: !!client.intake_notified_at,
-    onSave: async (values) => {
-      const { data, error } = await supabase.from("clients").update({ intake_form: values }).eq("id", client.id).select().single();
-      if (error) throw error;
-      Object.assign(currentClient, data);
-    },
-    onSubmit: async (values) => {
-      const result = await submitIntakeForm(client.id, values, profile);
-      const { data } = await supabase.from("clients").select("*").eq("id", client.id).maybeSingle();
-      if (data) Object.assign(currentClient, data);
-      await loadClientEvents();
-      await loadClientProgressStages();
-      renderModalBody();
-      const problem = describeDelivery(result);
-      if (problem) showNotice(`The form was submitted and the intro call completed, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
-    },
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Validation
