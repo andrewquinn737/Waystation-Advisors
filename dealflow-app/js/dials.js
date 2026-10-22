@@ -345,7 +345,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 // only.
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
-wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", false);
+wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", true);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -920,7 +920,7 @@ window.addEventListener("pagehide", () => { if (pendingNative) { pendingNative.l
 
 function placeCall(dial, phone, method) {
   // "Transcript calling" off (Dials > Advanced): plain calling through the phone's own dialer, no in-app call.
-  if (profile.transcript_calling_enabled !== true) {
+  if (profile.transcript_calling_enabled === false) {
     dialViaPhone(dial, method, phone);
     return;
   }

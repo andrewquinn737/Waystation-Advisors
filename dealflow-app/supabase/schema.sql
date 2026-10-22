@@ -1381,3 +1381,6 @@ $$;
 -- E.164). The Telnyx "Waystation Callbacks" Call Control application (webhook = telnyx-webhook, outbound profile
 -- "Waystation Interns") now owns the three pool numbers; its id is app_secrets.TELNYX_CALLBACK_APP_ID. To undo,
 -- point the numbers back at the "Waystation PWA WebRTC" connection in the Telnyx portal.
+
+-- profiles.transcript_calling_enabled default is TRUE again (migration transcript_calling_default_on_again) and
+-- every profile was set back to true: calls default to in-app calling with a transcript; off = phone dialer.
