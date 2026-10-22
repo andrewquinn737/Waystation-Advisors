@@ -3568,9 +3568,14 @@ function openQuestionnaireIntroPopup(dial) {
       // Back from the calendar: enter the booked time, which creates the client with the call scheduled.
       openIntroCallTimeConfirmModal(dial, {
         onConfirmed: async (sched) => {
+          let client = null;
           try {
-            const client = await createClientFromDial(dial);
-            await supabase.from("clients").update({ intake_form: values }).eq("id", client.id);
+            client = await createClientFromDial(dial);
+            // The moment the client exists, the lead goes to Slack and the leads sheet (company info + the form's
+            // few answers) — before the intro call is filed, so a problem filing it can't hold the lead back.
+            const delivery = await sendLeadToSheetAndSlack(client.id, values);
+            const problem = describeDelivery(delivery);
+            if (problem) showNotice(`The client was created, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
             const { data: existing, error: exErr } = await supabase
               .from("client_events").select("id").eq("client_id", client.id).eq("event_type", "intro_call");
             if (exErr) throw exErr;
@@ -3584,12 +3589,8 @@ function openQuestionnaireIntroPopup(dial) {
             }
             dial._scheduleIntroCallUsed = true;
             renderDialModal();
-            // Booked: send the lead to Slack and the leads sheet (company info + the form's few answers).
-            const delivery = await sendLeadToSheetAndSlack(client.id, values);
-            const problem = describeDelivery(delivery);
-            if (problem) showNotice(`The client was created with the intro call booked, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
           } catch (err) {
-            showNotice(`The call time couldn't be saved: ${err?.message || err}. Press Schedule intro call again to retry.`, { title: "Intro call not saved" });
+            showNotice(`${client ? "The client was created, but the" : "The"} call time couldn't be saved: ${err?.message || err}. Press Schedule intro call again to retry.`, { title: "Intro call not saved" });
           }
         },
       });
