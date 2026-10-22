@@ -25,7 +25,7 @@ import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
-import { openIntakeForm, BUYER_CALENDAR_URL } from "./intakeForm.js";
+import { openIntakeForm, buyerCalendarUrl, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 
 const session = await requireSession();
@@ -3562,7 +3562,7 @@ function openQuestionnaireIntroPopup(dial) {
     },
     onSchedule: async (values) => {
       // Opened first, straight from the click, so the browser lets the calendar window through.
-      window.open(BUYER_CALENDAR_URL, "_blank", "noopener");
+      window.open(buyerCalendarUrl(values.contact_email), "_blank", "noopener");
       try { await navigator.clipboard?.writeText(values.contact_email || ""); } catch { /* clipboard unavailable */ }
       await saveDialIntake(dial, values);
       // Back from the calendar: enter the booked time, which creates the client with the call scheduled.
@@ -3584,6 +3584,10 @@ function openQuestionnaireIntroPopup(dial) {
             }
             dial._scheduleIntroCallUsed = true;
             renderDialModal();
+            // Booked: send the lead to Slack and the leads sheet (company info + the form's few answers).
+            const delivery = await sendLeadToSheetAndSlack(client.id, values);
+            const problem = describeDelivery(delivery);
+            if (problem) showNotice(`The client was created with the intro call booked, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
           } catch (err) {
             showNotice(`The call time couldn't be saved: ${err?.message || err}. Press Schedule intro call again to retry.`, { title: "Intro call not saved" });
           }

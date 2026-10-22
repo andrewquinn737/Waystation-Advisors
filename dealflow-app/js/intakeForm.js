@@ -4,11 +4,17 @@
 // When every one passes, "Schedule intro call" unlocks and opens the buyer's own calendar; the form is
 // saved on the dial (dials.intake_form) either way, so a lead that can't be booked yet keeps its answers.
 // The client's own profile has no form section any more — just Profile / Progress / Timeline.
+import { supabase } from "./supabaseClient.js";
 import { escapeHtml } from "./clientForm.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
-// The buyer's booking page — opened by "Schedule intro call".
-export const BUYER_CALENDAR_URL = "https://calendar.app.google/gmYHvw8YPyeqEutG8";
+// The buyer's booking page — opened by "Schedule intro call". The email is added to the link as a best-effort
+// pre-fill (Google doesn't document one for booking pages, so it is ALSO copied to the clipboard by the caller).
+const BUYER_CALENDAR_URL = "https://calendar.google.com/appointments/schedules/AcZssZ27l3atfY31Iup9lYPEub4Ib_PqiUNofDVefq6Ew8FloNLEnT_F40TgHDu4O8v3oQSOyQ7SXanB";
+export function buyerCalendarUrl(email) {
+  const e = String(email || "").trim();
+  return e ? `${BUYER_CALENDAR_URL}?email=${encodeURIComponent(e)}` : BUYER_CALENDAR_URL;
+}
 
 // [label, passes?] — must be over 40 employees.
 const EMPLOYEE_RANGES = [
@@ -18,7 +24,8 @@ const EMPLOYEE_RANGES = [
   ["41–50", true],
   ["51–100", true],
   ["101–250", true],
-  ["251+", true],
+  ["251–500", true],
+  ["500+", true],
 ];
 const YES_NO = ["Yes", "No"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -168,4 +175,38 @@ export function openIntakeForm(opts) {
   modalEl.classList.remove("hidden");
   modalEl.scrollTop = 0;
   lockPageScroll();
+}
+
+// Sends the booked lead to Slack and the leads Google Sheet (intake-submit edge function): the company's
+// information plus the form's employees, years in business, email and willing/able to sell — never "not
+// talking to other brokers". Stamps the lead's "date called" and submitted time first. Resolves to
+// { slack, sheet, errors } ('sent' | 'updated' | 'already_sent' | 'not_configured' | 'failed').
+export async function sendLeadToSheetAndSlack(clientId, form) {
+  const now = new Date();
+  const dateCalled = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const { error: saveErr } = await supabase
+    .from("clients")
+    .update({ intake_form: { ...form, date_called: dateCalled }, intake_submitted_at: now.toISOString() })
+    .eq("id", clientId);
+  if (saveErr) throw saveErr;
+  try {
+    const { data: res, error } = await supabase.functions.invoke("intake-submit", { body: { client_id: clientId } });
+    if (error) {
+      let msg = error.message;
+      try { msg = (await error.context.json()).error || msg; } catch { /* keep the generic message */ }
+      return { slack: "failed", sheet: "failed", errors: { slack: msg, sheet: msg } };
+    }
+    return { slack: res?.slack || "failed", sheet: res?.sheet || "failed", errors: res?.errors || {} };
+  } catch (err) {
+    const msg = err?.message || String(err);
+    return { slack: "failed", sheet: "failed", errors: { slack: msg, sheet: msg } };
+  }
+}
+
+// Text explaining what didn't go out, or null when everything that's connected was delivered.
+export function describeDelivery(result) {
+  const names = { slack: "Slack", sheet: "the Google Sheet" };
+  const failed = Object.keys(names).filter((k) => result[k] === "failed");
+  if (!failed.length) return null;
+  return failed.map((k) => `posting to ${names[k]} failed: ${result.errors?.[k] || "unknown error"}`).join("; ");
 }

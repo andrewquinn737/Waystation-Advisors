@@ -1367,3 +1367,8 @@ $$;
 -- the booked time is entered like any intro call, and the client is created with the intro call scheduled (the
 -- form is copied to clients.intake_form for the record). The client profile no longer has a Form section, and
 -- nothing is posted to Slack / the leads sheet any more (the intake-submit edge function is now unused).
+
+-- intake-submit edge function v6: runs once the client is created with the intro call booked (not on a form
+-- submit). Sends company info + employees, years in business, email to the leads sheet, and the same plus
+-- willing/able to sell to Slack. "Not talking to other brokers" is never sent. Employees ranges are mapped to
+-- the sheet's own buckets (26–40 / 41–50 -> 26–50). Needs only clients.intake_form (no submitted flag).
