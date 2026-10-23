@@ -3587,6 +3587,21 @@ function openQuestionnaireIntroPopup(dial) {
               if (error) throw error;
               await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
             }
+            // The form just passed, so the client's Questionnaire step is done as of now (the Intro call step
+            // above is the booked call, which stays open until it happens).
+            const { data: haveQ } = await supabase.from("client_events").select("id").eq("client_id", client.id).eq("event_type", "questionnaire");
+            if (!haveQ?.length) {
+              const nowIso = new Date().toISOString();
+              const { data: qEvent, error: qErr } = await supabase.from("client_events").insert({
+                client_id: client.id, event_type: "questionnaire", created_by: profile.id, event_date: nowIso,
+                details: { via: "form", category: "meeting" },
+              }).select("id").single();
+              if (qErr) throw qErr;
+              const report = ["Questionnaire completed on the dial.",
+                `• Employees: ${values.employees}`, `• Years in business: ${values.years_in_business}`, `• Willing to sell their data: ${values.willing_to_sell}`,
+                `• Able to sell their data: ${values.able_to_sell}`, `• Not talking to other brokers: ${values.no_other_brokers}`, `• Email: ${values.contact_email}`].join("\n");
+              await supabase.rpc("set_client_event_confirmed", { p_event_id: qEvent.id, p_confirmed: true, p_report: report });
+            }
             dial._scheduleIntroCallUsed = true;
             renderDialModal();
           } catch (err) {

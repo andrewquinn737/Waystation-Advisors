@@ -1384,3 +1384,10 @@ $$;
 
 -- profiles.transcript_calling_enabled default is TRUE again (migration transcript_calling_default_on_again) and
 -- every profile was set back to true: calls default to in-app calling with a transcript; off = phone dialer.
+
+-- ARIEH SELLER FLOW now has an Intro call step (migration arieh_intro_call_step): Questionnaire ('questionnaire'
+-- event, filled on the dial) -> Intro call ('intro_call', the call booked with Arieh) -> Client approval -> Bid
+-- accepted by seller -> Close. Existing questionnaire-flow sellers' old intro_call events (they were the
+-- questionnaires) were moved to the 'questionnaire' type. get_buyer_progress_summary gains 'questionnaires_completed';
+-- get_buyer_milestone_clients also returns 'questionnaire'. Creating the client from the dial now logs the
+-- Questionnaire as completed and the booked Intro call as upcoming.

@@ -170,13 +170,14 @@ const BUYER_PROGRESS_STEPS = [
 // "Questionnaire" tracking flow (clients.tracking_flow = 'questionnaire') —
 // set in the database for ONE buyer only (Arieh Levi) and inherited by every
 // seller attached to him (see the clients_tracking_flow trigger); every other
-// client keeps the lists above. The seller's questionnaire reuses the
-// intro_call event type (so scheduling/confirming/reporting and the
-// "owners agreed" call status all work unchanged) — only its label differs —
-// and "Bid accepted by seller" is a new shared milestone between the two.
+// client keeps the lists above. A seller's flow is Questionnaire (the form
+// filled out on the dial — its own "questionnaire" event type) -> Intro call
+// (the call booked with the buyer, the normal intro_call event) -> Client
+// approval -> Bid accepted by seller (a new shared milestone) -> Close.
 const QUESTIONNAIRE_FLOW = "questionnaire";
 const QUESTIONNAIRE_SELLER_STEPS = [
-  { type: "intro_call", label: "Questionnaire" },
+  { type: "questionnaire", label: "Questionnaire" },
+  { type: "intro_call", label: "Intro call" },
   { type: "client_approval", label: "Client approval" },
   { type: "bid_accepted", label: "Bid accepted by seller" },
   { type: "close", label: "Close" },
@@ -246,8 +247,8 @@ const EVENT_TYPE_LABELS = {
 function progressStagesFor(clientType) {
   const stages = [{ value: "no_meetings", label: "No meetings yet" }, ...progressStepsFor(clientType).map((s) => ({ value: s.type, label: s.label }))];
   // Questionnaire-flow clients (one buyer and his sellers) fit into the same
-  // filter options: a seller's completed questionnaire shows under "Intro
-  // call", and "Bid accepted by seller" takes the place of "LOI" (see
+  // filter options: sellers get a Questionnaire option just before Intro call,
+  // and "Bid accepted by seller" takes the place of "LOI" (see
   // filterStageFor). Labels say so while any such client is loaded; Arieh
   // himself also gets a Questionnaire option of his own.
   if (clients.some((c) => c.client_type === clientType && c.tracking_flow === QUESTIONNAIRE_FLOW)) {
@@ -256,7 +257,10 @@ function progressStagesFor(clientType) {
       if (st) st.label = label;
     };
     relabel("loi", "LOI / Bid accepted by seller");
-    if (clientType === "seller") relabel("intro_call", "Intro call / Questionnaire completed");
+    if (clientType === "seller") {
+      const at = stages.findIndex((s) => s.value === "intro_call");
+      stages.splice(at, 0, { value: "questionnaire", label: "Questionnaire" });
+    }
     if (clientType === "buyer") {
       const at = stages.findIndex((s) => s.value === "client_approval");
       stages.splice(at, 0, { value: "questionnaire", label: "Questionnaire" });
@@ -321,14 +325,15 @@ const BUYER_CONTRACT_SUBTYPES = BUYER_PROGRESS_STEPS.filter((s) =>
 // a meeting type, and the flow's own milestones as contract advancement.
 const QUESTIONNAIRE_SELLER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
-  { value: "intro_call", label: "Questionnaire" },
+  { value: "questionnaire", label: "Questionnaire" },
+  { value: "intro_call", label: "Intro call" },
 ];
 const QUESTIONNAIRE_BUYER_MEETING_SUBTYPES = [
   { value: "general_meeting", label: "General" },
   { value: "intro_call", label: "Intro call" },
   { value: "questionnaire", label: "Questionnaire" },
 ];
-const QUESTIONNAIRE_SELLER_CONTRACT_SUBTYPES = QUESTIONNAIRE_SELLER_STEPS.filter((s) => s.type !== "intro_call").map((s) => ({ value: s.type, label: s.label }));
+const QUESTIONNAIRE_SELLER_CONTRACT_SUBTYPES = QUESTIONNAIRE_SELLER_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "questionnaire").map((s) => ({ value: s.type, label: s.label }));
 const QUESTIONNAIRE_BUYER_CONTRACT_SUBTYPES = QUESTIONNAIRE_BUYER_STEPS.filter((s) => s.type !== "intro_call" && s.type !== "questionnaire").map((s) => ({ value: s.type, label: s.label }));
 function meetingSubtypesFor(clientType, flow) {
   if (flow === QUESTIONNAIRE_FLOW) return clientType === "buyer" ? QUESTIONNAIRE_BUYER_MEETING_SUBTYPES : QUESTIONNAIRE_SELLER_MEETING_SUBTYPES;
@@ -339,9 +344,7 @@ function contractSubtypesFor(clientType, flow) {
   return clientType === "buyer" ? BUYER_CONTRACT_SUBTYPES : SELLER_CONTRACT_SUBTYPES;
 }
 
-// A seller's questionnaire IS its intro_call event — same type, relabelled.
-function eventLabelFor(eventType, client) {
-  if (eventType === "intro_call" && client?.client_type === "seller" && client?.tracking_flow === QUESTIONNAIRE_FLOW) return "Questionnaire";
+function eventLabelFor(eventType) {
   return EVENT_TYPE_LABELS[eventType] || eventType;
 }
 
@@ -642,8 +645,7 @@ async function loadClientProgressStages() {
 }
 // Which Progress-filter option a questionnaire-flow client's milestone counts
 // under: "Bid accepted by seller" stands in for LOI; everything else keeps its
-// own name (a seller's Questionnaire is the intro_call event, so it already
-// lands under "Intro call").
+// own name (a seller's Questionnaire and Intro call each have their own option).
 function filterStageFor(client, type) {
   return client?.tracking_flow === QUESTIONNAIRE_FLOW && type === "bid_accepted" ? "loi" : type;
 }
