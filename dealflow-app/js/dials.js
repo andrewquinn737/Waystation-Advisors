@@ -1091,6 +1091,19 @@ function filteredLists() {
     .sort((a, b) => a.sort_order - b.sort_order || new Date(a.created_at) - new Date(b.created_at));
 }
 
+// On a computer the tab row would be a wall of tabs, so only the most recently created ones show (plus whichever
+// tab is open) with a "More tabs" button at the end to reveal the rest. Phones keep every tab (their row scrolls).
+const TAB_LIMIT = 12;
+let showAllTabs = false;
+function shownTabLists(filtered) {
+  if (isMobileViewport() || showAllTabs || filtered.length <= TAB_LIMIT) return filtered;
+  const keep = new Set(
+    [...filtered].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, TAB_LIMIT).map((l) => l.id)
+  );
+  if (currentListId) keep.add(currentListId);
+  return filtered.filter((l) => keep.has(l.id));
+}
+
 function renderTabs() {
   const filtered = filteredLists();
   if (!currentListId || !filtered.some((l) => l.id === currentListId)) {
@@ -1108,7 +1121,9 @@ function renderTabs() {
   if (filtered.length === 0) {
     els.dialTabs.innerHTML = `<span class="help-text">No lists yet — tap + to create one.</span>`;
   } else {
-    els.dialTabs.innerHTML = filtered
+    const shown = shownTabLists(filtered);
+    const hiddenCount = filtered.length - shown.length;
+    els.dialTabs.innerHTML = shown
       .map((l) => {
         const isActive = l.id === currentListId;
         return `
@@ -1117,6 +1132,16 @@ function renderTabs() {
         </div>`;
       })
       .join("");
+    if (hiddenCount > 0 || (showAllTabs && !isMobileViewport() && filtered.length > TAB_LIMIT)) {
+      els.dialTabs.insertAdjacentHTML(
+        "beforeend",
+        `<button type="button" class="dial-tab-more" id="dialTabMoreBtn">${hiddenCount > 0 ? `More tabs (${hiddenCount})` : "Show fewer"}</button>`
+      );
+      els.dialTabs.querySelector("#dialTabMoreBtn").addEventListener("click", () => {
+        showAllTabs = hiddenCount > 0;
+        renderTabs();
+      });
+    }
     wireTabInteractions();
   }
   // Re-appended (moved, not cloned — same node, so its click listener from
@@ -1591,7 +1616,11 @@ function wireTabInteractions() {
 }
 
 async function persistTabOrder() {
-  const ids = [...els.dialTabs.querySelectorAll(".dial-tab")].map((b) => b.dataset.id);
+  // The row may show only some tabs: the dragged order goes into the slots those tabs already held, so hidden tabs keep their place.
+  const shownOrder = [...els.dialTabs.querySelectorAll(".dial-tab")].map((b) => b.dataset.id);
+  const shownSet = new Set(shownOrder);
+  let next = 0;
+  const ids = filteredLists().map((l) => (shownSet.has(l.id) ? shownOrder[next++] : l.id));
   await Promise.all(ids.map((id, i) => supabase.from("dial_lists").update({ sort_order: i }).eq("id", id)));
   await loadLists();
 }

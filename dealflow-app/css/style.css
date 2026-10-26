@@ -1204,6 +1204,11 @@ html.is-desktop-device .contact-action-tel:not(.contact-action-call) { display: 
 /* Wraps each tab button so the long-press drag has a stable unit to
    physically reorder. */
 .dial-tab-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.dial-tab-more {
+  flex-shrink: 0; padding: 8px 16px; border-radius: 6px; border: 1px dashed var(--border); background: none;
+  color: var(--text-muted); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+@media (hover: hover) { .dial-tab-more:hover { background: var(--gold-soft); color: var(--text); } }
 /* Only the active tab needs touch-action:none (it's the only one that can
    ever be long-pressed/dragged) — this stops the horizontal-scrolling tab
    bar from fighting the drag gesture, which was the main source of
