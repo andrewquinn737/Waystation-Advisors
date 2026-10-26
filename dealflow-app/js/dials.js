@@ -1095,13 +1095,15 @@ function filteredLists() {
 // tab is open) with a "More tabs" button at the end to reveal the rest. Phones keep every tab (their row scrolls).
 const TAB_LIMIT = 12;
 let showAllTabs = false;
+// On a computer the row is always newest -> oldest (by when each tab was created), so the most recent tabs sit at
+// the front and are always the ones visible; there is no manual reordering there.
 function shownTabLists(filtered) {
-  if (isMobileViewport() || showAllTabs || filtered.length <= TAB_LIMIT) return filtered;
-  const keep = new Set(
-    [...filtered].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, TAB_LIMIT).map((l) => l.id)
-  );
+  if (isMobileViewport()) return filtered;
+  const newestFirst = [...filtered].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  if (showAllTabs || newestFirst.length <= TAB_LIMIT) return newestFirst;
+  const keep = new Set(newestFirst.slice(0, TAB_LIMIT).map((l) => l.id));
   if (currentListId) keep.add(currentListId);
-  return filtered.filter((l) => keep.has(l.id));
+  return newestFirst.filter((l) => keep.has(l.id));
 }
 
 function renderTabs() {
@@ -1536,6 +1538,7 @@ function wireTabInteractions() {
     });
 
     btn.addEventListener("pointerdown", (e) => {
+      if (!isMobileViewport()) return; // computer: tabs are always newest-first, so there is nothing to drag
       const isMouse = e.pointerType === "mouse";
       // Touch: only the already-active tab can be picked up (see the big
       // comment above this section for why). Mouse: any tab can be grabbed
