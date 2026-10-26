@@ -16,7 +16,7 @@ export function buyerCalendarUrl(email) {
   return e ? `${BUYER_CALENDAR_URL}?email=${encodeURIComponent(e)}` : BUYER_CALENDAR_URL;
 }
 
-// [label, passes?] — must be over 40 employees.
+// Employee ranges (the box is optional, so the second value is no longer used).
 const EMPLOYEE_RANGES = [
   ["1–10", false],
   ["11–25", false],
@@ -31,7 +31,7 @@ const YES_NO = ["Yes", "No"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const INTAKE_FIELDS = [
-  { key: "employees", label: "Employee range", type: "select", options: EMPLOYEE_RANGES.map((r) => r[0]), rule: "Must be over 40 employees" },
+  { key: "employees", label: "Employee range", type: "select", options: EMPLOYEE_RANGES.map((r) => r[0]), rule: "Optional" },
   { key: "willing_to_sell", label: "Are they willing to sell their data?", type: "select", options: YES_NO, rule: "Must be yes" },
   { key: "able_to_sell", label: "Can they sell their data?", type: "select", options: YES_NO, rule: "Must be yes" },
   { key: "no_other_brokers", label: "Are they NOT talking to other brokers?", type: "select", options: YES_NO, rule: "Must be yes" },
@@ -42,9 +42,7 @@ export const INTAKE_FIELDS = [
 // Which checks aren't met yet. `answered` = every field has something in it.
 export function evaluateIntake(data = {}) {
   const failures = [];
-  const emp = EMPLOYEE_RANGES.find((r) => r[0] === data.employees);
-  if (!emp) failures.push("Employee range not chosen");
-  else if (!emp[1]) failures.push("Needs over 40 employees");
+  // Employee range is optional: recorded when given, never blocks scheduling.
   if (data.willing_to_sell !== "Yes") failures.push(data.willing_to_sell === "No" ? "Not willing to sell their data" : "Willing to sell not answered");
   if (data.able_to_sell !== "Yes") failures.push(data.able_to_sell === "No" ? "Can't sell their data" : "Able to sell not answered");
   if (data.no_other_brokers !== "Yes") failures.push(data.no_other_brokers === "No" ? "Talking to other brokers" : "Other brokers not answered");

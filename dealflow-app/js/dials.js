@@ -3598,7 +3598,7 @@ function openQuestionnaireIntroPopup(dial) {
               }).select("id").single();
               if (qErr) throw qErr;
               const report = ["Questionnaire completed on the dial.",
-                `• Employees: ${values.employees}`, `• Years in business: ${values.years_in_business}`, `• Willing to sell their data: ${values.willing_to_sell}`,
+                `• Employees: ${values.employees || "not given"}`, `• Years in business: ${values.years_in_business}`, `• Willing to sell their data: ${values.willing_to_sell}`,
                 `• Able to sell their data: ${values.able_to_sell}`, `• Not talking to other brokers: ${values.no_other_brokers}`, `• Email: ${values.contact_email}`].join("\n");
               await supabase.rpc("set_client_event_confirmed", { p_event_id: qEvent.id, p_confirmed: true, p_report: report });
             }
