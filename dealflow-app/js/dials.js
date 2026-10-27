@@ -2045,7 +2045,7 @@ function toggleDialSelection(id) {
 }
 
 // ---------------------------------------------------------------------------
-// Search — filters the currently selected tab's dials by name, company
+// Search — filters the dials of every tab in this category by name, company
 // name, email, or phone (see visibleDials above). Unlike Select/Move above,
 // this isn't an exclusive "mode" with its own bulk actions — it's just a
 // filter, so it has no outside-click-to-exit behavior; it stays open until
@@ -2062,6 +2062,11 @@ function exitSearchMode() {
   dialSearchQuery = "";
   els.dialsSearchInput.value = "";
   els.dialsSearchBar.classList.add("hidden");
+  if (searchPoolActive) {
+    searchPoolActive = false;
+    loadDials();
+    return;
+  }
   renderDialsTable();
 }
 
@@ -2071,8 +2076,17 @@ els.menuSearchBtn.addEventListener("click", (e) => {
   enterSearchMode();
 });
 
-els.dialsSearchInput.addEventListener("input", () => {
+let searchPoolActive = false;
+els.dialsSearchInput.addEventListener("input", async () => {
   dialSearchQuery = els.dialsSearchInput.value;
+  const wanted = !!dialSearchQuery.trim();
+  if (wanted && !searchPoolActive) {
+    searchPoolActive = await loadSearchPool();
+  } else if (!wanted && searchPoolActive) {
+    searchPoolActive = false;
+    await loadDials();
+    return;
+  }
   renderDialsTable();
 });
 
@@ -2552,7 +2566,31 @@ document.addEventListener("click", (e) => {
 // Location/Phone/Email) — see skeletonListHtml in js/placeholders.js.
 const DIALS_SKELETON_COLUMN_WIDTHS = ["55%", "65%", "45%", "50%", "70%"];
 
+// While a search is active the table shows matches from EVERY tab in this category (not just the selected one), so
+// `dials` is swapped for the pooled rows of all those tabs; clearing the search reloads the selected tab's own rows.
+async function loadSearchPool() {
+  const ids = filteredLists().map((l) => l.id);
+  if (!ids.length) return false;
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("dials").select("*").in("list_id", ids).order("id").range(from, from + 999);
+    if (error) return false;
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  dials = rows.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "", undefined, { sensitivity: "base" }));
+  return true;
+}
+
+function searchTabName(d) {
+  return allLists.find((l) => l.id === d.list_id)?.name || "";
+}
+
 async function loadDials() {
+  if (dialSearchQuery.trim() && (await loadSearchPool())) {
+    renderDialsTable();
+    return;
+  }
   if (!currentListId) {
     dials = [];
     renderDialsTable();
@@ -2635,7 +2673,7 @@ function renderDialsTable() {
 
   if (visible.length === 0) {
     els.dialsTableWrap.innerHTML = dialSearchQuery.trim()
-      ? `<div class="empty-state">No dials in this list match "${escapeHtml(dialSearchQuery.trim())}".</div>`
+      ? `<div class="empty-state">No dials in any tab match "${escapeHtml(dialSearchQuery.trim())}".</div>`
       : `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
     return;
   }
@@ -2665,7 +2703,7 @@ function renderDialsTable() {
           <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             ${selectMode ? `<td>${selectCircleHTML(d)}</td>` : ""}
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
-            <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}</td>
+            <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</td>
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
             <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || "—")}</td>
             <td class="muted" data-label="Email">${escapeHtml(d.email || "—")}</td>
@@ -2686,7 +2724,7 @@ function renderDialsTable() {
         <div class="mobile-card clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
           <div class="mc-main">
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
-            <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}</div>
+            <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</div>
           </div>
           ${
             selectMode

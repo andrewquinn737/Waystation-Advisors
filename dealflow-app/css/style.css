@@ -1204,6 +1204,17 @@ html.is-desktop-device .contact-action-tel:not(.contact-action-call) { display: 
 /* Wraps each tab button so the long-press drag has a stable unit to
    physically reorder. */
 .dial-tab-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.search-tab-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
 .dial-tab-more {
   flex-shrink: 0; padding: 8px 16px; border-radius: 6px; border: 1px dashed var(--border); background: none;
   color: var(--text-muted); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
