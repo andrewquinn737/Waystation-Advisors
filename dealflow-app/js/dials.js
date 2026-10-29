@@ -25,7 +25,7 @@ import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
-import { openIntakeForm, openCalendarPanel, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
+import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 
 const session = await requireSession();
@@ -3625,7 +3625,9 @@ function isQuestionnaireDial(dial) {
 // the dial either way. Once every check passes, "Schedule intro call" opens the buyer's calendar and the time
 // is then entered here like any other intro call — which creates the client with the intro call booked.
 async function saveDialIntake(dial, values) {
-  const patch = { intake_form: values };
+  // Merged into what is already saved: the submission popup stores each step as it is finished (form answers plus
+  // "_" step flags), and a later step must never wipe an earlier one.
+  const patch = { intake_form: { ...(dial.intake_form || {}), ...values } };
   const email = (values.contact_email || "").trim();
   if (email && email !== (dial.email || "")) patch.email = email; // "email on record": the dial's email follows the form
   const { error } = await supabase.from("dials").update(patch).eq("id", dial.id);
@@ -3637,70 +3639,56 @@ async function saveDialIntake(dial, values) {
 }
 
 function openQuestionnaireIntroPopup(dial) {
-  openIntakeForm({
-    title: dialDisplayName(dial),
+  openSubmissionPopup({
+    dial,
     data: { ...(dial.intake_form || {}), contact_email: dial.email || dial.intake_form?.contact_email || "" },
-    onSave: async (values) => {
-      await saveDialIntake(dial, values);
+    // Each step saves the moment it is finished, so closing the popup and coming back picks up where it left off.
+    onPersist: async (patch) => {
+      await saveDialIntake(dial, patch);
       renderDialModal();
       renderDialsTable();
     },
-    onSchedule: async (values) => {
-      await saveDialIntake(dial, values);
-      // The calendar opens INSIDE the app (not in another tab/app, which cut the call's audio off), with the lead's
-      // details beside it to copy into the booking form. "Booked" then asks for the time, which creates the client.
-      const phone = dial.mobile_phone || dial.company_phone || "";
-      openCalendarPanel({
-        details: [
-          { label: "Company", value: dial.company_name || "" },
-          { label: "Contact", value: dial.full_name || "" },
-          { label: "Email", value: values.contact_email || dial.email || "" },
-          { label: "Phone", value: phone },
-        ],
-        onBooked: () => openIntroCallTimeConfirmModal(dial, {
-        onConfirmed: async (sched) => {
-          let client = null;
-          try {
-            client = await createClientFromDial(dial);
-            // The moment the client exists, the lead goes to Slack and the leads sheet (company info + the form's
-            // few answers) — before the intro call is filed, so a problem filing it can't hold the lead back.
-            const delivery = await sendLeadToSheetAndSlack(client.id, values);
-            const problem = describeDelivery(delivery);
-            if (problem) showNotice(`The client was created, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
-            const { data: existing, error: exErr } = await supabase
-              .from("client_events").select("id").eq("client_id", client.id).eq("event_type", "intro_call");
-            if (exErr) throw exErr;
-            if (!existing?.length) {
-              const { error } = await supabase.from("client_events").insert({
-                client_id: client.id, event_type: "intro_call", created_by: profile.id,
-                event_date: sched.eventDate, details: { via: "calendly", time: sched.time, timezone: sched.timezone },
-              });
-              if (error) throw error;
-              await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
-            }
-            // The form just passed, so the client's Questionnaire step is done as of now (the Intro call step
-            // above is the booked call, which stays open until it happens).
-            const { data: haveQ } = await supabase.from("client_events").select("id").eq("client_id", client.id).eq("event_type", "questionnaire");
-            if (!haveQ?.length) {
-              const nowIso = new Date().toISOString();
-              const { data: qEvent, error: qErr } = await supabase.from("client_events").insert({
-                client_id: client.id, event_type: "questionnaire", created_by: profile.id, event_date: nowIso,
-                details: { via: "form", category: "meeting" },
-              }).select("id").single();
-              if (qErr) throw qErr;
-              const report = ["Questionnaire completed on the dial.",
-                `• Employees: ${values.employees || "not given"}`, `• Years in business: ${values.years_in_business}`, `• Willing to sell their data: ${values.willing_to_sell}`,
-                `• Able to sell their data: ${values.able_to_sell}`, `• Not talking to other brokers: ${values.no_other_brokers}`, `• Email: ${values.contact_email}`].join("\n");
-              await supabase.rpc("set_client_event_confirmed", { p_event_id: qEvent.id, p_confirmed: true, p_report: report });
-            }
-            dial._scheduleIntroCallUsed = true;
-            renderDialModal();
-          } catch (err) {
-            showNotice(`${client ? "The client was created, but the" : "The"} call time couldn't be saved: ${err?.message || err}. Press Schedule intro call again to retry.`, { title: "Intro call not saved" });
-          }
-        },
-        }),
-      });
+    // All three steps are done: create the client with the intro call already booked.
+    onSubmit: async (values, sched) => {
+      let client = null;
+      try {
+        client = await createClientFromDial(dial);
+        // The moment the client exists, the lead goes to Slack and the leads sheet (company info + the form's
+        // few answers) — before the intro call is filed, so a problem filing it can't hold the lead back.
+        const delivery = await sendLeadToSheetAndSlack(client.id, values);
+        const problem = describeDelivery(delivery);
+        if (problem) showNotice(`The client was created, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
+        const { data: existing, error: exErr } = await supabase
+          .from("client_events").select("id").eq("client_id", client.id).eq("event_type", "intro_call");
+        if (exErr) throw exErr;
+        if (!existing?.length) {
+          const { error } = await supabase.from("client_events").insert({
+            client_id: client.id, event_type: "intro_call", created_by: profile.id,
+            event_date: sched.eventDate, details: { via: "calendly", time: sched.time, timezone: sched.timezone },
+          });
+          if (error) throw error;
+          await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
+        }
+        // The form passed, so the client's Questionnaire step is done as of now (the Intro call step above is the
+        // booked call, which stays open until it happens).
+        const { data: haveQ } = await supabase.from("client_events").select("id").eq("client_id", client.id).eq("event_type", "questionnaire");
+        if (!haveQ?.length) {
+          const nowIso = new Date().toISOString();
+          const { data: qEvent, error: qErr } = await supabase.from("client_events").insert({
+            client_id: client.id, event_type: "questionnaire", created_by: profile.id, event_date: nowIso,
+            details: { via: "form", category: "meeting" },
+          }).select("id").single();
+          if (qErr) throw qErr;
+          const report = ["Questionnaire completed on the dial.",
+            `• Employees: ${values.employees || "not given"}`, `• Years in business: ${values.years_in_business}`, `• Willing to sell their data: ${values.willing_to_sell}`,
+            `• Able to sell their data: ${values.able_to_sell}`, `• Not talking to other brokers: ${values.no_other_brokers}`, `• Email: ${values.contact_email}`].join("\n");
+          await supabase.rpc("set_client_event_confirmed", { p_event_id: qEvent.id, p_confirmed: true, p_report: report });
+        }
+        dial._scheduleIntroCallUsed = true;
+        renderDialModal();
+      } catch (err) {
+        throw new Error(`${client ? "The client was created, but the" : "The"} intro call couldn't be saved: ${err?.message || err}. Press Submit client again to retry.`);
+      }
     },
   });
 }

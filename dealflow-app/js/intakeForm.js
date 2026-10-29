@@ -1,12 +1,14 @@
-// Short pre-call form for the questionnaire-flow buyer's sellers (see clients.tracking_flow =
-// 'questionnaire' and QUESTIONNAIRE_FLOW in js/clients.js). Opened from Dials ("Intro call / form",
-// see openQuestionnaireIntroPopup in js/dials.js) BEFORE a call is booked: six qualifying questions.
-// When every one passes, "Schedule intro call" unlocks and opens the buyer's own calendar; the form is
-// saved on the dial (dials.intake_form) either way, so a lead that can't be booked yet keeps its answers.
+// Submission popup for the questionnaire-flow buyer's sellers (see clients.tracking_flow = 'questionnaire' and
+// QUESTIONNAIRE_FLOW in js/clients.js). Opened from Dials ("Intro call / form", see openQuestionnaireIntroPopup in
+// js/dials.js). Three steps, done in whatever order suits the call, each saved on the dial (dials.intake_form) the
+// moment it is completed: (1) the six qualifying questions, which must pass; (2) booking on the buyer's own calendar,
+// shown inside the app; (3) entering that time in the app. When all three are done "Submit client" unlocks.
+// The extra step flags live in the same jsonb under keys starting with "_" (formFieldsOnly strips them).
 // The client's own profile has no form section any more — just Profile / Progress / Timeline.
 import { supabase } from "./supabaseClient.js";
 import { escapeHtml } from "./clientForm.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
+import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 
 // The buyer's booking page. The `/calendar/appointments/...?gv=true` form is Google's embeddable version of it
 // (the plain `/appointments/...` page refuses to be framed), so it is shown INSIDE the app (see openCalendarPanel)
@@ -19,13 +21,27 @@ export function buyerCalendarUrl(email) {
   return e ? `${BUYER_CALENDAR_URL}?email=${encodeURIComponent(e)}` : BUYER_CALENDAR_URL;
 }
 
+function detailRowsHTML(rows) {
+  return rows.map((d, i) => `<div class="calendar-detail"><div class="calendar-detail-text"><span class="calendar-detail-label">${escapeHtml(d.label)}</span><span class="calendar-detail-value">${escapeHtml(d.value)}</span></div><button type="button" class="btn secondary calendar-copy" data-i="${i}">Copy</button></div>`).join("");
+}
+function wireCopyButtons(root, rows) {
+  root.querySelectorAll(".calendar-copy").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const value = rows[Number(btn.dataset.i)].value;
+      try { await navigator.clipboard.writeText(value); btn.textContent = "Copied"; }
+      catch { btn.textContent = "Select & copy"; }
+      setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+    });
+  });
+}
+
 let calendarEl = null;
 // Full-screen sheet with the buyer's booking page in a frame and the lead's details pinned above it, each with a
 // Copy button — the booking form asks for an email and company name, and they are no longer out of sight.
 //  details  — [{ label, value }] rows shown with Copy buttons (empty values are skipped)
 //  onBooked — the rep tapped "Booked — enter the time"
 //  onClose  — the rep closed it without booking
-export function openCalendarPanel({ details = [], onBooked, onClose }) {
+export function openCalendarPanel({ details = [], bookedLabel = "Booked — enter the time", onBooked, onClose }) {
   closeCalendarPanel(true);
   calendarEl = document.createElement("div");
   calendarEl.className = "calendar-panel";
@@ -39,22 +55,15 @@ export function openCalendarPanel({ details = [], onBooked, onClose }) {
       <button type="button" class="btn secondary" id="calCloseBtn">Close</button>
     </div>
     <div class="calendar-panel-details">
-      ${rows.map((d, i) => `<div class="calendar-detail"><div class="calendar-detail-text"><span class="calendar-detail-label">${escapeHtml(d.label)}</span><span class="calendar-detail-value">${escapeHtml(d.value)}</span></div><button type="button" class="btn secondary calendar-copy" data-i="${i}">Copy</button></div>`).join("")}
+      ${detailRowsHTML(rows)}
     </div>
     <iframe class="calendar-frame" src="${BUYER_CALENDAR_EMBED_URL}" title="Book the intro call" allow="clipboard-write"></iframe>
     <div class="calendar-panel-foot">
       <a class="calendar-newtab" href="${BUYER_CALENDAR_URL}" target="_blank" rel="noopener">Calendar not loading? Open it in a new tab</a>
-      <button type="button" class="btn yellow" id="calBookedBtn">Booked — enter the time</button>
+      <button type="button" class="btn yellow" id="calBookedBtn">${escapeHtml(bookedLabel)}</button>
     </div>`;
   document.body.appendChild(calendarEl);
-  calendarEl.querySelectorAll(".calendar-copy").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const value = rows[Number(btn.dataset.i)].value;
-      try { await navigator.clipboard.writeText(value); btn.textContent = "Copied"; }
-      catch { btn.textContent = "Select & copy"; }
-      setTimeout(() => { btn.textContent = "Copy"; }, 1500);
-    });
-  });
+  wireCopyButtons(calendarEl, rows);
   calendarEl.querySelector("#calCloseBtn").addEventListener("click", () => { closeCalendarPanel(); onClose?.(); });
   calendarEl.querySelector("#calBookedBtn").addEventListener("click", () => { closeCalendarPanel(); onBooked?.(); });
 }
@@ -137,87 +146,163 @@ export function closeIntakeForm() {
   if (cb) cb();
 }
 
+export const formFieldsOnly = (data = {}) => Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("_")));
+
+// First / last name for the booking form, from the dial's single full-name field.
+function splitName(full) {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+  return { first: parts[0] || "", last: parts.slice(1).join(" ") };
+}
+
 // opts:
-//  title        — popup heading
-//  data         — starting answers
-//  onSave(data)     — async; throw to show the error inline. Closes the popup after.
-//  onSchedule(data) — async; called from the click itself (so a calendar window can open right away).
-//                     Only reachable once every check passes. Throw to show the error inline.
-//  onClose()    — called after the popup closes for any reason
-export function openIntakeForm(opts) {
+//  dial          — the dial (name + company shown for the booking form)
+//  data          — everything saved so far (dial.intake_form: form answers + "_" step flags)
+//  onPersist(patch) — async; merge `patch` into the saved data (throw to show the error)
+//  onSubmit(form, appTime) — async; creates the client. Throw to show the error inline.
+//  onClose()     — called after the popup closes for any reason
+export function openSubmissionPopup(opts) {
   ensureModal();
-  const { title = "Intro call form", data = {}, onSave, onSchedule, onClose } = opts;
+  const { dial, data = {}, onPersist, onSubmit, onClose } = opts;
+  const state = { ...data };
   const box = modalEl.querySelector(".modal");
+  const nm = splitName(dial.full_name);
+  const title = dial.company_name || dial.full_name || "Intro call";
   box.innerHTML = `
     <h2>${escapeHtml(title)}</h2>
-    <p class="help-text">Fill this out first. When every check passes you can schedule the intro call.</p>
-    ${INTAKE_FIELDS.map((f) => fieldHTML(f, data[f.key])).join("")}
-    <div class="intake-status" id="intakeStatus"></div>
-    <div class="error-msg hidden" id="intakeError"></div>
-    <div class="form-actions intake-actions">
-      <button type="button" class="btn secondary" id="intakeCancelBtn">Close</button>
-      <button type="button" class="btn secondary" id="intakeSaveBtn">Save</button>
+    <p class="help-text">Do these three in whatever order suits the call. Each one saves as soon as you finish it; when all three are done you can submit the client.</p>
+
+    <div class="sub-step" data-step="form">
+      <div class="sub-step-head"><span class="sub-badge"></span><span class="sub-step-title">Form &amp; checks</span></div>
+      <div class="sub-step-body">
+        ${INTAKE_FIELDS.map((f) => fieldHTML(f, state[f.key])).join("")}
+        <div class="intake-status" id="subFormStatus"></div>
+        <div class="form-actions"><button type="button" class="btn" id="subFormSave">Save form</button></div>
+      </div>
     </div>
+
+    <div class="sub-step" data-step="cal">
+      <div class="sub-step-head"><span class="sub-badge"></span><span class="sub-step-title">Book on the buyer's calendar</span></div>
+      <div class="sub-step-body">
+        <p class="help-text">Opens the calendar here in the app (your call keeps going) with the details to copy into it.</p>
+        <div class="form-actions">
+          <button type="button" class="btn yellow" id="subCalOpen">Open calendar</button>
+          <button type="button" class="btn secondary" id="subCalToggle">Mark as booked</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sub-step" data-step="app">
+      <div class="sub-step-head"><span class="sub-badge"></span><span class="sub-step-title">Schedule it in the app</span></div>
+      <div class="sub-step-body">
+        <p class="help-text">The date and time you booked on the calendar.</p>
+        <label for="subDate">Date</label><input type="date" id="subDate" />
+        <label for="subTime">Time</label><select id="subTime"></select>
+        <label for="subTz">Time zone</label><select id="subTz"></select>
+        <div class="form-actions"><button type="button" class="btn" id="subAppSave">Save time</button></div>
+      </div>
+    </div>
+
+    <div class="error-msg hidden" id="subError"></div>
     <div class="form-actions intake-submit-row">
-      <button type="button" class="btn yellow" id="intakeScheduleBtn" disabled>Schedule intro call</button>
+      <button type="button" class="btn secondary" id="subClose">Close</button>
+      <button type="button" class="btn yellow" id="subSubmit" disabled>Submit client</button>
     </div>
-    <p class="help-text">Schedule intro call opens the calendar to book a time and copies the email above so you can paste it in. Can't get it booked? Save the form and come back to it.</p>`;
+    <p class="help-text" id="subHint"></p>`;
 
-  const errEl = box.querySelector("#intakeError");
-  const statusEl = box.querySelector("#intakeStatus");
-  const saveBtn = box.querySelector("#intakeSaveBtn");
-  const scheduleBtn = box.querySelector("#intakeScheduleBtn");
-
-  const collect = () => {
+  const $ = (sel) => box.querySelector(sel);
+  const errEl = $("#subError");
+  const showErr = (msg) => { errEl.textContent = msg; errEl.classList.remove("hidden"); };
+  const collectForm = () => {
     const out = {};
-    INTAKE_FIELDS.forEach((f) => {
-      out[f.key] = (box.querySelector(`[data-key="${f.key}"]`)?.value || "").trim();
-    });
+    INTAKE_FIELDS.forEach((f) => { out[f.key] = (box.querySelector(`[data-key="${f.key}"]`)?.value || "").trim(); });
     return out;
   };
-  const sync = () => {
-    const { passes, failures } = evaluateIntake(collect());
-    scheduleBtn.disabled = !passes;
-    statusEl.className = `intake-status ${passes ? "pass" : "fail"}`;
-    statusEl.innerHTML = passes
-      ? "✓ Passes every check — you can schedule the intro call."
-      : `Not ready to schedule yet:<ul>${failures.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`;
+  const persist = async (patch) => {
+    errEl.classList.add("hidden");
+    try { await onPersist(patch); } catch (err) { showErr(err?.message || String(err)); return false; }
+    Object.assign(state, patch);
+    refresh();
+    return true;
   };
-  sync();
-  box.addEventListener("input", sync);
-  box.addEventListener("change", sync);
 
-  box.querySelector("#intakeCancelBtn").addEventListener("click", closeIntakeForm);
-  saveBtn.addEventListener("click", async () => {
+  // Booking details to copy: first name, last name, email and company only.
+  const bookingDetails = () => [
+    { label: "First name", value: nm.first },
+    { label: "Last name", value: nm.last },
+    { label: "Email", value: collectForm().contact_email || state.contact_email || dial.email || "" },
+    { label: "Company", value: dial.company_name || "" },
+  ];
+
+  $("#subDate").value = state._app_time?.val || (() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); })();
+  $("#subTime").innerHTML = timeOptionsHTML(state._app_time?.time || "", { includeNoTime: false });
+  $("#subTz").innerHTML = timezoneOptionsHTML(state._app_time?.timezone || defaultTimezone());
+
+  const done = () => ({
+    form: evaluateIntake(formFieldsOnly(state)).passes,
+    cal: !!state._cal_booked,
+    app: !!state._app_time?.eventDate,
+  });
+  const refresh = () => {
+    const d = done();
+    Object.entries(d).forEach(([k, ok]) => {
+      const step = $(`.sub-step[data-step="${k}"]`);
+      step.classList.toggle("done", ok);
+      step.querySelector(".sub-badge").textContent = ok ? "✓" : "";
+    });
+    const { passes, failures } = evaluateIntake(collectForm());
+    const st = $("#subFormStatus");
+    st.className = `intake-status ${passes ? "pass" : "fail"}`;
+    st.innerHTML = passes ? "✓ Passes every check." : `Not passing yet:<ul>${failures.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`;
+    $("#subCalToggle").textContent = d.cal ? "Undo booked" : "Mark as booked";
+    $("#subAppSave").textContent = d.app ? "Update time" : "Save time";
+    const all = d.form && d.cal && d.app;
+    $("#subSubmit").disabled = !all;
+    const left = [!d.form && "the form", !d.cal && "the calendar booking", !d.app && "the time in the app"].filter(Boolean);
+    $("#subHint").textContent = all ? "All three are done — submit the client when you're ready." : `Still to do: ${left.join(", ")}.`;
+  };
+
+  box.addEventListener("input", refresh);
+  box.addEventListener("change", refresh);
+  box.querySelectorAll(".sub-step-head").forEach((h) => h.addEventListener("click", () => h.parentElement.classList.toggle("collapsed")));
+
+  $("#subFormSave").addEventListener("click", async () => {
+    const values = collectForm();
+    const ok = await persist(values);
+    if (ok && evaluateIntake(values).passes) $('.sub-step[data-step="form"]').classList.add("collapsed");
+  });
+  $("#subCalOpen").addEventListener("click", () => {
+    modalEl.classList.add("hidden"); // out of the way while the calendar sheet is up; the page stays locked
+    const back = () => modalEl.classList.remove("hidden");
+    openCalendarPanel({
+      details: bookingDetails(),
+      bookedLabel: "I booked it",
+      onBooked: async () => { back(); await persist({ _cal_booked: true }); },
+      onClose: back,
+    });
+  });
+  $("#subCalToggle").addEventListener("click", () => persist({ _cal_booked: !state._cal_booked }));
+  $("#subAppSave").addEventListener("click", async () => {
+    const val = $("#subDate").value, time = $("#subTime").value, timezone = $("#subTz").value;
+    if (!val || !time) return showErr("Please enter both a date and a time.");
+    await persist({ _app_time: { val, time, timezone, eventDate: zonedTimeToUtcIso(val, time, timezone) } });
+  });
+  $("#subClose").addEventListener("click", closeIntakeForm);
+  $("#subSubmit").addEventListener("click", async () => {
+    const btn = $("#subSubmit");
+    btn.disabled = true;
     errEl.classList.add("hidden");
-    saveBtn.disabled = true;
     try {
-      await onSave(collect());
+      await onSubmit(formFieldsOnly(state), state._app_time);
     } catch (err) {
-      errEl.textContent = err?.message || String(err);
-      errEl.classList.remove("hidden");
-      saveBtn.disabled = false;
+      showErr(err?.message || String(err));
+      refresh();
       return;
     }
-    saveBtn.disabled = false;
-    closeIntakeForm();
-  });
-  scheduleBtn.addEventListener("click", async () => {
-    const values = collect();
-    if (!evaluateIntake(values).passes) return;
-    errEl.classList.add("hidden");
-    scheduleBtn.disabled = true;
-    try {
-      await onSchedule(values);
-    } catch (err) {
-      errEl.textContent = err?.message || String(err);
-      errEl.classList.remove("hidden");
-      sync();
-      return;
-    }
     closeIntakeForm();
   });
 
+  refresh();
+  ["form", "cal", "app"].forEach((k) => { if (done()[k]) $(`.sub-step[data-step="${k}"]`).classList.add("collapsed"); });
   closeHandler = onClose || null;
   modalEl.classList.remove("hidden");
   modalEl.scrollTop = 0;
