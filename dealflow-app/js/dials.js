@@ -25,7 +25,7 @@ import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
-import { openIntakeForm, buyerCalendarUrl, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
+import { openIntakeForm, openCalendarPanel, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 
 const session = await requireSession();
@@ -3295,22 +3295,37 @@ els.dialNextBtn.addEventListener("click", () => goToDial(1));
 
 document.addEventListener("keydown", (e) => {
   if (els.dialModalBackdrop.classList.contains("hidden")) return;
+  // Arrow keys inside a field (or with Shift/Ctrl/Cmd held, i.e. moving or extending a text selection) are for
+  // the text, not for flipping dials.
+  if (e.target.closest?.("input, textarea, select, [contenteditable]") || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "ArrowLeft") goToDial(-1);
   if (e.key === "ArrowRight") goToDial(1);
 });
 
-let touchStartX = null;
+// A swipe flips dials only when it is a quick, mostly-sideways flick that started outside a text field and
+// didn't begin on selected text: a long-press, a drag of the selection handles, or a drag across text to select
+// it (all of which move sideways too) must never flip, or nothing in a dial can be copied.
+let touchStart = null;
 els.dialModalBackdrop.addEventListener("touchstart", (e) => {
-  touchStartX = e.touches[0].clientX;
+  if (e.touches.length !== 1) { touchStart = null; return; }
+  const t = e.touches[0];
+  touchStart = { x: t.clientX, y: t.clientY, at: Date.now(), target: e.target, inField: !!e.target.closest?.("input, textarea, select, [contenteditable]") };
 });
+els.dialModalBackdrop.addEventListener("touchcancel", () => { touchStart = null; });
 els.dialModalBackdrop.addEventListener("touchend", (e) => {
-  if (touchStartX === null) return;
-  const dx = e.changedTouches[0].clientX - touchStartX;
-  if (Math.abs(dx) > 50) {
-    if (dx < 0) goToDial(1);
-    else goToDial(-1);
-  }
-  touchStartX = null;
+  const start = touchStart;
+  touchStart = null;
+  if (!start || start.inField) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - start.x;
+  const dy = t.clientY - start.y;
+  if (Math.abs(dx) <= 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return; // too short, or more up/down than sideways
+  if (Date.now() - start.at > 500) return; // a slow drag is a selection gesture, not a swipe
+  const sel = window.getSelection?.();
+  // A swipe that starts on the selected text itself is the user adjusting the selection, not flipping.
+  if (sel && !sel.isCollapsed && String(sel).trim() && start.target && sel.containsNode(start.target, true)) return;
+  if (dx < 0) goToDial(1);
+  else goToDial(-1);
 });
 
 // ---------------------------------------------------------------------------
@@ -3631,12 +3646,18 @@ function openQuestionnaireIntroPopup(dial) {
       renderDialsTable();
     },
     onSchedule: async (values) => {
-      // Opened first, straight from the click, so the browser lets the calendar window through.
-      window.open(buyerCalendarUrl(values.contact_email), "_blank", "noopener");
-      try { await navigator.clipboard?.writeText(values.contact_email || ""); } catch { /* clipboard unavailable */ }
       await saveDialIntake(dial, values);
-      // Back from the calendar: enter the booked time, which creates the client with the call scheduled.
-      openIntroCallTimeConfirmModal(dial, {
+      // The calendar opens INSIDE the app (not in another tab/app, which cut the call's audio off), with the lead's
+      // details beside it to copy into the booking form. "Booked" then asks for the time, which creates the client.
+      const phone = dial.mobile_phone || dial.company_phone || "";
+      openCalendarPanel({
+        details: [
+          { label: "Company", value: dial.company_name || "" },
+          { label: "Contact", value: dial.full_name || "" },
+          { label: "Email", value: values.contact_email || dial.email || "" },
+          { label: "Phone", value: phone },
+        ],
+        onBooked: () => openIntroCallTimeConfirmModal(dial, {
         onConfirmed: async (sched) => {
           let client = null;
           try {
@@ -3678,6 +3699,7 @@ function openQuestionnaireIntroPopup(dial) {
             showNotice(`${client ? "The client was created, but the" : "The"} call time couldn't be saved: ${err?.message || err}. Press Schedule intro call again to retry.`, { title: "Intro call not saved" });
           }
         },
+        }),
       });
     },
   });

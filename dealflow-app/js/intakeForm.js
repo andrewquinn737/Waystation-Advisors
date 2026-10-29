@@ -8,12 +8,61 @@ import { supabase } from "./supabaseClient.js";
 import { escapeHtml } from "./clientForm.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
-// The buyer's booking page — opened by "Schedule intro call". The email is added to the link as a best-effort
-// pre-fill (Google doesn't document one for booking pages, so it is ALSO copied to the clipboard by the caller).
-const BUYER_CALENDAR_URL = "https://calendar.google.com/appointments/schedules/AcZssZ27l3atfY31Iup9lYPEub4Ib_PqiUNofDVefq6Ew8FloNLEnT_F40TgHDu4O8v3oQSOyQ7SXanB";
+// The buyer's booking page. The `/calendar/appointments/...?gv=true` form is Google's embeddable version of it
+// (the plain `/appointments/...` page refuses to be framed), so it is shown INSIDE the app (see openCalendarPanel)
+// instead of navigating away — leaving the page is what cut the rep's call audio off on phones.
+const BUYER_CALENDAR_ID = "AcZssZ27l3atfY31Iup9lYPEub4Ib_PqiUNofDVefq6Ew8FloNLEnT_F40TgHDu4O8v3oQSOyQ7SXanB";
+const BUYER_CALENDAR_EMBED_URL = `https://calendar.google.com/calendar/appointments/schedules/${BUYER_CALENDAR_ID}?gv=true`;
+const BUYER_CALENDAR_URL = `https://calendar.google.com/appointments/schedules/${BUYER_CALENDAR_ID}`;
 export function buyerCalendarUrl(email) {
   const e = String(email || "").trim();
   return e ? `${BUYER_CALENDAR_URL}?email=${encodeURIComponent(e)}` : BUYER_CALENDAR_URL;
+}
+
+let calendarEl = null;
+// Full-screen sheet with the buyer's booking page in a frame and the lead's details pinned above it, each with a
+// Copy button — the booking form asks for an email and company name, and they are no longer out of sight.
+//  details  — [{ label, value }] rows shown with Copy buttons (empty values are skipped)
+//  onBooked — the rep tapped "Booked — enter the time"
+//  onClose  — the rep closed it without booking
+export function openCalendarPanel({ details = [], onBooked, onClose }) {
+  closeCalendarPanel(true);
+  calendarEl = document.createElement("div");
+  calendarEl.className = "calendar-panel";
+  // Leave room for the call bar (it floats over the bottom of the screen during a call).
+  const callBar = document.querySelector(".call-panel");
+  calendarEl.style.paddingBottom = callBar ? `${callBar.offsetHeight + 36}px` : "0px";
+  const rows = details.filter((d) => d.value);
+  calendarEl.innerHTML = `
+    <div class="calendar-panel-head">
+      <div class="calendar-panel-title">Book the intro call</div>
+      <button type="button" class="btn secondary" id="calCloseBtn">Close</button>
+    </div>
+    <div class="calendar-panel-details">
+      ${rows.map((d, i) => `<div class="calendar-detail"><div class="calendar-detail-text"><span class="calendar-detail-label">${escapeHtml(d.label)}</span><span class="calendar-detail-value">${escapeHtml(d.value)}</span></div><button type="button" class="btn secondary calendar-copy" data-i="${i}">Copy</button></div>`).join("")}
+    </div>
+    <iframe class="calendar-frame" src="${BUYER_CALENDAR_EMBED_URL}" title="Book the intro call" allow="clipboard-write"></iframe>
+    <div class="calendar-panel-foot">
+      <a class="calendar-newtab" href="${BUYER_CALENDAR_URL}" target="_blank" rel="noopener">Calendar not loading? Open it in a new tab</a>
+      <button type="button" class="btn yellow" id="calBookedBtn">Booked — enter the time</button>
+    </div>`;
+  document.body.appendChild(calendarEl);
+  calendarEl.querySelectorAll(".calendar-copy").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const value = rows[Number(btn.dataset.i)].value;
+      try { await navigator.clipboard.writeText(value); btn.textContent = "Copied"; }
+      catch { btn.textContent = "Select & copy"; }
+      setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+    });
+  });
+  calendarEl.querySelector("#calCloseBtn").addEventListener("click", () => { closeCalendarPanel(); onClose?.(); });
+  calendarEl.querySelector("#calBookedBtn").addEventListener("click", () => { closeCalendarPanel(); onBooked?.(); });
+}
+
+export function closeCalendarPanel(silent) {
+  if (!calendarEl) return;
+  calendarEl.remove();
+  calendarEl = null;
 }
 
 // Employee ranges (the box is optional, so the second value is no longer used).
