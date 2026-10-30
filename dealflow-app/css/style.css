@@ -1261,7 +1261,7 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
    bolder, bordered row sitting above the plain per-account checkbox rows —
    the "tab at the top" the feature was asked for — so it reads as a
    master toggle rather than just one more account in the list. */
-.accounts-visible-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.accounts-visible-list { display: flex; flex-direction: column; gap: 2px; max-height: min(62vh, 520px); overflow-y: auto; margin-top: 8px; }
 .accounts-visible-row {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 10px;
   border: none; background: none; border-radius: 6px; font-size: 13.5px; color: var(--text);
