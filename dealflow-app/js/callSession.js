@@ -254,7 +254,7 @@ export async function startCall(opts) {
           try {
             transcript = startTranscript({ callId, onLine: (l) => panel.addLine(l), onInterim: (i) => panel.interim(i), onFailed: () => panel.note("Live transcript unavailable — the call continues.") });
             stopAudio = await startCallAudio({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream, onFrame: (b) => transcript?.sendAudio(b) });
-            if (profile.record_accepted_calls === true && window.MediaRecorder) {
+            if (profile.record_accepted_calls !== false && window.MediaRecorder) {
               try { recorder = startRecorder({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream }); panel.state("Connected · transcribing · recording"); } catch { recorder = null; }
             }
           } catch { panel.note("Live transcript unavailable — the call continues."); }

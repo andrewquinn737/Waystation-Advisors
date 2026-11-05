@@ -28,7 +28,7 @@ import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIs
 import { skeletonListHtml } from "./placeholders.js";
 import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
-import { keepRecordingForDial, signedRecordingUrl } from "./callRecordings.js";
+import { keepRecordingForDial, discardRecordingsForDial, signedRecordingUrl } from "./callRecordings.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -195,6 +195,8 @@ const els = {
   autodialToggle: document.getElementById("autodialToggle"),
   transcriptCallingRow: document.getElementById("transcriptCallingRow"),
   transcriptCallingToggle: document.getElementById("transcriptCallingToggle"),
+  callRecordingRow: document.getElementById("callRecordingRow"),
+  callRecordingToggle: document.getElementById("callRecordingToggle"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -348,6 +350,7 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
 wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", true);
+wireProfileToggle(els.callRecordingRow, els.callRecordingToggle, profile, "record_accepted_calls", true);
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -3137,11 +3140,14 @@ async function updateDialStatus(newStatus) {
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);
+  const updatedDialId = currentDial.id;
   if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled) {
     currentDial._scheduleIntroCallUsed = false;
   }
-  // Accounts with call recording on keep the recording only for calls that end as "Accepted intro call".
-  if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled && profile.record_accepted_calls === true) {
+  // Any other category throws the dial's recordings away (the held ones, and ones saved when it was Accepted), to save space.
+  if (newStatus !== "intro_call_scheduled") discardRecordingsForDial(currentDial.id).then(() => { if (wasAlreadyIntroScheduled && currentDial?.id === updatedDialId) loadDialTranscript(); }, () => {});
+  // Call recording keeps the recording only for calls that end as "Accepted intro call".
+  if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled && profile.record_accepted_calls !== false) {
     const dialId = currentDial.id;
     keepRecordingForDial(profile, dialId, isCallActive()).then(
       (saved) => {

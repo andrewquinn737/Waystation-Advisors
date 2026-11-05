@@ -1407,3 +1407,8 @@ $$;
 -- Independent lead is only a position now (migration remove_independent_leads_team): the locked "Independent Leads" team,
 -- its trigger locked_team_no_lead (enforce_locked_team_no_lead) and locked_team_no_delete (prevent_locked_team_delete) are
 -- gone. Anyone can hold the independent_lead role inside any team (Teams popup > position menu).
+
+-- Call recording for everyone (migration call_recording_on_for_everyone): profiles.record_accepted_calls defaults to true
+-- (Dials > Advanced > Call recording). A recording is uploaded only when the dial is set to Accepted intro call and is
+-- deleted (file + calls.recording_path) as soon as any other category is chosen. Caller, their team lead and admins can
+-- read/delete files in the call-recordings bucket.

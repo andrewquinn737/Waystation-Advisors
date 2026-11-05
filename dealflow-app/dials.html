@@ -362,6 +362,13 @@
           <span class="advanced-settings-row-label">Transcript calling</span>
           <span class="toggle-switch" id="transcriptCallingToggle" role="switch" aria-checked="true"><span class="toggle-switch-thumb"></span></span>
         </button>
+        <!-- Call recording (js/autodial.js wireProfileToggle, profiles.record_accepted_calls): on (default) = the call is
+             recorded, but the recording is kept only if the dial ends up as Accepted intro call; any other category
+             deletes it. Needs Transcript calling on. -->
+        <button type="button" class="advanced-settings-row" id="callRecordingRow">
+          <span class="advanced-settings-row-label">Call recording (kept for accepted intro calls)</span>
+          <span class="toggle-switch" id="callRecordingToggle" role="switch" aria-checked="true"><span class="toggle-switch-thumb"></span></span>
+        </button>
       </div>
       <div class="form-actions">
         <button type="button" class="btn secondary" id="advancedSettingsClose">Done</button>
