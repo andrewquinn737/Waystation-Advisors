@@ -70,7 +70,7 @@ export async function startCall(opts) {
   const panel = openCallPanel({
     name: dial.full_name || dial.company_name, company: dial.company_name,
     onHangup: () => { try { call?.hangup(); } catch { /* ignore */ } if (!call) finish("Call cancelled"); },
-    onMute: (m) => { try { m ? call?.muteAudio() : call?.unmuteAudio(); } catch { /* ignore */ } },
+    onMute: (m) => setMuted(m),
     onDtmf: (d) => { try { call?.dtmf(d); } catch { /* call not connected yet */ } },
   });
 
@@ -107,7 +107,7 @@ export async function startCall(opts) {
     const clear = () => { clearTimeout(micTimer); if (!finished) panel.warn(""); };
     track.addEventListener("mute", () => {
       clearTimeout(micTimer);
-      micTimer = setTimeout(() => { if (!finished && track.muted) panel.warn("Your phone interrupted the microphone — they may not hear you."); }, 1200);
+      micTimer = setTimeout(() => { if (!finished && !micMuted && track.muted) panel.warn("Your phone interrupted the microphone — they may not hear you."); }, 1200);
     });
     track.addEventListener("unmute", clear);
     track.addEventListener("ended", () => recoverMic());
@@ -121,12 +121,44 @@ export async function startCall(opts) {
       const pc = call?.peer?.instance;
       const sender = pc?.getSenders?.().find((s) => s.track?.kind === "audio" || (!s.track && s.dtmf));
       if (!sender) throw new Error("no sender");
+      t.enabled = !micMuted; // a mic you muted stays muted
       await sender.replaceTrack(t);
       mic?.getTracks().forEach((x) => x.stop());
       mic = fresh;
+      try { if (call?.options) call.options.localStream = fresh; } catch { /* ignore */ }
       watchMic();
       panel.warn("");
     } catch { panel.warn("Your microphone stopped working — hang up and call again."); }
+  };
+  // Mute/unmute. The mute is applied to the microphone track that is ACTUALLY in the call right now (recoverMic can
+  // swap it for a fresh one, which the SDK's own mute doesn't know about), and the SDK is told too. Unmuting also
+  // makes sure the mic is live and the incoming audio is playing — a mute used to be able to leave the call silent.
+  let micMuted = false;
+  const applyMute = () => {
+    const tracks = new Set([...(mic?.getAudioTracks?.() || []), ...(call?.options?.localStream?.getAudioTracks?.() || [])]);
+    const sender = call?.peer?.instance?.getSenders?.().find((s) => s.track?.kind === "audio");
+    if (sender?.track) tracks.add(sender.track);
+    tracks.forEach((t) => { t.enabled = !micMuted; });
+  };
+  const setMuted = (m) => {
+    micMuted = m;
+    try { m ? call?.muteAudio() : call?.unmuteAudio(); } catch { /* ignore */ }
+    applyMute();
+    if (!m) setTimeout(ensureLiveAfterUnmute, 0);
+  };
+  const ensureLiveAfterUnmute = async () => {
+    if (finished || micMuted) return;
+    try { if (ctx && ctx.state !== "running" && ctx.state !== "closed") await ctx.resume(); } catch { /* ignore */ }
+    if (call) attachRemote(call);
+    try { if (remoteAudio.srcObject && remoteAudio.paused) await remoteAudio.play(); } catch { /* ignore */ }
+    const t = mic?.getAudioTracks?.()[0];
+    const sender = call?.peer?.instance?.getSenders?.().find((s) => s.track?.kind === "audio" || (!s.track && s.dtmf));
+    const senderOk = sender?.track && sender.track.readyState === "live" && sender.track.enabled && !sender.track.muted;
+    if (!t || t.readyState === "ended" || t.muted || !senderOk) {
+      // The microphone didn't come back after the unmute: re-open it, and make sure the call is using the new one.
+      micBadSince = 0;
+      await recoverMic();
+    }
   };
   // iPhones pause the call's audio and cut the microphone when something interrupts the audio session (a
   // notification sound, Siri, a message tone) and do NOT resume either by themselves. While a call is live,
@@ -140,7 +172,7 @@ export async function startCall(opts) {
       try { if (remoteAudio.srcObject && remoteAudio.paused) remoteAudio.play().catch(() => {}); } catch { /* ignore */ }
       try { if (ctx && ctx.state !== "running" && ctx.state !== "closed") ctx.resume().catch(() => {}); } catch { /* ignore */ }
       const t = mic?.getAudioTracks?.()[0];
-      const bad = !t || t.readyState === "ended" || t.muted;
+      const bad = !micMuted && (!t || t.readyState === "ended" || t.muted); // a mic you muted on purpose isn't a fault
       if (!bad) { micBadSince = 0; return; }
       if (!micBadSince) micBadSince = Date.now();
       else if (Date.now() - micBadSince > 3000) { micBadSince = Date.now() + 8000; recoverMic(); } // then give it 8 s before trying again
