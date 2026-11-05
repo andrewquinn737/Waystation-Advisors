@@ -712,22 +712,9 @@ async function clearExtraTeams(memberId) {
 function buildGroupDefs() {
   return [
     { key: ADMINS_KEY, label: "Admins", locked: true },
-    // A custom team can itself be "locked" (teams.is_locked — currently just
-    // "Independent Leads", see supabase migrations) — permanent, can't be
-    // deleted or renamed, and (separately, see memberCardHTML/
-    // applyAutoPromotion below) can never have a team lead. Reuses the same
-    // `locked` flag Admins/Unassigned already use for "no trash icon, no
-    // rename" so it looks and behaves identically to them.
-    ...customTeams.map((t) => ({ key: t.id, label: t.name, locked: !!t.is_locked })),
+    ...customTeams.map((t) => ({ key: t.id, label: t.name, locked: false })),
     { key: UNASSIGNED_KEY, label: "Unassigned interns", locked: true },
   ];
-}
-
-// Locked custom teams (see buildGroupDefs above) never have a team lead —
-// used by memberCardHTML (hide the "Team lead" position option) and
-// setMemberAsTeamLead (reject the promotion server-side-mirrored check).
-function isLockedTeam(groupKey) {
-  return customTeams.some((t) => t.id === groupKey && t.is_locked);
 }
 
 async function loadTeams() {
@@ -915,10 +902,9 @@ function renderTeams() {
       if (role === "independent_lead") {
         const member = allMembers.find((m) => m.id === memberId);
         if (member?.role === "admin") {
-          // Same as demoting an admin to intern: no "previous team" — an
-          // independent lead's natural home is the Independent Leads box.
-          const lockedTeam = customTeams.find((t) => t.is_locked);
-          moveMemberToGroup(memberId, lockedTeam ? lockedTeam.id : UNASSIGNED_KEY);
+          // Same as demoting an admin to intern: no "previous team", so they go to Unassigned, now as an
+          // independent lead (a position, not a team).
+          setMemberRoleAndTeam(memberId, "independent_lead", null);
         } else {
           setMemberRoleInPlace(memberId, "independent_lead");
         }
@@ -966,11 +952,6 @@ function memberCardHTML(m, groupKey) {
   const isExtraInstance = m.role === "team_lead" && !!groupKey && groupKey !== groupKeyForMember(m) && customTeams.some((t) => t.id === groupKey);
   const leadsSeveral = m.role === "team_lead" && leadTeamIds(m).length > 1;
   const positionLabel = isExtraInstance ? "Team lead (also leads this team)" : memberPositionLabel(m);
-  // "Team lead" is omitted entirely for anyone currently in a locked team
-  // (e.g. Independent Leads) — matches the server-side
-  // enforce_locked_team_no_lead trigger, which would just silently coerce
-  // the promotion back to intern anyway, so there's no point offering it.
-  const canBeTeamLead = !isLockedTeam(groupKeyForMember(m));
   const positionHTML = isAdmin && !isExtraInstance
     ? `
     <div class="mc-sub-wrap">
@@ -978,7 +959,7 @@ function memberCardHTML(m, groupKey) {
       <div class="position-menu hidden" data-member-id="${m.id}">
         <button type="button" class="position-option" data-role="intern">Intern</button>
         <button type="button" class="position-option" data-role="independent_lead">Independent lead</button>
-        ${canBeTeamLead ? `<button type="button" class="position-option" data-role="team_lead">Team lead</button>` : ""}
+        <button type="button" class="position-option" data-role="team_lead">Team lead</button>
         <button type="button" class="position-option" data-role="admin">Admin</button>
       </div>
     </div>`
@@ -1209,35 +1190,28 @@ document.addEventListener("click", () => closeAllPositionMenus());
 // Moves a member into `groupKey` (either ADMINS_KEY, UNASSIGNED_KEY, or a
 // custom team's id) — shared by the position dropdown's Admin/Intern options
 // and the drag-drop gesture below. Moving into Admins always sets
-// role='admin'; moving into the locked Independent Leads box always sets
-// role='independent_lead'; moving anywhere else sets role='intern' (an admin
-// or team lead dragged out becomes a plain intern again, per spec) — except
-// an independent lead keeps their role when moved to another team — plus
-// that destination's team_id. Team lead promotion itself is NOT done through this
+// role='admin'; moving anywhere else sets role='intern' (an admin dragged out
+// becomes a plain intern again, per spec) — except an independent lead keeps
+// their role when moved to another team — plus that destination's team_id. Team lead promotion itself is NOT done through this
 // function — see setMemberAsTeamLead/demoteTeamLeadInPlace below, which
 // change role without moving anyone between boxes.
 async function moveMemberToGroup(memberId, groupKey) {
   const member = allMembers.find((m) => m.id === memberId);
   // A team lead dragged into another real team doesn't leave their team(s): they ALSO lead the new one, shown in
   // both boxes, and everyone on every team they lead is theirs to see. (A lead with no team yet takes the normal path.)
-  if (member?.role === "team_lead" && member.team_id && groupKey !== ADMINS_KEY && groupKey !== UNASSIGNED_KEY && !isLockedTeam(groupKey)) {
+  if (member?.role === "team_lead" && member.team_id && groupKey !== ADMINS_KEY && groupKey !== UNASSIGNED_KEY) {
     if (leadTeamIds(member).includes(groupKey)) return renderTeams();
     const { error } = await supabase.from("team_lead_teams").insert({ profile_id: memberId, team_id: groupKey });
     if (error) return showError(els.teamsErrorBox, error);
     await loadTeams();
     return;
   }
-  // Anywhere else (Admins, Unassigned, the locked Independent Leads box) the move is a full one: extra teams go.
+  // Anywhere else (Admins, Unassigned) the move is a full one: extra teams go.
   const clearErr = await clearExtraTeams(memberId);
   if (clearErr) return showError(els.teamsErrorBox, clearErr);
   let updates;
   if (groupKey === ADMINS_KEY) {
     updates = { role: "admin" };
-  } else if (isLockedTeam(groupKey)) {
-    // Anyone put into the locked Independent Leads box becomes an
-    // independent lead (the locked_team_no_lead trigger enforces the same
-    // server-side).
-    updates = { role: "independent_lead", team_id: groupKey };
   } else {
     // An independent lead moved to a different team (or Unassigned) keeps
     // that role — they just sit with that team's interns until someone
@@ -1273,10 +1247,6 @@ async function setMemberAsTeamLead(memberId) {
     showError(els.teamsErrorBox, new Error("Only accounts inside a team box can be made team lead."));
     return;
   }
-  if (isLockedTeam(groupKey)) {
-    showError(els.teamsErrorBox, new Error("This team can't have a team lead."));
-    return;
-  }
   const boxmates = teamMembersByGroup[groupKey] || [];
   const existingLead = boxmates.find((m) => m.id !== memberId && m.role === "team_lead" && m.team_id === groupKey);
   if (existingLead) {
@@ -1285,6 +1255,15 @@ async function setMemberAsTeamLead(memberId) {
     if (demoteErr) return showError(els.teamsErrorBox, demoteErr);
   }
   const { error } = await supabase.from("profiles").update({ role: "team_lead" }).eq("id", memberId);
+  if (error) return showError(els.teamsErrorBox, error);
+  await loadTeams();
+}
+
+// Sets role and team together (an admin turned independent lead lands in Unassigned with that role).
+async function setMemberRoleAndTeam(memberId, role, teamId) {
+  const clearErr = await clearExtraTeams(memberId);
+  if (clearErr) return showError(els.teamsErrorBox, clearErr);
+  const { error } = await supabase.from("profiles").update({ role, team_id: teamId }).eq("id", memberId);
   if (error) return showError(els.teamsErrorBox, error);
   await loadTeams();
 }
@@ -1353,7 +1332,6 @@ async function removeLeadFromTeam(memberId, teamId) {
 async function applyAutoPromotion(excludeMemberId) {
   let changed = false;
   for (const team of customTeams) {
-    if (team.is_locked) continue; // e.g. Independent Leads — never auto-promotes
     const members = teamMembersByGroup[team.id] || [];
     if (members.length === 1) {
       const only = members[0];

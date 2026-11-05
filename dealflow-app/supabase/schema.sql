@@ -1403,3 +1403,7 @@ $$;
 -- daily-notification lookups and email_accounts_select now use it instead of a single team_id.
 -- Client: profile.team_ids (js/auth.js), js/teamScope.js, the Teams popup (drag a lead into another team to add it,
 -- X to leave one, auto-scroll while dragging), and Accounts visible grouped by team for leads over several teams.
+
+-- Independent lead is only a position now (migration remove_independent_leads_team): the locked "Independent Leads" team,
+-- its trigger locked_team_no_lead (enforce_locked_team_no_lead) and locked_team_no_delete (prevent_locked_team_delete) are
+-- gone. Anyone can hold the independent_lead role inside any team (Teams popup > position menu).
