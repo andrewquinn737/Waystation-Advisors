@@ -27,6 +27,7 @@ import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIs
 import { skeletonListHtml } from "./placeholders.js";
 import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
+import { keepRecordingForDial, signedRecordingUrl } from "./callRecordings.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -928,6 +929,7 @@ function placeCall(dial, phone, method) {
     dial, phone, method, profile,
     onDialed: () => autoMarkContacted(dial, method),
     onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
+    onRecordingSaved: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     fallbackTel: (num) => dialViaPhone(dial, method, num),
   });
 }
@@ -958,7 +960,7 @@ async function loadDialTranscript() {
   const dialId = currentDial.id;
   const { data, error } = await supabase
     .from("calls")
-    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary, dial_method")
+    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary, dial_method, recording_path")
     .eq("dial_id", dialId)
     .eq("direction", "outbound")
     .eq("mode", "in_app")
@@ -983,9 +985,30 @@ async function loadDialTranscript() {
             : "No summary (call was too short).";
       const lines = c.transcribed && c.answered ? `<details data-call-id="${c.id}"><summary>Full transcript</summary><div class="dial-transcript-lines"></div></details>` : "";
       const line = c.dial_method === "company" ? "Company line" : c.dial_method === "mobile" ? "Mobile" : "Call";
-      return `<div class="dial-transcript-call"><div class="dial-transcript-when"><b>${line}</b> · ${escapeHtml(when + dur)}</div><div>${body}</div>${lines}</div>`;
+      const rec = c.recording_path ? `<div class="dial-recording" data-path="${escapeHtml(c.recording_path)}"><button type="button" class="btn secondary dial-recording-play">▶ Play recording</button></div>` : "";
+      return `<div class="dial-transcript-call"><div class="dial-transcript-when"><b>${line}</b> · ${escapeHtml(when + dur)}</div><div>${body}</div>${rec}${lines}</div>`;
     })
     .join("");
+  el.querySelectorAll(".dial-recording").forEach((box) => {
+    box.querySelector(".dial-recording-play").addEventListener("click", async () => {
+      const path = box.dataset.path;
+      try {
+        const url = await signedRecordingUrl(path, 3600);
+        box.innerHTML = `<audio controls autoplay preload="auto" src="${url}"></audio>
+          <div class="dial-recording-actions"><button type="button" class="btn secondary" data-act="share">Copy share link (7 days)</button><button type="button" class="btn secondary" data-act="download">Download</button></div>`;
+        box.querySelector('[data-act="share"]').addEventListener("click", async (e) => {
+          const b = e.currentTarget;
+          try { await navigator.clipboard.writeText(await signedRecordingUrl(path, 7 * 24 * 3600)); b.textContent = "Link copied"; } catch { b.textContent = "Couldn't copy"; }
+          setTimeout(() => { b.textContent = "Copy share link (7 days)"; }, 2000);
+        });
+        box.querySelector('[data-act="download"]').addEventListener("click", async () => {
+          try { window.location.href = await signedRecordingUrl(path, 300, true); } catch { /* ignore */ }
+        });
+      } catch (err) {
+        box.innerHTML = `<div class="help-text">Couldn't load the recording: ${escapeHtml(err?.message || String(err))}</div>`;
+      }
+    });
+  });
   el.querySelectorAll("details[data-call-id]").forEach((d) => {
     d.addEventListener("toggle", async () => {
       const target = d.querySelector(".dial-transcript-lines");
@@ -3115,6 +3138,18 @@ async function updateDialStatus(newStatus) {
   Object.assign(currentDial, data);
   if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled) {
     currentDial._scheduleIntroCallUsed = false;
+  }
+  // Accounts with call recording on keep the recording only for calls that end as "Accepted intro call".
+  if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled && profile.record_accepted_calls === true) {
+    const dialId = currentDial.id;
+    keepRecordingForDial(profile, dialId, isCallActive()).then(
+      (saved) => {
+        if (!saved) return;
+        showNotice("The recording of this call was saved. Find it under the dial's Transcript, where you can play it, copy a share link, or download it.", { title: "Recording saved" });
+        if (currentDial?.id === dialId) loadDialTranscript();
+      },
+      (err) => showNotice(`The call recording couldn't be saved: ${err?.message || err}`, { title: "Recording not saved" })
+    );
   }
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) Object.assign(dials[idx], data);

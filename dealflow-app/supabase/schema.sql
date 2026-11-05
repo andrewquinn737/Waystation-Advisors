@@ -1391,3 +1391,8 @@ $$;
 -- questionnaires) were moved to the 'questionnaire' type. get_buyer_progress_summary gains 'questionnaires_completed';
 -- get_buyer_milestone_clients also returns 'questionnaire'. Creating the client from the dial now logs the
 -- Questionnaire as completed and the booked Intro call as upcoming.
+
+-- Call recordings (migration call_recordings_for_accepted_calls): profiles.record_accepted_calls (true for Andrew Quinn
+-- only) makes the app record both sides of in-app calls the server approved for recording, hold the audio in the
+-- browser, and upload it to the private storage bucket call-recordings ({user_id}/{call_id}.webm|m4a) ONLY when the
+-- dial is set to "Accepted intro call"; calls.recording_path/recording_mime point at it. Owner or admin can read it.

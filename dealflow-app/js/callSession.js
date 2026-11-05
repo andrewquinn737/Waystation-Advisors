@@ -10,6 +10,7 @@ import { showNotice } from "./notice.js";
 import { openCallPanel } from "./callPanel.js";
 import { startCallAudio } from "./callAudio.js";
 import { startTranscript } from "./callTranscript.js";
+import { startRecorder, holdRecording } from "./callRecordings.js";
 
 const TELNYX_SDK = "https://cdn.jsdelivr.net/npm/@telnyx/webrtc@2.27.10/lib/bundle.mjs";
 let active = false;
@@ -60,7 +61,7 @@ export async function startCall(opts) {
 
   // Created inside the tap so iOS lets the audio run.
   let ctx = null, mic = null, client = null, call = null, wake = null, transcript = null, stopAudio = null;
-  let callId = null, transcribe = false, answeredAt = null, finished = false, ringing = false;
+  let callId = null, transcribe = false, answeredAt = null, finished = false, ringing = false, recorder = null;
   try { ctx = primed && primed.state !== "closed" ? primed : new AudioContext({ sampleRate: 16000 }); primed = null; await ctx.resume(); } catch { ctx = null; }
   const remoteAudio = Object.assign(document.createElement("audio"), { autoplay: true });
   remoteAudio.setAttribute("playsinline", "");
@@ -160,7 +161,12 @@ export async function startCall(opts) {
     panel.ended(label || "Call ended");
     let lines = 0;
     try { if (transcript) lines = await transcript.stop(); } catch { /* ignore */ }
+    // The recording (accounts with record_accepted_calls only) is held in memory; it is uploaded only if this dial
+    // ends up as "Accepted intro call" (see js/callRecordings.js).
+    let recorded = null;
+    try { if (recorder) recorded = await recorder.stop(); } catch { /* ignore */ }
     cleanupMedia();
+    if (recorded && callId && answeredAt) holdRecording(profile, callId, dial.id, recorded).then((saved) => { if (saved) opts.onRecordingSaved?.(); }, () => {});
     if (callId) {
       const patch = { ended_at: endedAt.toISOString(), answered: !!answeredAt };
       if (answeredAt) patch.duration_sec = Math.max(0, Math.round((endedAt - answeredAt) / 1000));
@@ -248,6 +254,9 @@ export async function startCall(opts) {
           try {
             transcript = startTranscript({ callId, onLine: (l) => panel.addLine(l), onInterim: (i) => panel.interim(i), onFailed: () => panel.note("Live transcript unavailable — the call continues.") });
             stopAudio = await startCallAudio({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream, onFrame: (b) => transcript?.sendAudio(b) });
+            if (profile.record_accepted_calls === true && window.MediaRecorder) {
+              try { recorder = startRecorder({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream }); panel.state("Connected · transcribing · recording"); } catch { recorder = null; }
+            }
           } catch { panel.note("Live transcript unavailable — the call continues."); }
         }
       }

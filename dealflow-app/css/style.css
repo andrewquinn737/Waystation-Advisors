@@ -2044,3 +2044,8 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .sub-step-body { padding: 0 12px 12px; }
 .sub-step.collapsed .sub-step-body { display: none; }
 .sub-step .form-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+/* Saved call recording under a dial's calls (js/dials.js loadDialTranscript). */
+.dial-recording { margin: 8px 0 4px; }
+.dial-recording audio { width: 100%; }
+.dial-recording-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
