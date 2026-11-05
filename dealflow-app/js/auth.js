@@ -1,3 +1,4 @@
+import { findTeamLead } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { setOwnEmail, setOwnRole, setTeamLeadMailbox, setOwnHasMailbox } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
@@ -152,6 +153,18 @@ export async function requireSession() {
   // never phone numbers, and always falls back to a plain mailto: otherwise.
   setOwnEmail(resolvedProfile.email);
 
+  // Every team this account belongs to or leads: a team lead can lead more than one (profiles.team_id is the
+  // primary, team_lead_teams the extras). Everything that scopes "my team" uses profile.team_ids.
+  resolvedProfile.team_ids = resolvedProfile.team_id ? [resolvedProfile.team_id] : [];
+  if (resolvedProfile.role === "team_lead") {
+    try {
+      const { data: extra } = await supabase.from("team_lead_teams").select("team_id").eq("profile_id", resolvedProfile.id);
+      (extra || []).forEach((r) => { if (!resolvedProfile.team_ids.includes(r.team_id)) resolvedProfile.team_ids.push(r.team_id); });
+    } catch (e) {
+      console.error("Could not load extra teams", e);
+    }
+  }
+
   // Also decides what the "Email" icon does, by role (see contactIcons.js's
   // own comment on setOwnRole/setTeamLeadMailbox for the 3-way split). Only
   // an intern needs the extra round trip: find their team lead, then that
@@ -164,12 +177,7 @@ export async function requireSession() {
   setOwnRole(resolvedProfile.role);
   if (resolvedProfile.role === "intern" && resolvedProfile.team_id) {
     try {
-      const { data: teamLead } = await supabase
-        .from("profiles")
-        .select("id, email")
-        .eq("team_id", resolvedProfile.team_id)
-        .eq("role", "team_lead")
-        .maybeSingle();
+      const teamLead = await findTeamLead(resolvedProfile.team_id, "id, email");
       if (teamLead) {
         const { data: mailboxes } = await supabase.from("email_accounts").select("id, email_address").eq("owner_id", teamLead.id);
         const primary = (mailboxes || []).find((m) => m.email_address?.toLowerCase() === (teamLead.email || "").toLowerCase()) || (mailboxes || [])[0];

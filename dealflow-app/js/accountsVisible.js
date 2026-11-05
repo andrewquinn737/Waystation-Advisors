@@ -143,6 +143,15 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
   let teams = [];
   let teamsLoaded = false;
 
+  // A team lead over several teams (a.team_ids, see js/teamScope.js) is listed under every team they lead.
+  function groupKeysFor(a) {
+    if (a.role === "team_lead" && a.team_ids && a.team_ids.length > 1) {
+      const ks = a.team_ids.filter((id) => teams.some((t) => t.id === id));
+      if (ks.length) return ks;
+    }
+    return [groupKeyFor(a)];
+  }
+
   function groupKeyFor(a) {
     if (a.role === "admin") return ADMIN_GROUP_KEY;
     if (a.team_id && teams.some((t) => t.id === a.team_id)) return a.team_id;
@@ -196,7 +205,7 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     } else if (getTeams && teams.length) {
       const byGroup = new Map();
       buildGroupDefs().forEach((g) => byGroup.set(g.key, []));
-      allAccounts.forEach((a) => byGroup.get(groupKeyFor(a)).push(a));
+      allAccounts.forEach((a) => groupKeysFor(a).forEach((k) => byGroup.get(k)?.push(a)));
       rowsHTML = buildGroupDefs()
         .map((g) => {
           const members = byGroup.get(g.key) || [];
@@ -283,7 +292,7 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
       groupBtn.addEventListener("click", (e) => {
         e.stopPropagation(); // see the comment on #accountsSelectAllBtn's handler above
         const groupKey = groupBtn.dataset.group;
-        const members = allAccounts.filter((a) => groupKeyFor(a) === groupKey);
+        const members = allAccounts.filter((a) => groupKeysFor(a).includes(groupKey));
         // Same shape as the individual-row handler above: the first group
         // pick after "Select all" starts from everyone and excludes this
         // whole group, rather than jumping to "only this group".

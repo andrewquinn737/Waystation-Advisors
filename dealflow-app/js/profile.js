@@ -1,3 +1,4 @@
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
 import { toE164 } from "./phoneUtil.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
@@ -307,7 +308,7 @@ async function resolveSelectedAccounts() {
   // from in the first place — this just needs to agree with that scope).
   const pool = isAdminSync
     ? all
-    : all.filter((a) => a.id === profile.id || (profile.team_id && a.team_id === profile.team_id && (a.role === "intern" || a.role === "independent_lead")));
+    : all.filter((a) => a.id === profile.id || (teamIdsOf(profile).includes(a.team_id) && (a.role === "intern" || a.role === "independent_lead")));
   const visible = getVisibleAccountIds();
   if (!visible) return pool.length ? pool : [profile];
   const picked = pool.filter((a) => visible.has(a.id));
@@ -644,6 +645,8 @@ const UNASSIGNED_KEY = "unassigned";
 let allMembers = []; // every profiles row
 let customTeams = []; // every teams row (sort_order asc)
 let teamMembersByGroup = {}; // groupKey -> members[]
+// Team leads can lead several teams: profiles.team_id is their primary team, team_lead_teams lists the extras.
+let extraTeamsByLead = {}; // leadId -> [teamId, ...] (extra teams only)
 let isAdmin = false;
 let editMode = false;
 // Group keys the user has explicitly collapsed — see renderTeams() and the
@@ -679,6 +682,29 @@ function groupKeyForMember(m) {
   return UNASSIGNED_KEY;
 }
 
+// Every real team a team lead leads (primary first, then extras); anyone else just has their one team.
+function leadTeamIds(m) {
+  const ids = [];
+  if (m.team_id && customTeams.some((t) => t.id === m.team_id)) ids.push(m.team_id);
+  (extraTeamsByLead[m.id] || []).forEach((id) => { if (!ids.includes(id) && customTeams.some((t) => t.id === id)) ids.push(id); });
+  return ids;
+}
+
+// Every group box a member shows up in: a team lead appears in each team they lead.
+function groupKeysForMember(m) {
+  if (m.role === "team_lead") {
+    const ids = leadTeamIds(m);
+    return ids.length ? ids : [UNASSIGNED_KEY];
+  }
+  return [groupKeyForMember(m)];
+}
+
+async function clearExtraTeams(memberId) {
+  if (!(extraTeamsByLead[memberId] || []).length) return null;
+  const { error } = await supabase.from("team_lead_teams").delete().eq("profile_id", memberId);
+  return error || null;
+}
+
 // Admins first, then every custom team (in sort_order), then Unassigned
 // interns last — a newly-created team lands right before Unassigned (see
 // createNewTeam()), matching "between the last listed team and unassigned
@@ -705,14 +731,17 @@ function isLockedTeam(groupKey) {
 }
 
 async function loadTeams() {
-  const [{ data: profiles, error: profErr }, { data: teamsData, error: teamsErr }, { data: tempPwData }] = await Promise.all([
+  const [{ data: profiles, error: profErr }, { data: teamsData, error: teamsErr }, { data: tempPwData }, { data: extraRows }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, role, phone, email, team_id, avatar_url, calendly_link").order("full_name", { ascending: true }),
     supabase.from("teams").select("*").order("sort_order", { ascending: true }),
     // Non-admins are simply denied by RLS here and get back an empty array
     // (or an error we can safely ignore) rather than blocking the rest of
     // Teams from loading — so no error-checking on this one.
     supabase.from("profile_temp_passwords").select("profile_id, temp_password"),
+    supabase.from("team_lead_teams").select("profile_id, team_id"),
   ]);
+  extraTeamsByLead = {};
+  (extraRows || []).forEach((r) => { (extraTeamsByLead[r.profile_id] ||= []).push(r.team_id); });
   if (profErr) return showError(els.teamsErrorBox, profErr);
   if (teamsErr) return showError(els.teamsErrorBox, teamsErr);
   tempPasswordsByMemberId = {};
@@ -732,13 +761,15 @@ async function loadTeams() {
   // Who the Teams popup shows: admins see everyone; a team lead sees their own team plus the admins;
   // interns and independent leads see only the team they're under (never the admins or other teams).
   // (Display only — the profiles table itself stays readable app-wide for names, mailboxes, reports.)
-  const myTeam = me?.team_id || null;
+  const myTeams = me ? (me.role === "team_lead" ? leadTeamIds(me) : me.team_id ? [me.team_id] : []) : [];
   allMembers = isAdmin
     ? everyone
     : everyone.filter((m) => {
         if (m.id === profile.id) return true;
         if (me?.role === "team_lead" && m.role === "admin") return true;
-        return m.role !== "admin" && !!myTeam && m.team_id === myTeam;
+        if (m.role === "admin") return false;
+        const theirs = m.role === "team_lead" ? leadTeamIds(m) : m.team_id ? [m.team_id] : [];
+        return theirs.some((t) => myTeams.includes(t));
       });
   els.teamsAddBtn.classList.toggle("hidden", !isAdmin);
   els.teamsEditBtn.classList.toggle("hidden", !isAdmin);
@@ -747,7 +778,7 @@ async function loadTeams() {
   teamMembersByGroup = {};
   buildGroupDefs().forEach((g) => (teamMembersByGroup[g.key] = []));
   allMembers.forEach((m) => {
-    teamMembersByGroup[groupKeyForMember(m)].push(m);
+    groupKeysForMember(m).forEach((k) => teamMembersByGroup[k]?.push(m));
   });
   // A team's lead (if it has one) always sorts to the top of its box — see
   // memberCardHTML's "is-team-lead" class, which highlights their card's
@@ -807,7 +838,7 @@ function renderTeams() {
         <div class="accordion-body team-group-body">
           ${
             members.length
-              ? `<div class="team-member-list">${members.map(memberCardHTML).join("")}</div>`
+              ? `<div class="team-member-list">${members.map((m) => memberCardHTML(m, g.key)).join("")}</div>`
               : `<div class="empty-state">No one here yet.</div>`
           }
         </div>
@@ -906,6 +937,12 @@ function renderTeams() {
       }
     });
   });
+  els.teamsWrap.querySelectorAll(".lead-leave-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeLeadFromTeam(btn.dataset.memberId, btn.dataset.teamId);
+    });
+  });
   els.teamsWrap.querySelectorAll(".member-trash-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -923,15 +960,18 @@ function renderTeams() {
   stopContactActionPropagation(els.teamsWrap);
 }
 
-function memberCardHTML(m) {
+function memberCardHTML(m, groupKey) {
   const isMemberAdmin = m.role === "admin";
-  const positionLabel = memberPositionLabel(m);
+  // A team lead shown in a team that is not their primary one (they lead it as an extra team).
+  const isExtraInstance = m.role === "team_lead" && !!groupKey && groupKey !== groupKeyForMember(m) && customTeams.some((t) => t.id === groupKey);
+  const leadsSeveral = m.role === "team_lead" && leadTeamIds(m).length > 1;
+  const positionLabel = isExtraInstance ? "Team lead (also leads this team)" : memberPositionLabel(m);
   // "Team lead" is omitted entirely for anyone currently in a locked team
   // (e.g. Independent Leads) — matches the server-side
   // enforce_locked_team_no_lead trigger, which would just silently coerce
   // the promotion back to intern anyway, so there's no point offering it.
   const canBeTeamLead = !isLockedTeam(groupKeyForMember(m));
-  const positionHTML = isAdmin
+  const positionHTML = isAdmin && !isExtraInstance
     ? `
     <div class="mc-sub-wrap">
       <span class="mc-sub position-toggle" data-member-id="${m.id}">${escapeHtml(positionLabel)}</span>
@@ -944,9 +984,12 @@ function memberCardHTML(m) {
     </div>`
     : `<div class="mc-sub">${escapeHtml(positionLabel)}</div>`;
 
+  const leaveBtn = editMode && leadsSeveral && groupKey
+    ? `<button type="button" class="team-trash-btn lead-leave-btn" data-member-id="${m.id}" data-team-id="${groupKey}" title="Stop leading this team">&#10005;</button>`
+    : "";
   const rightHTML =
     editMode && !isMemberAdmin
-      ? `<button type="button" class="team-trash-btn member-trash-btn" data-member-id="${m.id}" data-member-name="${escapeHtml(m.full_name)}" title="Remove account">&#128465;</button>`
+      ? `${leaveBtn}${isExtraInstance ? "" : `<button type="button" class="team-trash-btn member-trash-btn" data-member-id="${m.id}" data-member-name="${escapeHtml(m.full_name)}" title="Remove account">&#128465;</button>`}`
       : // Wrapped together (rather than left as two separate flex children of
         // .team-member-card) so the key icon sits directly against the
         // instant-contact icons instead of getting pushed apart by the row's
@@ -956,7 +999,7 @@ function memberCardHTML(m) {
   const pwRevealed = revealedPasswordMemberIds.has(m.id);
   return `
     <div class="team-member-card-wrap">
-      <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""} ${m.role === "team_lead" ? "is-team-lead" : ""} ${m.id === mainAdminId ? "is-main-admin" : ""}" data-member-id="${m.id}">
+      <div class="team-member-card clickable-row ${pwRevealed ? "expanded" : ""} ${m.role === "team_lead" ? "is-team-lead" : ""} ${m.id === mainAdminId ? "is-main-admin" : ""}" data-member-id="${m.id}" data-group-key="${groupKey || ""}">
         <div class="mc-left">
           ${memberAvatarHTML(m)}
           <div class="mc-main">
@@ -1175,6 +1218,18 @@ document.addEventListener("click", () => closeAllPositionMenus());
 // change role without moving anyone between boxes.
 async function moveMemberToGroup(memberId, groupKey) {
   const member = allMembers.find((m) => m.id === memberId);
+  // A team lead dragged into another real team doesn't leave their team(s): they ALSO lead the new one, shown in
+  // both boxes, and everyone on every team they lead is theirs to see. (A lead with no team yet takes the normal path.)
+  if (member?.role === "team_lead" && member.team_id && groupKey !== ADMINS_KEY && groupKey !== UNASSIGNED_KEY && !isLockedTeam(groupKey)) {
+    if (leadTeamIds(member).includes(groupKey)) return renderTeams();
+    const { error } = await supabase.from("team_lead_teams").insert({ profile_id: memberId, team_id: groupKey });
+    if (error) return showError(els.teamsErrorBox, error);
+    await loadTeams();
+    return;
+  }
+  // Anywhere else (Admins, Unassigned, the locked Independent Leads box) the move is a full one: extra teams go.
+  const clearErr = await clearExtraTeams(memberId);
+  if (clearErr) return showError(els.teamsErrorBox, clearErr);
   let updates;
   if (groupKey === ADMINS_KEY) {
     updates = { role: "admin" };
@@ -1223,8 +1278,9 @@ async function setMemberAsTeamLead(memberId) {
     return;
   }
   const boxmates = teamMembersByGroup[groupKey] || [];
-  const existingLead = boxmates.find((m) => m.id !== memberId && m.role === "team_lead");
+  const existingLead = boxmates.find((m) => m.id !== memberId && m.role === "team_lead" && m.team_id === groupKey);
   if (existingLead) {
+    await clearExtraTeams(existingLead.id);
     const { error: demoteErr } = await supabase.from("profiles").update({ role: "intern" }).eq("id", existingLead.id);
     if (demoteErr) return showError(els.teamsErrorBox, demoteErr);
   }
@@ -1236,6 +1292,8 @@ async function setMemberAsTeamLead(memberId) {
 // Switches just the role (no box change) — used by the position dropdown's
 // "Independent lead" option for someone already sitting in a team.
 async function setMemberRoleInPlace(memberId, role) {
+  const clearErr = await clearExtraTeams(memberId);
+  if (clearErr) return showError(els.teamsErrorBox, clearErr);
   const { error } = await supabase.from("profiles").update({ role }).eq("id", memberId);
   if (error) return showError(els.teamsErrorBox, error);
   await loadTeams();
@@ -1249,6 +1307,8 @@ async function setMemberRoleInPlace(memberId, role) {
 // only their role changes (see moveMemberToGroup's own comment for why this
 // needs to be a separate function rather than reusing it).
 async function demoteTeamLeadInPlace(memberId) {
+  const clearErr = await clearExtraTeams(memberId);
+  if (clearErr) return showError(els.teamsErrorBox, clearErr);
   const { error } = await supabase.from("profiles").update({ role: "intern" }).eq("id", memberId);
   if (error) return showError(els.teamsErrorBox, error);
   await loadTeams();
@@ -1259,6 +1319,29 @@ async function demoteTeamLeadInPlace(memberId) {
   // membership runs applyAutoPromotion() with no exclusion, so they're fair
   // game to be auto-promoted again after that.
   await applyAutoPromotion(memberId);
+}
+
+// Takes a team lead off one of the teams they lead (they keep the others). If it was their primary team, one of
+// the extra teams becomes the primary.
+async function removeLeadFromTeam(memberId, teamId) {
+  const member = allMembers.find((m) => m.id === memberId);
+  if (!member) return;
+  const teams = leadTeamIds(member);
+  if (teams.length <= 1) {
+    showError(els.teamsErrorBox, new Error("A team lead needs at least one team. Use the position menu to change their role."));
+    return;
+  }
+  if (teamId === member.team_id) {
+    const next = teams.find((t) => t !== teamId);
+    const { error } = await supabase.from("profiles").update({ team_id: next }).eq("id", memberId);
+    if (error) return showError(els.teamsErrorBox, error);
+    const { error: delErr } = await supabase.from("team_lead_teams").delete().eq("profile_id", memberId).eq("team_id", next);
+    if (delErr) return showError(els.teamsErrorBox, delErr);
+  } else {
+    const { error } = await supabase.from("team_lead_teams").delete().eq("profile_id", memberId).eq("team_id", teamId);
+    if (error) return showError(els.teamsErrorBox, error);
+  }
+  await loadTeams();
 }
 
 // "If there is only one account in a box they are automatically set to a
@@ -1319,8 +1402,50 @@ function cancelMemberLongPressTimer() {
   }
 }
 
+// While a card is held, the popup scrolls itself when the pointer nears its top or bottom edge, so a card can be
+// dropped into ANY team box and not just the ones already on screen (long lists of teams are taller than the screen).
+function scrollContainerFor(el) {
+  for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    const oy = getComputedStyle(n).overflowY;
+    if ((oy === "auto" || oy === "scroll") && n.scrollHeight > n.clientHeight + 1) return n;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+function startDragAutoScroll() {
+  stopDragAutoScroll();
+  const EDGE = 100, MAX = 26;
+  const tick = () => {
+    if (!memberDragState.active) return;
+    const y = memberDragState.lastY;
+    if (y != null) {
+      const box = scrollContainerFor(els.teamsWrap);
+      const isRoot = box === document.scrollingElement || box === document.documentElement;
+      const top = isRoot ? 0 : box.getBoundingClientRect().top;
+      const bottom = isRoot ? window.innerHeight : box.getBoundingClientRect().bottom;
+      let dy = 0;
+      if (y < top + EDGE) dy = -Math.min(MAX, ((top + EDGE - y) / EDGE) * MAX);
+      else if (y > bottom - EDGE) dy = Math.min(MAX, ((y - (bottom - EDGE)) / EDGE) * MAX);
+      if (dy) {
+        const before = box.scrollTop;
+        box.scrollTop += dy;
+        // The boxes moved under the held card: work out the new drop target without waiting for the pointer.
+        if (box.scrollTop !== before) moveMemberDragGhost({ clientX: memberDragState.lastX, clientY: y });
+      }
+    }
+    memberDragState.scrollRaf = requestAnimationFrame(tick);
+  };
+  memberDragState.scrollRaf = requestAnimationFrame(tick);
+}
+function stopDragAutoScroll() {
+  if (memberDragState.scrollRaf) cancelAnimationFrame(memberDragState.scrollRaf);
+  memberDragState.scrollRaf = null;
+}
+
 function startMemberDragVisuals(card, e) {
   memberDragState.active = true;
+  memberDragState.lastX = e.clientX;
+  memberDragState.lastY = e.clientY;
+  startDragAutoScroll();
   // Force every group open so there's always somewhere visible to drop into,
   // even if that group was collapsed when the drag started.
   els.teamsWrap.querySelectorAll(".accordion-section").forEach((sec) => sec.classList.add("open"));
@@ -1348,6 +1473,8 @@ function rectOverlapArea(a, b) {
 
 function moveMemberDragGhost(e) {
   if (!memberDragState.ghost) return;
+  memberDragState.lastX = e.clientX;
+  memberDragState.lastY = e.clientY;
   memberDragState.ghost.style.left = `${e.clientX - memberDragState.offsetX}px`;
   memberDragState.ghost.style.top = `${e.clientY - memberDragState.offsetY}px`;
 
@@ -1397,6 +1524,7 @@ function moveMemberDragGhost(e) {
 }
 
 function endMemberDrag(card) {
+  stopDragAutoScroll();
   // Defensive: if anything forced a re-render mid-drag (unlikely in normal
   // use, but this used to throw and leave the gesture visibly "stuck" —
   // ghost still on screen, card unresponsive — if `card` had been detached
@@ -1428,6 +1556,7 @@ function wireMemberDrag(card, memberId) {
       e.target.closest(".position-menu") ||
       e.target.closest(".contact-action-btn") ||
       e.target.closest(".member-trash-btn") ||
+      e.target.closest(".lead-leave-btn") ||
       e.target.closest(".temp-pw-reveal")
     ) {
       return;
@@ -1472,8 +1601,10 @@ function wireMemberDrag(card, memberId) {
     memberDragState.dropTarget = null;
     if (wasActive) {
       memberDragState.suppressClick = true;
-      const currentGroup = groupKeyForMember(allMembers.find((m) => m.id === memberId) || {});
-      if (dropTarget && dropTarget !== currentGroup) {
+      const dragged = allMembers.find((m) => m.id === memberId) || {};
+      const currentGroup = groupKeyForMember(dragged);
+      const alreadyThere = dragged.role === "team_lead" && leadTeamIds(dragged).includes(dropTarget);
+      if (dropTarget && dropTarget !== currentGroup && !alreadyThere) {
         await moveMemberToGroup(memberId, dropTarget);
       } else {
         renderTeams();
@@ -2000,7 +2131,7 @@ async function extraIntroCallOwnerIds(alreadyCoveredIds) {
     // An independent lead with their own Calendly link books through that
     // instead (see resolveCalendlyLink in js/mainAdmin.js) — not this lead's.
     return all
-      .filter((a) => a.team_id === profile.team_id && routesThroughPartnerLink(a) && !alreadyCoveredIds.includes(a.id))
+      .filter((a) => teamIdsOf(profile).includes(a.team_id) && routesThroughPartnerLink(a) && !alreadyCoveredIds.includes(a.id))
       .map((a) => a.id);
   }
   if (profile.id === mainAdminId) {
@@ -2460,21 +2591,14 @@ if (isAdminSync || isTeamLeadSync) {
         const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
-      if (!profile.team_id) return [profile];
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .eq("team_id", profile.team_id)
-        .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
-        .order("full_name", { ascending: true });
-      return error ? [] : data || [];
+      return loadTeamScopeAccounts(profile);
     },
     // Admin-only — groups the popup's account list under team section
     // labels (same real teams shown in the Teams popup) so an admin with
     // many accounts can tell them apart at a glance, rather than one long
     // alphabetical list. Team leads' own pool is already just themselves +
     // their interns, so grouping isn't offered there.
-    getTeams: isAdminSync
+    getTeams: groupsByTeam(profile, isAdminSync)
       ? async () => {
           const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
           return error ? [] : data || [];

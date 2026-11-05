@@ -1,3 +1,4 @@
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { wireAccountsVisiblePopup, getVisibleAccountIds, initDefaultToSelf } from "./accountsVisible.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
@@ -307,14 +308,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
       return error ? [] : data || [];
     }
-    if (!profile.team_id) return [profile];
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .eq("team_id", profile.team_id)
-      .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
-      .order("full_name", { ascending: true });
-    return error ? [] : data || [];
+    return loadTeamScopeAccounts(profile);
   }
 
   // Admin-only — groups the popup's account list under team section labels
@@ -979,7 +973,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     closeBtn: els.reportsAccountsVisibleClose,
     myProfileId: profile.id,
     getAllAccounts,
-    getTeams: isAdminSync ? getTeamsForGrouping : undefined,
+    getTeams: groupsByTeam(profile, isAdminSync) ? getTeamsForGrouping : undefined,
     storageKey: REPORTS_ACCOUNTS_KEY,
     onChange: () => {
       selectedBuyerIds = null; // available buyers depend on which accounts are selected

@@ -2049,3 +2049,6 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .dial-recording { margin: 8px 0 4px; }
 .dial-recording audio { width: 100%; }
 .dial-recording-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Teams popup: take a team lead off one of several teams they lead. */
+.lead-leave-btn { margin-right: 6px; }

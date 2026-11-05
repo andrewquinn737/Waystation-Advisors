@@ -1396,3 +1396,10 @@ $$;
 -- only) makes the app record both sides of in-app calls the server approved for recording, hold the audio in the
 -- browser, and upload it to the private storage bucket call-recordings ({user_id}/{call_id}.webm|m4a) ONLY when the
 -- dial is set to "Accepted intro call"; calls.recording_path/recording_mime point at it. Owner or admin can read it.
+
+-- Team leads over multiple teams (migration team_leads_over_multiple_teams): profiles.team_id is a team lead's primary
+-- team; team_lead_teams(profile_id, team_id) lists the extra teams they lead (admin-write, readable by all signed-in).
+-- my_team_ids(uid) = primary + extras; is_team_lead_of, the reports/transfer/counterpart functions, the escalation and
+-- daily-notification lookups and email_accounts_select now use it instead of a single team_id.
+-- Client: profile.team_ids (js/auth.js), js/teamScope.js, the Teams popup (drag a lead into another team to add it,
+-- X to leave one, auto-scroll while dragging), and Accounts visible grouped by team for leads over several teams.

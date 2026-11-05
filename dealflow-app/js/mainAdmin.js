@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient.js";
+import { findTeamLead } from "./teamScope.js";
 
 // ---------------------------------------------------------------------------
 // "Main admin" = the admin account listed the longest (earliest created_at
@@ -43,13 +44,8 @@ export async function resolveCalendlyLink(profile) {
     return mainAdmin?.calendly_link || null;
   }
   if (profile.team_id) {
-    const { data: lead, error } = await supabase
-      .from("profiles")
-      .select("calendly_link")
-      .eq("team_id", profile.team_id)
-      .eq("role", "team_lead")
-      .maybeSingle();
-    if (!error && lead?.calendly_link) return lead.calendly_link;
+    const lead = await findTeamLead(profile.team_id, "calendly_link");
+    if (lead?.calendly_link) return lead.calendly_link;
   }
   return mainAdmin?.calendly_link || null;
 }

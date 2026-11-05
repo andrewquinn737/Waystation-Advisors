@@ -1,3 +1,4 @@
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
@@ -1302,7 +1303,7 @@ async function openTransferMenu() {
   const isOwnTab = !list || list.created_by === profile.id;
   let query = supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
   if (isTeamLead) {
-    query = query.or(`role.eq.admin,and(role.in.(intern,independent_lead),team_id.eq.${profile.team_id}),id.eq.${profile.id}`);
+    query = query.or(`role.eq.admin,and(role.in.(intern,independent_lead),team_id.in.(${teamIdsOf(profile).join(",")})),id.eq.${profile.id}`);
   }
   if (isOwnTab) query = query.neq("id", profile.id);
   const { data, error } = await query;
@@ -1698,11 +1699,11 @@ function startRenameTab(btn, list) {
 async function loadContractSignedBuyers() {
   let ownerIds = null;
   if (!isAdmin) {
-    if (profile.team_id) {
+    if (teamIdsOf(profile).length) {
       const { data: teamProfiles } = await supabase
         .from("profiles")
         .select("id")
-        .eq("team_id", profile.team_id)
+        .in("team_id", teamIdsOf(profile))
         .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`);
       ownerIds = (teamProfiles || []).map((p) => p.id);
     } else {
@@ -3951,21 +3952,14 @@ if (isAdmin || isTeamLead) {
         const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
         return error ? [] : data || [];
       }
-      if (!profile.team_id) return [profile];
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .eq("team_id", profile.team_id)
-        .or(`role.in.(intern,independent_lead),id.eq.${profile.id}`)
-        .order("full_name", { ascending: true });
-      return error ? [] : data || [];
+      return loadTeamScopeAccounts(profile);
     },
     // Admin-only — groups the popup's account list under team section
     // labels (same real teams shown in the Teams popup) so an admin with
     // many accounts can tell them apart at a glance, rather than one long
     // alphabetical list. Team leads' own pool is already just themselves +
     // their interns, so grouping isn't offered there.
-    getTeams: isAdmin
+    getTeams: groupsByTeam(profile, isAdmin)
       ? async () => {
           const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
           return error ? [] : data || [];
