@@ -1412,3 +1412,9 @@ $$;
 -- (Dials > Advanced > Call recording). A recording is uploaded only when the dial is set to Accepted intro call and is
 -- deleted (file + calls.recording_path) as soon as any other category is chosen. Caller, their team lead and admins can
 -- read/delete files in the call-recordings bucket.
+
+-- Callback times (migration dial_callback_times): dials.callback_at / callback_user_id / callback_reminded_at; the dial's
+-- "Callback" button sets them. run_callback_reminders() (cron callback-reminders, every minute) inserts a notification
+-- (type callback_due, notifications.link = /dials.html?dial=ID) 5 minutes before; send-push opens that link when tapped.
+-- Profile shows "Callbacks for today"; js/callbackBanners.js shows banners at the top of every page.
+-- Inbound callback fix (telnyx-webhook v3): the owner's call is no longer answered until the rep presses a key.

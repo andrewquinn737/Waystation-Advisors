@@ -1,4 +1,5 @@
 import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
+import { loadTodaysCallbacks } from "./callbackBanners.js";
 import { toE164 } from "./phoneUtil.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError, signOut } from "./auth.js";
@@ -97,6 +98,7 @@ const els = {
   menuCallsViewBtn: document.getElementById("menuCallsViewBtn"),
   upcomingEventsSection: document.getElementById("upcomingEventsSection"),
   upcomingEventsBox: document.getElementById("upcomingEventsBox"),
+  callbacksTodayBox: document.getElementById("callbacksTodayBox"),
   avatarFileInput: document.getElementById("avatarFileInput"),
   avatarInitials: document.getElementById("avatarInitials"),
   profileName: document.getElementById("profileName"),
@@ -623,6 +625,7 @@ function showCallsView(view) {
 function refreshActiveCallsView() {
   showCallsView(els.menuCallsViewBtn.dataset.view || "outreach");
   loadUpcomingEvents();
+  loadCallbacksToday();
 }
 
 els.menuCallsViewBtn.addEventListener("click", (e) => {
@@ -2122,6 +2125,33 @@ async function extraIntroCallOwnerIds(alreadyCoveredIds) {
   return [];
 }
 
+// "Callbacks for today": dials whose callback time falls today for whichever account(s) are selected in Accounts
+// visible. Tapping one opens the dial (dials.html?dial=ID) to call them.
+async function loadCallbacksToday() {
+  if (!els.callbacksTodayBox) return;
+  const selected = await resolveSelectedAccounts();
+  const rows = await loadTodaysCallbacks(selected.map((a) => a.id));
+  if (!rows.length) {
+    els.callbacksTodayBox.innerHTML = `<div class="empty-state">No callbacks scheduled for today.</div>`;
+    return;
+  }
+  els.callbacksTodayBox.innerHTML = rows
+    .map((r) => {
+      const time = new Date(r.callback_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      const past = new Date(r.callback_at).getTime() < Date.now() - 30 * 60 * 1000;
+      return `
+      <button type="button" class="upcoming-event-row callback-row${past ? " is-past" : ""}" data-dial-id="${r.id}">
+        <div class="upcoming-event-name">${escapeHtml(r.full_name || "Prospect")}</div>
+        <div class="upcoming-event-meta">${escapeHtml(time)}${r.company_name ? " · " + escapeHtml(r.company_name) : ""}</div>
+      </button>`;
+    })
+    .join("");
+  els.callbacksTodayBox.querySelectorAll(".callback-row").forEach((row) => {
+    row.addEventListener("click", () => { window.location.href = `dials.html?dial=${encodeURIComponent(row.dataset.dialId)}`; });
+  });
+}
+window.addEventListener("callbacks-changed", () => loadCallbacksToday());
+
 async function loadUpcomingEvents() {
   const selected = await resolveSelectedAccounts();
   const ids = selected.map((a) => a.id);
@@ -2626,3 +2656,4 @@ if (isAdminSync || isTeamLeadSync) {
 
 showCallsView("outreach");
 loadUpcomingEvents();
+loadCallbacksToday();

@@ -237,6 +237,12 @@ const els = {
   introCallPopupBody: document.getElementById("introCallPopupBody"),
   introCallPopupClose: document.getElementById("introCallPopupClose"),
   introCallTimeModal: document.getElementById("introCallTimeModal"),
+  callbackTimeModal: document.getElementById("callbackTimeModal"),
+  callbackDateInput: document.getElementById("callbackDateInput"),
+  callbackTimeInput: document.getElementById("callbackTimeInput"),
+  callbackTimeError: document.getElementById("callbackTimeError"),
+  callbackTimeSaveBtn: document.getElementById("callbackTimeSaveBtn"),
+  callbackTimeCancelBtn: document.getElementById("callbackTimeCancelBtn"),
   introCallTimeDateInput: document.getElementById("introCallTimeDateInput"),
   introCallTimeSelect: document.getElementById("introCallTimeSelect"),
   introCallTimeZoneSelect: document.getElementById("introCallTimeZoneSelect"),
@@ -2841,9 +2847,87 @@ function buildDialViewHTML(dial) {
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
     ${buildCallNotesLiveHTML(dial)}
+    ${buildCallbackHTML(dial)}
     ${buildDialTranscriptHTML()}
   `;
 }
+
+// ---------------------------------------------------------------------------
+// Callback time (dials.callback_at): a button under Call notes that opens a calendar + time picker. A set callback
+// shows under "Callbacks for today" on Profile, as a banner at the top of the app, and as a push reminder 5 minutes
+// before (server-side run_callback_reminders()). Tapping any of those opens this dial.
+// ---------------------------------------------------------------------------
+function callbackLabel(iso) {
+  const d = new Date(iso);
+  const day = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} at ${time}`;
+}
+function buildCallbackHTML(dial) {
+  const set = !!dial.callback_at;
+  return `
+    <div class="readonly-field">
+      <div class="rf-label">Callback</div>
+      <div class="callback-field">
+        ${set ? `<span class="callback-field-time">${escapeHtml(callbackLabel(dial.callback_at))}</span>` : ""}
+        <button type="button" class="btn secondary" id="callbackSetBtn">${set ? "Change" : "Pick a callback time"}</button>
+        ${set ? `<button type="button" class="btn secondary" id="callbackClearBtn">Clear</button>` : ""}
+      </div>
+    </div>`;
+}
+async function saveCallback(dial, iso) {
+  const patch = iso ? { callback_at: iso, callback_user_id: profile.id, callback_reminded_at: null } : { callback_at: null, callback_user_id: null, callback_reminded_at: null };
+  const { error } = await supabase.from("dials").update(patch).eq("id", dial.id);
+  if (error) throw error;
+  Object.assign(dial, patch);
+  if (currentDial?.id === dial.id) Object.assign(currentDial, patch);
+  const idx = dials.findIndex((d) => d.id === dial.id);
+  if (idx !== -1) Object.assign(dials[idx], patch);
+  window.dispatchEvent(new Event("callbacks-changed")); // refreshes the top-of-app banners and Profile's list
+}
+function openCallbackModal(dial) {
+  const base = dial.callback_at ? new Date(dial.callback_at) : new Date(Date.now() + 60 * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  els.callbackDateInput.value = `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`;
+  els.callbackTimeInput.value = `${pad(base.getHours())}:${pad(Math.round(base.getMinutes() / 5) * 5 % 60)}`;
+  els.callbackTimeError.classList.add("hidden");
+  els.callbackTimeModal.classList.remove("hidden");
+  const close = () => {
+    els.callbackTimeModal.classList.add("hidden");
+    els.callbackTimeSaveBtn.removeEventListener("click", onSave);
+    els.callbackTimeCancelBtn.removeEventListener("click", close);
+  };
+  const onSave = async () => {
+    const date = els.callbackDateInput.value, time = els.callbackTimeInput.value;
+    if (!date || !time) {
+      els.callbackTimeError.textContent = "Pick both a date and a time.";
+      els.callbackTimeError.classList.remove("hidden");
+      return;
+    }
+    const when = new Date(`${date}T${time}`);
+    if (Number.isNaN(when.getTime())) return;
+    els.callbackTimeSaveBtn.disabled = true;
+    try {
+      await saveCallback(dial, when.toISOString());
+      close();
+      renderDialModal();
+    } catch (err) {
+      els.callbackTimeError.textContent = err?.message || String(err);
+      els.callbackTimeError.classList.remove("hidden");
+    } finally {
+      els.callbackTimeSaveBtn.disabled = false;
+    }
+  };
+  els.callbackTimeSaveBtn.addEventListener("click", onSave);
+  els.callbackTimeCancelBtn.addEventListener("click", close);
+}
+document.addEventListener("click", async (e) => {
+  const setBtn = e.target.closest?.("#callbackSetBtn");
+  const clearBtn = e.target.closest?.("#callbackClearBtn");
+  if ((!setBtn && !clearBtn) || !currentDial) return;
+  if (setBtn) return openCallbackModal(currentDial);
+  try { await saveCallback(currentDial, null); renderDialModal(); } catch (err) { showError(els.dialModalError, err); }
+});
 
 function buildDialEditHTML(dial) {
   return `

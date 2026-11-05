@@ -1,4 +1,5 @@
 import { findTeamLead } from "./teamScope.js";
+import { initCallbackBanners } from "./callbackBanners.js";
 import { supabase } from "./supabaseClient.js";
 import { setOwnEmail, setOwnRole, setTeamLeadMailbox, setOwnHasMailbox } from "./contactIcons.js";
 import { subscribeToPush } from "./push.js";
@@ -200,6 +201,7 @@ export async function requireSession() {
   }
 
   renderNav(resolvedProfile);
+  try { initCallbackBanners(resolvedProfile); } catch (e) { console.error("callback banners", e); }
 
   // Real push notifications (see js/push.js) — subscribes this browser/
   // device once (upserted by endpoint, so re-running here on every page

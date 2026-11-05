@@ -574,6 +574,23 @@
        js/dials.js), together with its Timeline "intro_call" entry, using
        that real date/time/timezone instead of "now". Nothing about the
        client exists in the database until this modal is confirmed. -->
+  <!-- Callback time picker (js/dials.js, the dial's "Callback" button): a calendar + time, in the rep's own local time. -->
+  <div class="modal-backdrop hidden" id="callbackTimeModal" style="z-index:150">
+    <div class="modal">
+      <h2>Callback time</h2>
+      <p class="help-text">Pick when to call them back. It shows under Callbacks for today on Profile, and you get a reminder 5 minutes before. Your own local time.</p>
+      <label for="callbackDateInput">Date</label>
+      <input type="date" id="callbackDateInput" />
+      <label for="callbackTimeInput">Time</label>
+      <input type="time" id="callbackTimeInput" step="300" />
+      <div id="callbackTimeError" class="error-msg hidden"></div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" id="callbackTimeCancelBtn">Cancel</button>
+        <button type="button" class="btn" id="callbackTimeSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop hidden" id="introCallTimeModal">
     <div class="modal">
       <h2>Confirm the scheduled time</h2>

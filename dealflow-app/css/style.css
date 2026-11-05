@@ -2052,3 +2052,20 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 
 /* Teams popup: take a team lead off one of several teams they lead. */
 .lead-leave-btn { margin-right: 6px; }
+
+/* Callback time under a dial's call notes (js/dials.js buildCallbackHTML). */
+.callback-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.callback-field-time { font-weight: 600; }
+/* Profile's "Callbacks for today" rows: ones more than 30 minutes ago are dimmed. */
+.callback-row.is-past { opacity: .55; }
+
+/* Top-of-app callback banners (js/callbackBanners.js). */
+.callback-banners { display: flex; flex-direction: column; gap: 6px; padding: 0 12px; }
+.callback-banners:not(:empty) { padding-top: 8px; padding-bottom: 4px; }
+.callback-banner { display: flex; align-items: stretch; border: 1px solid var(--gold); background: var(--gold-soft); border-radius: 12px; overflow: hidden; max-width: 760px; width: 100%; margin: 0 auto; }
+.callback-banner.soon { border-color: #d1453b; background: #fdecea; }
+.callback-banner-main { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 10px 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.callback-banner-title { font-weight: 700; font-size: 13.5px; }
+.callback-banner-who { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.callback-banner-x { border: 0; background: none; font-size: 24px; line-height: 1; padding: 0 14px; cursor: pointer; color: var(--text-muted); }
+@media (prefers-color-scheme: dark) { .callback-banner.soon { background: #3a1f1c; } }
