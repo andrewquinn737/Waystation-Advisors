@@ -2071,3 +2071,5 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .callback-banner-who { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .callback-banner-x { border: 0; background: none; font-size: 24px; line-height: 1; padding: 0 14px; cursor: pointer; color: var(--text-muted); }
 @media (prefers-color-scheme: dark) { .callback-banner.soon { background: #3a1f1c; } }
+.call-panel-who { min-width: 0; flex: 1 1 auto; }
+.call-panel-meta { flex: 0 0 auto; font-size: 12px; }

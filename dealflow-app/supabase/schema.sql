@@ -1418,3 +1418,7 @@ $$;
 -- (type callback_due, notifications.link = /dials.html?dial=ID) 5 minutes before; send-push opens that link when tapped.
 -- Profile shows "Callbacks for today"; js/callbackBanners.js shows banners at the top of every page.
 -- Inbound callback fix (telnyx-webhook v3): the owner's call is no longer answered until the rep presses a key.
+
+-- Record all calls (migration record_all_calls_option): profiles.record_all_calls boolean not null default false. Exclusive with
+-- record_accepted_calls in the UI (Dials > Advanced). All-calls mode keeps a recording for every category except no_response and
+-- busy_callback. Turned on for Andrew Quinn (record_accepted_calls off for him).

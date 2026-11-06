@@ -193,7 +193,7 @@ export async function startCall(opts) {
     panel.ended(label || "Call ended");
     let lines = 0;
     try { if (transcript) lines = await transcript.stop(); } catch { /* ignore */ }
-    // The recording (accounts with record_accepted_calls only) is held in memory; it is uploaded only if this dial
+    // The recording (accounts with record_accepted_calls or record_all_calls) is held in memory; it is uploaded only if this dial
     // ends up as "Accepted intro call" (see js/callRecordings.js).
     let recorded = null;
     try { if (recorder) recorded = await recorder.stop(); } catch { /* ignore */ }
@@ -276,7 +276,7 @@ export async function startCall(opts) {
       if (st === "ringing" || st === "early") { ringing = true; panel.state("Ringing…"); markDialed(); }
       if (st === "active" && !answeredAt) {
         answeredAt = new Date(); ringing = true; startGuard(); markDialed();
-        panel.state(transcribe ? "Connected · transcribing" : "Connected"); panel.startTimer();
+        panel.state(transcribe ? "Transcribing" : "Connected"); panel.startTimer();
         // The owner's first words can arrive a beat after "active": keep nudging playback for a few seconds.
         let nudges = 0;
         const nudge = setInterval(() => { attachRemote(c); if (++nudges >= 20 || finished) clearInterval(nudge); }, 250);
@@ -286,8 +286,8 @@ export async function startCall(opts) {
           try {
             transcript = startTranscript({ callId, onLine: (l) => panel.addLine(l), onInterim: (i) => panel.interim(i), onFailed: () => panel.note("Live transcript unavailable — the call continues.") });
             stopAudio = await startCallAudio({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream, onFrame: (b) => transcript?.sendAudio(b) });
-            if (profile.record_accepted_calls !== false && window.MediaRecorder) {
-              try { recorder = startRecorder({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream }); panel.state("Connected · transcribing · recording"); } catch { recorder = null; }
+            if ((profile.record_accepted_calls !== false || profile.record_all_calls === true) && window.MediaRecorder) {
+              try { recorder = startRecorder({ ctx, micStream: c.localStream || mic, remoteStream: c.remoteStream }); panel.state("Recording and transcribing"); } catch { recorder = null; }
             }
           } catch { panel.note("Live transcript unavailable — the call continues."); }
         }

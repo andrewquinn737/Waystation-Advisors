@@ -197,6 +197,8 @@ const els = {
   transcriptCallingToggle: document.getElementById("transcriptCallingToggle"),
   callRecordingRow: document.getElementById("callRecordingRow"),
   callRecordingToggle: document.getElementById("callRecordingToggle"),
+  recordAllCallsRow: document.getElementById("recordAllCallsRow"),
+  recordAllCallsToggle: document.getElementById("recordAllCallsToggle"),
   dialsProspectCount: document.getElementById("dialsProspectCount"),
   dialTabs: document.getElementById("dialTabs"),
   dialTabArchiveMenu: document.getElementById("dialTabArchiveMenu"),
@@ -356,7 +358,26 @@ if (isAdmin || isTeamLead) els.addTabBtn.classList.remove("hidden");
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 wireAutodialToggle(els.autodialRow, els.autodialToggle, profile);
 wireProfileToggle(els.transcriptCallingRow, els.transcriptCallingToggle, profile, "transcript_calling_enabled", true);
-wireProfileToggle(els.callRecordingRow, els.callRecordingToggle, profile, "record_accepted_calls", true);
+// Two recording choices that exclude each other: accepted intro calls only (default) or all calls. Tapping the one that is on turns recording off.
+(function wireRecordingChoice() {
+  const rows = [
+    { row: els.callRecordingRow, sw: els.callRecordingToggle, col: "record_accepted_calls", other: "record_all_calls", dflt: true },
+    { row: els.recordAllCallsRow, sw: els.recordAllCallsToggle, col: "record_all_calls", other: "record_accepted_calls", dflt: false },
+  ];
+  const isOn = (c, d) => (profile[c] === undefined || profile[c] === null ? d : profile[c] === true);
+  const render = () => rows.forEach((r) => { const on = isOn(r.col, r.dflt); r.sw.classList.toggle("on", on); r.sw.setAttribute("aria-checked", String(on)); });
+  render();
+  rows.forEach((r) => r.row?.addEventListener("click", async () => {
+    const prev = { a: profile.record_accepted_calls, b: profile.record_all_calls };
+    const next = !isOn(r.col, r.dflt);
+    profile[r.col] = next;
+    if (next) profile[r.other] = false;
+    render();
+    const patch = { [r.col]: next }; if (next) patch[r.other] = false;
+    const { error } = await supabase.from("profiles").update(patch).eq("id", profile.id);
+    if (error) { console.error("Failed to update recording setting", error); profile.record_accepted_calls = prev.a; profile.record_all_calls = prev.b; render(); }
+  }));
+})();
 
 // "Advanced" settings (email templates, texting, recommended emails) — shared
 // wiring, see js/advancedSettings.js for the full implementation and why
@@ -3228,10 +3249,15 @@ async function updateDialStatus(newStatus) {
   if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled) {
     currentDial._scheduleIntroCallUsed = false;
   }
-  // Any other category throws the dial's recordings away (the held ones, and ones saved when it was Accepted), to save space.
-  if (newStatus !== "intro_call_scheduled") discardRecordingsForDial(currentDial.id).then(() => { if (wasAlreadyIntroScheduled && currentDial?.id === updatedDialId) loadDialTranscript(); }, () => {});
-  // Call recording keeps the recording only for calls that end as "Accepted intro call".
-  if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled && profile.record_accepted_calls !== false) {
+  // Recording rules: "Record accepted" keeps a call's recording only for Accepted intro call (any other category deletes it,
+  // held and saved alike). "Record all calls" keeps it for every category except no_response / busy_callback, which only drop
+  // the recordings still held in memory (ones already saved stay).
+  const recAll = profile.record_all_calls === true;
+  const recAccepted = !recAll && profile.record_accepted_calls !== false;
+  const keepThis = recAll ? !["no_response", "busy_callback"].includes(newStatus) : newStatus === "intro_call_scheduled";
+  if (!keepThis) {
+    discardRecordingsForDial(currentDial.id, { savedToo: !recAll }).then(() => { if (!recAll && wasAlreadyIntroScheduled && currentDial?.id === updatedDialId) loadDialTranscript(); }, () => {});
+  } else if ((recAll || recAccepted) && (recAll || !wasAlreadyIntroScheduled)) {
     const dialId = currentDial.id;
     keepRecordingForDial(profile, dialId, isCallActive()).then(
       (saved) => {

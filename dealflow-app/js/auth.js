@@ -58,7 +58,7 @@ export async function requireSession() {
       supabase
         .from("profiles")
         .select(
-          "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, transcript_calling_enabled, record_accepted_calls, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
+          "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, transcript_calling_enabled, record_accepted_calls, record_all_calls, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
         )
         .eq("id", session.user.id)
         .single()
@@ -70,7 +70,7 @@ export async function requireSession() {
         supabase
           .from("profiles")
           .select(
-            "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, transcript_calling_enabled, record_accepted_calls, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
+            "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, transcript_calling_enabled, record_accepted_calls, record_all_calls, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
           )
           .eq("id", session.user.id)
           .single()

@@ -1,4 +1,4 @@
-// Call recordings for accounts with profiles.record_accepted_calls on (the default; Dials > Advanced > Call recording). The call's
+// Call recordings for accounts with profiles.record_accepted_calls on (the default) or record_all_calls on (Dials > Advanced). The call's
 // audio (both sides mixed) is captured in the browser while the call runs and held IN MEMORY; nothing is uploaded
 // unless the dial ends up in "Accepted intro call" — then that call's recording is saved to the private
 // call-recordings bucket and shows under the dial's calls, with a link to share it. Every other recording is
@@ -75,9 +75,10 @@ export async function keepRecordingForDial(profile, dialId, callIsLive) {
 
 // The dial was set to any category OTHER than "Accepted intro call": drop the recordings held in memory for it, and
 // delete any that were saved earlier (the stored file and the link on the call), to save space.
-export async function discardRecordingsForDial(dialId) {
+export async function discardRecordingsForDial(dialId, { savedToo = true } = {}) {
   keepDials.delete(dialId);
   [...pending.entries()].forEach(([id, r]) => { if (r.dialId === dialId) pending.delete(id); });
+  if (!savedToo) return 0;
   const { data } = await supabase.from("calls").select("id, recording_path").eq("dial_id", dialId).not("recording_path", "is", null);
   const rows = data || [];
   if (!rows.length) return 0;
