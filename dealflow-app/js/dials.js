@@ -2678,8 +2678,18 @@ async function loadDials() {
 // exactly what's actually on screen right now. Used both to render the list
 // AND (see openDialModal/goToDial) to scope prev/next/swipe/arrow-key
 // navigation to only those dials, instead of every dial in the tab.
+// Phone searches compare digits only, so "5024380520" finds "+1 (502) 438-0520" however the number was typed or imported.
+// A search counts as a phone search when it holds at least 3 digits and nothing but phone punctuation (spaces + ( ) - . ) besides.
+const phoneDigits = (s) => { const n = String(s || "").replace(/\D/g, ""); return n.length === 11 && n[0] === "1" ? n.slice(1) : n; };
+function searchPhoneDigits(q) {
+  if (!/^[\d\s+().\-]+$/.test(q)) return "";
+  const n = phoneDigits(q);
+  return n.length >= 3 ? n : "";
+}
+
 function visibleDials() {
   const q = dialSearchQuery.trim().toLowerCase();
+  const qd = searchPhoneDigits(q);
   return dials.filter(
     (d) =>
       !hiddenStatuses.has(d.contact_status || "uncontacted") &&
@@ -2688,7 +2698,8 @@ function visibleDials() {
         (d.company_name || "").toLowerCase().includes(q) ||
         (d.email || "").toLowerCase().includes(q) ||
         (d.mobile_phone || "").toLowerCase().includes(q) ||
-        (d.company_phone || "").toLowerCase().includes(q))
+        (d.company_phone || "").toLowerCase().includes(q) ||
+        (qd && (phoneDigits(d.mobile_phone).includes(qd) || phoneDigits(d.company_phone).includes(qd))))
   );
 }
 
