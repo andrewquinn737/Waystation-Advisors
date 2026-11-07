@@ -156,8 +156,8 @@ const QUESTIONNAIRE_LABEL_SET = {
     ["bid_accepted", "Bid accepted by seller"],
     ["closed", "Closed"],
   ],
-  chart: relabel(CHART_METRIC_LABELS, "intro_call_scheduled", "Accepted questionnaire"),
-  graph: relabel(GRAPH_METRIC_LABELS, "intro_call_scheduled", "Accepted questionnaire"),
+  chart: relabel(CHART_METRIC_LABELS, "intro_call_scheduled", "Accepted intro call"),
+  graph: relabel(GRAPH_METRIC_LABELS, "intro_call_scheduled", "Accepted intro call"),
   milestone: [
     ["close", "Closed"],
     ["bid_accepted", "Bid accepted by seller"],
@@ -165,7 +165,7 @@ const QUESTIONNAIRE_LABEL_SET = {
     ["intro_call", "Intro call completed"],
     ["questionnaire", "Questionnaire completed"],
   ],
-  contacted: relabel(CONTACTED_TABLE_TITLES, "intro_call_scheduled", "Accepted questionnaire"),
+  contacted: relabel(CONTACTED_TABLE_TITLES, "intro_call_scheduled", "Accepted intro call"),
 };
 let labelSet = STANDARD_LABEL_SET;
 

@@ -1422,3 +1422,7 @@ $$;
 -- Record all calls (migration record_all_calls_option): profiles.record_all_calls boolean not null default false. Exclusive with
 -- record_accepted_calls in the UI (Dials > Advanced). All-calls mode keeps a recording for every category except no_response and
 -- busy_callback. Turned on for Andrew Quinn (record_accepted_calls off for him).
+
+-- Reports ignore repeat accepted calls (migration reports_ignore_repeat_accepted_calls): get_buyer_outreach_chart and
+-- get_buyer_contacted_owners drop a call_status_changes row whose status is intro_call_scheduled when the dial's previous
+-- logged call already was intro_call_scheduled (a follow-up to an owner who had accepted, not a new acceptance).
