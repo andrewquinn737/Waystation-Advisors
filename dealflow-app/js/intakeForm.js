@@ -94,7 +94,7 @@ export const INTAKE_FIELDS = [
   { key: "able_to_sell", label: "Can they sell their data?", type: "select", options: YES_NO, rule: "Must be yes" },
   { key: "no_other_brokers", label: "Are they NOT talking to other brokers?", type: "select", options: YES_NO, rule: "Must be yes" },
   { key: "contact_email", label: "Email on record", type: "email", rule: "Needs an email (put it in here if there isn't one)" },
-  { key: "years_in_business", label: "Years in business", type: "number", rule: "Must have been in business over 10 years" },
+  { key: "years_in_business", label: "Years in business", type: "number", rule: "Recommended: over 10 years in business (not required)" },
 ];
 
 // Which checks aren't met yet. `answered` = every field has something in it.
@@ -105,10 +105,12 @@ export function evaluateIntake(data = {}) {
   if (data.able_to_sell !== "Yes") failures.push(data.able_to_sell === "No" ? "Can't sell their data" : "Able to sell not answered");
   if (data.no_other_brokers !== "Yes") failures.push(data.no_other_brokers === "No" ? "Talking to other brokers" : "Other brokers not answered");
   if (!EMAIL_RE.test(String(data.contact_email || "").trim())) failures.push("Needs an email on record");
+  // Over 10 years in business is only a recommendation: it is shown as a note and never blocks submitting.
   const years = Number(data.years_in_business);
+  const notes = [];
   if (data.years_in_business === undefined || data.years_in_business === "" || Number.isNaN(years)) failures.push("Years in business not entered");
-  else if (years <= 10) failures.push("Needs over 10 years in business");
-  return { passes: failures.length === 0, failures };
+  else if (years <= 10) notes.push("Recommended: over 10 years in business");
+  return { passes: failures.length === 0, failures, notes };
 }
 
 function fieldHTML(f, value) {
@@ -249,10 +251,11 @@ export function openSubmissionPopup(opts) {
       step.classList.toggle("done", ok);
       step.querySelector(".sub-badge").textContent = ok ? "✓" : "";
     });
-    const { passes, failures } = evaluateIntake(collectForm());
+    const { passes, failures, notes } = evaluateIntake(collectForm());
     const st = $("#subFormStatus");
     st.className = `intake-status ${passes ? "pass" : "fail"}`;
-    st.innerHTML = passes ? "✓ Passes every check." : `Not passing yet:<ul>${failures.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`;
+    st.innerHTML = (passes ? "✓ Passes every check." : `Not passing yet:<ul>${failures.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`) +
+      (notes.length ? `<div class="help-text">${notes.map((n) => escapeHtml(n)).join(" · ")}</div>` : "");
     $("#subCalToggle").textContent = d.cal ? "Undo booked" : "Mark as booked";
     $("#subAppSave").textContent = d.app ? "Update time" : "Save time";
     const all = d.form && d.cal && d.app;
