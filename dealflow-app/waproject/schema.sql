@@ -1,0 +1,9 @@
+-- TEMPORARY standalone dialing page (this folder). Its own tables; nothing else in the app reads or writes them.
+-- Applied as migration "waproject_temp_tables". REMOVE EVERYTHING WITH:
+--   drop table public.wp_dials;
+--   drop table public.wp_lists;
+-- and then delete the whole waproject/ folder.
+-- wp_lists  : one row per tab (owner_id, name, status current|archived, sort_order)
+-- wp_dials  : one row per prospect (same fields as the main app's dials, plus extra jsonb for CSV columns that
+--             didn't match a field, last_contacted_at, contact_count)
+-- RLS: each signed-in user sees their own rows; admins see all.

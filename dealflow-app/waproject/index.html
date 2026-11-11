@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Dialer</title>
+<script>
+  (function () {
+    var ua = navigator.userAgent || navigator.vendor || "";
+    var isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile/i.test(ua);
+    var isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    document.documentElement.classList.add(isMobileUA || isIpadOS ? "is-mobile-device" : "is-desktop-device");
+  })();
+</script>
+<link rel="stylesheet" href="../css/style.css" />
+<link rel="stylesheet" href="waproject.css" />
+<link rel="icon" href="../favicon-32.png" type="image/png" sizes="32x32" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<link rel="apple-touch-icon" href="../icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Dialer" />
+</head>
+<body data-page="waproject">
+  <!-- Sign-in (only shown when there's no session; same accounts and session as the main app). -->
+  <main id="wpLogin" class="hidden">
+    <div class="auth-card">
+      <h1>Dialer</h1>
+      <div id="wpLoginError" class="error-msg hidden"></div>
+      <label for="wpEmail">Email</label>
+      <input id="wpEmail" type="email" autocomplete="username" />
+      <label for="wpPassword">Password</label>
+      <input id="wpPassword" type="password" autocomplete="current-password" />
+      <div class="form-actions"><button type="button" class="btn" id="wpLoginBtn">Sign in</button></div>
+    </div>
+  </main>
+
+  <main id="wpApp" class="hidden">
+    <div class="page-header">
+      <div class="page-header-left">
+        <button type="button" class="page-header-toggle" id="pageMenuToggle" title="Options">
+          <svg viewBox="0 0 16 16" width="10" height="10"><path d="M2 10 L8 4 L14 10 Z" fill="currentColor"/></svg>
+        </button>
+        <h1>Dials</h1>
+        <span class="dials-prospect-count" id="dialsProspectCount"></span>
+      </div>
+    </div>
+
+    <div class="page-header-menu hidden" id="pageHeaderMenu">
+      <button type="button" class="page-header-menu-item" id="menuAddNewBtn"><span class="menu-item-label">Add new</span><span class="menu-item-icon">+</span></button>
+      <button type="button" class="page-header-menu-item" id="menuImportBtn"><span class="menu-item-label">Import</span><span class="menu-item-icon">&#8679;</span></button>
+      <button type="button" class="page-header-menu-item" id="menuSelectBtn"><span class="menu-item-label">Select</span><span class="menu-item-icon">&#10003;</span></button>
+      <button type="button" class="page-header-menu-item" id="menuSearchBtn"><span class="menu-item-label">Search</span><span class="menu-item-icon">&#9906;</span></button>
+      <button type="button" class="page-header-menu-item" id="menuStatusBtn"><span class="menu-item-label">Current</span><span class="menu-item-icon">&#9776;</span></button>
+      <button type="button" class="page-header-menu-item" id="menuCategoriesBtn"><span class="menu-item-label">Categories</span><span class="menu-item-icon">&#9679;</span></button>
+      <button type="button" class="page-header-menu-item" id="menuWaSettingsBtn"><span class="menu-item-label">WhatsApp settings</span><span class="menu-item-icon">&#9881;</span></button>
+      <button type="button" class="page-header-menu-item" id="menuSignOutBtn"><span class="menu-item-label">Sign out</span><span class="menu-item-icon">&#8594;</span></button>
+    </div>
+    <div class="categories-submenu hidden" id="categoriesSubmenu"></div>
+
+    <div class="select-mode-bar hidden" id="selectModeBar">
+      <button type="button" class="select-mode-btn" id="selectBackBtn">Back</button>
+      <button type="button" class="select-mode-btn" id="selectAllBtn">Select all</button>
+      <button type="button" class="select-mode-btn" id="selectMoveBtn">Move</button>
+      <button type="button" class="select-mode-btn danger" id="selectDeleteBtn">Delete</button>
+    </div>
+    <div class="select-mode-hint hidden" id="selectMoveHint">Tap a tab above to move the selected dials there.</div>
+
+    <div class="toolbar hidden" id="dialsSearchBar">
+      <input type="search" id="dialsSearchInput" placeholder="Search all tabs..." />
+      <button type="button" class="btn secondary small" id="dialsSearchCloseBtn">&times;</button>
+    </div>
+
+    <div id="errorBox" class="error-msg hidden"></div>
+
+    <div class="dials-tabbar">
+      <div class="dials-tabs" id="dialTabs"></div>
+      <button type="button" class="dial-tab-add" id="addTabBtn" title="New list">+</button>
+    </div>
+
+    <div class="page-header-menu hidden" id="dialTabMenu">
+      <button type="button" class="page-header-menu-item" id="dialTabRenameBtn">Rename</button>
+      <button type="button" class="page-header-menu-item" id="dialTabArchiveBtn"></button>
+      <button type="button" class="page-header-menu-item danger" id="dialTabDeleteBtn">Delete</button>
+    </div>
+
+    <div id="dialsTableWrap"></div>
+  </main>
+
+  <!-- Dial popup -->
+  <div class="modal-backdrop hidden" id="dialModalBackdrop">
+    <div class="dial-modal-stack">
+      <div class="modal dial-modal">
+        <div id="dialModalHeader"></div>
+        <div id="dialModalError" class="error-msg hidden"></div>
+        <div id="dialModalBody"></div>
+        <div class="form-actions" id="dialModalActions"></div>
+        <div class="dial-nav-row hidden" id="dialNavRow">
+          <button type="button" class="btn secondary dial-nav-btn" id="dialPrevBtn">&#8249; Previous</button>
+          <button type="button" class="btn secondary dial-nav-btn" id="dialNextBtn">Next &#8250;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New / rename list -->
+  <div class="modal-backdrop hidden" id="listNameModal">
+    <div class="modal">
+      <h2 id="listNameTitle">New list</h2>
+      <div id="listNameError" class="error-msg hidden"></div>
+      <input id="listNameInput" placeholder="List name" />
+      <div class="form-actions">
+        <button type="button" class="btn" id="listNameSaveBtn">Save</button>
+        <button type="button" class="btn secondary" id="listNameCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic confirm -->
+  <div class="modal-backdrop hidden" id="confirmModal">
+    <div class="modal">
+      <h2 id="confirmTitle">Are you sure?</h2>
+      <p class="help-text" id="confirmText"></p>
+      <div class="form-actions">
+        <button type="button" class="btn danger" id="confirmYesBtn">Delete</button>
+        <button type="button" class="btn secondary" id="confirmNoBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import CSV -->
+  <div class="modal-backdrop hidden" id="importDialsModal">
+    <div class="modal">
+      <h2>Import dials from CSV</h2>
+      <div id="importDialsError" class="error-msg hidden"></div>
+      <p class="help-text" style="margin-top:0;">Column headers in the first row are matched to dial fields (First name, Last name, Company name, Email, Mobile phone, Company phone, LinkedIn, City, State, Website, Industry, Summary, Call notes). Any column that doesn't match is kept and shown on the dial. Select up to 10 files — each becomes its own tab.</p>
+      <div class="import-dials-dropzone" id="importDialsDropzone">
+        <input type="file" id="importDialsFileInput" accept=".csv" multiple class="hidden" />
+        <button type="button" class="btn secondary" id="importDialsChooseBtn">Choose CSV files</button>
+        <div class="import-dials-drop-hint">or drag CSV files here</div>
+      </div>
+      <div id="importDialsFileName" class="help-text"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="importDialsImportBtn" disabled>Import</button>
+        <button type="button" class="btn secondary" id="importDialsCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp settings -->
+  <div class="modal-backdrop hidden" id="waSettingsModal">
+    <div class="modal">
+      <h2>WhatsApp settings</h2>
+      <p class="help-text" style="margin-top:0;">Numbers are turned into international format for WhatsApp. A number that already starts with + (or has an 11+ digit country code) is used as is; otherwise this country code is added.</p>
+      <label for="waCountryInput">Default country code (digits only)</label>
+      <input id="waCountryInput" inputmode="numeric" placeholder="1" />
+      <label for="waTemplateInput">Text message (optional — pre-filled when you tap Text; {name} becomes their first name)</label>
+      <textarea id="waTemplateInput" placeholder="Hi {name}, ..."></textarea>
+      <div class="form-actions">
+        <button type="button" class="btn" id="waSettingsSaveBtn">Save</button>
+        <button type="button" class="btn secondary" id="waSettingsCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+/* Only what the page needs on top of ../css/style.css. */
+.hidden { display: none !important; }
+.wa-btn { display: inline-flex; align-items: center; gap: 6px; }
+.wa-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 4px; }
+.wa-actions .btn { flex: 1 1 0; justify-content: center; }
+.wa-note { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.dial-extra .rf-label { text-transform: none; }
+#waSettingsModal textarea { min-height: 90px; }
