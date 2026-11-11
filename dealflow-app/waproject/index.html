@@ -24,16 +24,10 @@
 <meta name="apple-mobile-web-app-title" content="Dialer" />
 </head>
 <body data-page="waproject">
-  <!-- Sign-in (only shown when there's no session; same accounts and session as the main app). -->
-  <main id="wpLogin" class="hidden">
+  <main id="wpNoKey" class="hidden">
     <div class="auth-card">
       <h1>Dialer</h1>
-      <div id="wpLoginError" class="error-msg hidden"></div>
-      <label for="wpEmail">Email</label>
-      <input id="wpEmail" type="email" autocomplete="username" />
-      <label for="wpPassword">Password</label>
-      <input id="wpPassword" type="password" autocomplete="current-password" />
-      <div class="form-actions"><button type="button" class="btn" id="wpLoginBtn">Sign in</button></div>
+      <p class="help-text">This page opens from a private link. Open the full link you were given once (it ends in #key=...) and this device will remember it.</p>
     </div>
   </main>
 
@@ -56,7 +50,6 @@
       <button type="button" class="page-header-menu-item" id="menuStatusBtn"><span class="menu-item-label">Current</span><span class="menu-item-icon">&#9776;</span></button>
       <button type="button" class="page-header-menu-item" id="menuCategoriesBtn"><span class="menu-item-label">Categories</span><span class="menu-item-icon">&#9679;</span></button>
       <button type="button" class="page-header-menu-item" id="menuWaSettingsBtn"><span class="menu-item-label">WhatsApp settings</span><span class="menu-item-icon">&#9881;</span></button>
-      <button type="button" class="page-header-menu-item" id="menuSignOutBtn"><span class="menu-item-label">Sign out</span><span class="menu-item-icon">&#8594;</span></button>
     </div>
     <div class="categories-submenu hidden" id="categoriesSubmenu"></div>
 

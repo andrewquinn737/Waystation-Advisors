@@ -1,6 +1,6 @@
 // TEMPORARY standalone dialing page — see README.md in this folder. Own tables (wp_lists, wp_dials); nothing in the main
 // app imports this file. Same Dials look (css/style.css), but calls and texts open WhatsApp instead of the company line.
-import { supabase } from "../js/supabaseClient.js";
+import { supabase, accessKey } from "./client.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -68,7 +68,6 @@ document.addEventListener("click", (e) => {
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-let user = null;
 let allLists = [];
 let currentListId = store.get("wp_list");
 let currentStatus = store.get("wp_status", "current");
@@ -88,20 +87,9 @@ const showErr = (el, err) => { el.textContent = err?.message || String(err); el.
 // Boot / sign-in
 // ---------------------------------------------------------------------------
 async function boot() {
-  const { data } = await supabase.auth.getSession();
-  if (!data.session) {
-    $("wpLogin").classList.remove("hidden");
-    $("wpLoginBtn").addEventListener("click", async () => {
-      $("wpLoginError").classList.add("hidden");
-      const { error } = await supabase.auth.signInWithPassword({ email: $("wpEmail").value.trim(), password: $("wpPassword").value });
-      if (error) return showErr($("wpLoginError"), error);
-      location.reload();
-    });
-    return;
-  }
-  user = data.session.user;
-  addTabBtnEl = $("addTabBtn");
+  if (!accessKey) { $("wpNoKey").classList.remove("hidden"); return; }
   $("wpApp").classList.remove("hidden");
+  addTabBtnEl = $("addTabBtn");
   wireUi();
   await loadLists();
 }
@@ -606,7 +594,6 @@ function wireUi() {
   $("menuWaSettingsBtn").addEventListener("click", () => { closeHeaderMenu(); $("waCountryInput").value = store.get("wp_cc", "1"); $("waTemplateInput").value = store.get("wp_template", ""); $("waSettingsModal").classList.remove("hidden"); });
   $("waSettingsCancelBtn").addEventListener("click", () => $("waSettingsModal").classList.add("hidden"));
   $("waSettingsSaveBtn").addEventListener("click", () => { store.set("wp_cc", $("waCountryInput").value.replace(/\D/g, "") || "1"); store.set("wp_template", $("waTemplateInput").value); $("waSettingsModal").classList.add("hidden"); renderTable(); });
-  $("menuSignOutBtn").addEventListener("click", async () => { await supabase.auth.signOut(); location.reload(); });
   renderCategories();
 
   // Search (all tabs in the current Current/Archived view)
