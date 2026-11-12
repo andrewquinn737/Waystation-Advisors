@@ -44,7 +44,8 @@ function waTemplate(dial) {
   const t = store.get("wp_template", "") || "";
   if (!t) return "";
   const first = String(dial.full_name || "").trim().split(/\s+/)[0] || "";
-  return t.replace(/\{name\}/gi, first);
+  const company = String(dial.company_name || "").trim();
+  return t.replace(/\{name\}/gi, first).replace(/\{company\}/gi, company);
 }
 // WhatsApp has no public "start a call" link: both buttons open the chat with that number (Call = plain chat, then tap
 // WhatsApp's own call icon; Text = chat with your message pre-filled).
