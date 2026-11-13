@@ -10,15 +10,33 @@ import { escapeHtml } from "./clientForm.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 
-// The buyer's booking page. The `/calendar/appointments/...?gv=true` form is Google's embeddable version of it
-// (the plain `/appointments/...` page refuses to be framed), so it is shown INSIDE the app (see openCalendarPanel)
-// instead of navigating away — leaving the page is what cut the rep's call audio off on phones.
-const BUYER_CALENDAR_ID = "AcZssZ27l3atfY31Iup9lYPEub4Ib_PqiUNofDVefq6Ew8FloNLEnT_F40TgHDu4O8v3oQSOyQ7SXanB";
-const BUYER_CALENDAR_EMBED_URL = `https://calendar.google.com/calendar/appointments/schedules/${BUYER_CALENDAR_ID}?gv=true`;
-const BUYER_CALENDAR_URL = `https://calendar.google.com/appointments/schedules/${BUYER_CALENDAR_ID}`;
-export function buyerCalendarUrl(email) {
-  const e = String(email || "").trim();
-  return e ? `${BUYER_CALENDAR_URL}?email=${encodeURIComponent(e)}` : BUYER_CALENDAR_URL;
+// The buyer's booking page (Cal.com). It is shown INSIDE the app (see openCalendarPanel) instead of navigating away —
+// leaving the page is what cut the rep's call audio off on phones. Cal.com fills its booking form from the URL's query
+// string, using each question's own name: name, email, attendeePhoneNumber, Company and Referred-By.
+const BUYER_CALENDAR_URL = "https://cal.com/arieh-levi-sdr7wb/25-minute-meeting";
+
+// Phone in the +E.164 shape Cal.com's phone box expects: keeps a leading +, treats 00 as +, assumes US for 10 digits
+// (or 11 starting with 1), otherwise just puts a + in front of the digits.
+function phoneForBooking(raw) {
+  const s = String(raw || "").trim();
+  const d = s.replace(/\D/g, "");
+  if (!d) return "";
+  if (s.startsWith("+")) return `+${d}`;
+  if (d.startsWith("00")) return `+${d.slice(2)}`;
+  if (d.length === 10) return `+1${d}`;
+  return `+${d}`;
+}
+// info: { name, email, phone, company, rep } — empty values are left off.
+export function buyerCalendarUrl(info = {}) {
+  const q = new URLSearchParams();
+  const put = (k, v) => { const t = String(v || "").trim(); if (t) q.set(k, t); };
+  put("name", info.name);
+  put("email", info.email);
+  put("attendeePhoneNumber", phoneForBooking(info.phone));
+  put("Company", info.company);
+  put("Referred-By", info.rep);
+  const qs = q.toString();
+  return qs ? `${BUYER_CALENDAR_URL}?${qs}` : BUYER_CALENDAR_URL;
 }
 
 function detailRowsHTML(rows) {
@@ -41,7 +59,7 @@ let calendarEl = null;
 //  details  — [{ label, value }] rows shown with Copy buttons (empty values are skipped)
 //  onBooked — the rep tapped "Booked — enter the time"
 //  onClose  — the rep closed it without booking
-export function openCalendarPanel({ details = [], bookedLabel = "Booked — enter the time", onBooked, onClose }) {
+export function openCalendarPanel({ details = [], url = BUYER_CALENDAR_URL, bookedLabel = "Booked — enter the time", onBooked, onClose }) {
   closeCalendarPanel(true);
   calendarEl = document.createElement("div");
   calendarEl.className = "calendar-panel";
@@ -57,9 +75,9 @@ export function openCalendarPanel({ details = [], bookedLabel = "Booked — ente
     <div class="calendar-panel-details">
       ${detailRowsHTML(rows)}
     </div>
-    <iframe class="calendar-frame" src="${BUYER_CALENDAR_EMBED_URL}" title="Book the intro call" allow="clipboard-write"></iframe>
+    <iframe class="calendar-frame" src="${escapeHtml(url)}" title="Book the intro call" allow="clipboard-write"></iframe>
     <div class="calendar-panel-foot">
-      <a class="calendar-newtab" href="${BUYER_CALENDAR_URL}" target="_blank" rel="noopener">Calendar not loading? Open it in a new tab</a>
+      <a class="calendar-newtab" href="${escapeHtml(url)}" target="_blank" rel="noopener">Calendar not loading? Open it in a new tab</a>
       <button type="button" class="btn yellow" id="calBookedBtn">${escapeHtml(bookedLabel)}</button>
     </div>`;
   document.body.appendChild(calendarEl);
@@ -150,24 +168,18 @@ export function closeIntakeForm() {
 
 export const formFieldsOnly = (data = {}) => Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("_")));
 
-// First / last name for the booking form, from the dial's single full-name field.
-function splitName(full) {
-  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
-  return { first: parts[0] || "", last: parts.slice(1).join(" ") };
-}
-
 // opts:
 //  dial          — the dial (name + company shown for the booking form)
+//  rep           — the signed-in rep's name, filled into the booking form's "Referred By"
 //  data          — everything saved so far (dial.intake_form: form answers + "_" step flags)
 //  onPersist(patch) — async; merge `patch` into the saved data (throw to show the error)
 //  onSubmit(form, appTime) — async; creates the client. Throw to show the error inline.
 //  onClose()     — called after the popup closes for any reason
 export function openSubmissionPopup(opts) {
   ensureModal();
-  const { dial, data = {}, onPersist, onSubmit, onClose } = opts;
+  const { dial, data = {}, rep = "", onPersist, onSubmit, onClose } = opts;
   const state = { ...data };
   const box = modalEl.querySelector(".modal");
-  const nm = splitName(dial.full_name);
   const title = dial.company_name || dial.full_name || "Intro call";
   box.innerHTML = `
     <h2>${escapeHtml(title)}</h2>
@@ -227,13 +239,25 @@ export function openSubmissionPopup(opts) {
     return true;
   };
 
-  // Booking details to copy: first name, last name, email and company only.
-  const bookingDetails = () => [
-    { label: "First name", value: nm.first },
-    { label: "Last name", value: nm.last },
-    { label: "Email", value: collectForm().contact_email || state.contact_email || dial.email || "" },
-    { label: "Company", value: dial.company_name || "" },
-  ];
+  // The booking form's answers: pre-filled through the page's URL, and also listed above it with Copy buttons in case
+  // any box comes up empty.
+  const bookingInfo = () => ({
+    name: String(dial.full_name || "").trim(),
+    email: collectForm().contact_email || state.contact_email || dial.email || "",
+    phone: dial.mobile_phone || dial.company_phone || "",
+    company: dial.company_name || "",
+    rep,
+  });
+  const bookingDetails = () => {
+    const i = bookingInfo();
+    return [
+      { label: "Owner name", value: i.name },
+      { label: "Email", value: i.email },
+      { label: "Phone", value: phoneForBooking(i.phone) },
+      { label: "Company", value: i.company },
+      { label: "Referred by", value: i.rep },
+    ];
+  };
 
   $("#subDate").value = state._app_time?.val || (() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); })();
   $("#subTime").innerHTML = timeOptionsHTML(state._app_time?.time || "", { includeNoTime: false });
@@ -278,6 +302,7 @@ export function openSubmissionPopup(opts) {
     const back = () => modalEl.classList.remove("hidden");
     openCalendarPanel({
       details: bookingDetails(),
+      url: buyerCalendarUrl(bookingInfo()),
       bookedLabel: "I booked it",
       onBooked: async () => { back(); await persist({ _cal_booked: true }); },
       onClose: back,

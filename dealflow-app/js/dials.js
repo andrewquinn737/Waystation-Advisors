@@ -3804,6 +3804,7 @@ async function saveDialIntake(dial, values) {
 function openQuestionnaireIntroPopup(dial) {
   openSubmissionPopup({
     dial,
+    rep: profile?.full_name || "",
     data: { ...(dial.intake_form || {}), contact_email: dial.email || dial.intake_form?.contact_email || "" },
     // Each step saves the moment it is finished, so closing the popup and coming back picks up where it left off.
     onPersist: async (patch) => {
