@@ -39,49 +39,29 @@ export function buyerCalendarUrl(info = {}) {
   return qs ? `${BUYER_CALENDAR_URL}?${qs}` : BUYER_CALENDAR_URL;
 }
 
-function detailRowsHTML(rows) {
-  return rows.map((d, i) => `<div class="calendar-detail"><div class="calendar-detail-text"><span class="calendar-detail-label">${escapeHtml(d.label)}</span><span class="calendar-detail-value">${escapeHtml(d.value)}</span></div><button type="button" class="btn secondary calendar-copy" data-i="${i}">Copy</button></div>`).join("");
-}
-function wireCopyButtons(root, rows) {
-  root.querySelectorAll(".calendar-copy").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const value = rows[Number(btn.dataset.i)].value;
-      try { await navigator.clipboard.writeText(value); btn.textContent = "Copied"; }
-      catch { btn.textContent = "Select & copy"; }
-      setTimeout(() => { btn.textContent = "Copy"; }, 1500);
-    });
-  });
-}
-
 let calendarEl = null;
-// Full-screen sheet with the buyer's booking page in a frame and the lead's details pinned above it, each with a
-// Copy button — the booking form asks for an email and company name, and they are no longer out of sight.
-//  details  — [{ label, value }] rows shown with Copy buttons (empty values are skipped)
+// Full-screen sheet with the buyer's booking page in a frame (its form is pre-filled through the URL).
+//  url      — the booking page address, already carrying the lead's details
 //  onBooked — the rep tapped "Booked — enter the time"
 //  onClose  — the rep closed it without booking
-export function openCalendarPanel({ details = [], url = BUYER_CALENDAR_URL, bookedLabel = "Booked — enter the time", onBooked, onClose }) {
+export function openCalendarPanel({ url = BUYER_CALENDAR_URL, bookedLabel = "Booked — enter the time", onBooked, onClose }) {
   closeCalendarPanel(true);
   calendarEl = document.createElement("div");
   calendarEl.className = "calendar-panel";
   // Leave room for the call bar (it floats over the bottom of the screen during a call).
   const callBar = document.querySelector(".call-panel");
-  calendarEl.style.paddingBottom = callBar ? `${callBar.offsetHeight + 36}px` : "0px";
-  const rows = details.filter((d) => d.value);
+  calendarEl.style.paddingBottom = callBar ? `${callBar.offsetHeight + 30}px` : "0px";
   calendarEl.innerHTML = `
     <div class="calendar-panel-head">
       <div class="calendar-panel-title">Book the intro call</div>
       <button type="button" class="btn secondary" id="calCloseBtn">Close</button>
     </div>
-    <div class="calendar-panel-details">
-      ${detailRowsHTML(rows)}
-    </div>
     <iframe class="calendar-frame" src="${escapeHtml(url)}" title="Book the intro call" allow="clipboard-write"></iframe>
     <div class="calendar-panel-foot">
-      <a class="calendar-newtab" href="${escapeHtml(url)}" target="_blank" rel="noopener">Calendar not loading? Open it in a new tab</a>
+      <a class="calendar-newtab" href="${escapeHtml(url)}" target="_blank" rel="noopener">Not loading? Open in new tab</a>
       <button type="button" class="btn yellow" id="calBookedBtn">${escapeHtml(bookedLabel)}</button>
     </div>`;
   document.body.appendChild(calendarEl);
-  wireCopyButtons(calendarEl, rows);
   calendarEl.querySelector("#calCloseBtn").addEventListener("click", () => { closeCalendarPanel(); onClose?.(); });
   calendarEl.querySelector("#calBookedBtn").addEventListener("click", () => { closeCalendarPanel(); onBooked?.(); });
 }
@@ -197,7 +177,7 @@ export function openSubmissionPopup(opts) {
     <div class="sub-step" data-step="cal">
       <div class="sub-step-head"><span class="sub-badge"></span><span class="sub-step-title">Book on the buyer's calendar</span></div>
       <div class="sub-step-body">
-        <p class="help-text">Opens the calendar here in the app (your call keeps going) with the details to copy into it.</p>
+        <p class="help-text">Opens the calendar here in the app (your call keeps going), with the owner's details already filled in.</p>
         <div class="form-actions">
           <button type="button" class="btn yellow" id="subCalOpen">Open calendar</button>
           <button type="button" class="btn secondary" id="subCalToggle">Mark as booked</button>
@@ -239,8 +219,7 @@ export function openSubmissionPopup(opts) {
     return true;
   };
 
-  // The booking form's answers: pre-filled through the page's URL, and also listed above it with Copy buttons in case
-  // any box comes up empty.
+  // The booking form's answers, pre-filled through the page's URL.
   const bookingInfo = () => ({
     name: String(dial.full_name || "").trim(),
     email: collectForm().contact_email || state.contact_email || dial.email || "",
@@ -248,16 +227,6 @@ export function openSubmissionPopup(opts) {
     company: dial.company_name || "",
     rep,
   });
-  const bookingDetails = () => {
-    const i = bookingInfo();
-    return [
-      { label: "Owner name", value: i.name },
-      { label: "Email", value: i.email },
-      { label: "Phone", value: phoneForBooking(i.phone) },
-      { label: "Company", value: i.company },
-      { label: "Referred by", value: i.rep },
-    ];
-  };
 
   $("#subDate").value = state._app_time?.val || (() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); })();
   $("#subTime").innerHTML = timeOptionsHTML(state._app_time?.time || "", { includeNoTime: false });
@@ -301,7 +270,6 @@ export function openSubmissionPopup(opts) {
     modalEl.classList.add("hidden"); // out of the way while the calendar sheet is up; the page stays locked
     const back = () => modalEl.classList.remove("hidden");
     openCalendarPanel({
-      details: bookingDetails(),
       url: buyerCalendarUrl(bookingInfo()),
       bookedLabel: "I booked it",
       onBooked: async () => { back(); await persist({ _cal_booked: true }); },
