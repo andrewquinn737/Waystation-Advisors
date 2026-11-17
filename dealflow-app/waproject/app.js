@@ -40,9 +40,13 @@ function waNumber(raw) {
   if (d.length >= 11) return d; // already has a country code
   return (store.get("wp_cc", "1").replace(/\D/g, "") || "1") + d;
 }
-// The text setting can hold several formats, separated by a line with just --- ; each tap on Text picks one at random.
+// The text setting holds several formats (one box each); each tap on Text picks one at random.
+// Saved as a JSON list under wp_templates; an older single saved message (wp_template) still counts as one format.
 function waTemplates() {
-  return String(store.get("wp_template", "") || "").split(/^[ \t]*-{3,}[ \t]*$/m).map((t) => t.trim()).filter(Boolean);
+  let list = [];
+  try { list = JSON.parse(store.get("wp_templates", "") || "null") || []; } catch { list = []; }
+  if (!list.length) list = String(store.get("wp_template", "") || "").split(/^[ \t]*-{3,}[ \t]*$/m);
+  return list.map((t) => String(t).trim()).filter(Boolean);
 }
 function waTemplate(dial) {
   const all = waTemplates();
@@ -78,6 +82,14 @@ document.addEventListener("click", (e) => {
     logContact(a.dataset.waLog);
   }
 }, true);
+
+// Settings: one box per text format, with a remove button on each and "Add another format" below.
+function renderTemplateBoxes(values) {
+  const host = $("waTemplateBoxes");
+  const vals = values.length ? values : [""];
+  host.innerHTML = vals.map((v, i) => `<div class="wa-tpl-box"><div class="wa-tpl-head"><span>Format ${i + 1}</span>${vals.length > 1 ? `<button type="button" class="wa-tpl-remove" data-i="${i}">Remove</button>` : ""}</div><textarea class="wa-tpl-input" rows="4" placeholder="Hi {name}, I'd like to talk about {company}...">${esc(v)}</textarea></div>`).join("");
+}
+const templateBoxValues = () => [...document.querySelectorAll("#waTemplateBoxes .wa-tpl-input")].map((t) => t.value.trim()).filter(Boolean);
 
 // ---------------------------------------------------------------------------
 // State
@@ -605,9 +617,22 @@ function wireUi() {
       sub.style.left = `${Math.max(8, left)}px`; sub.style.top = `${r.top}px`;
     }
   });
-  $("menuWaSettingsBtn").addEventListener("click", () => { closeHeaderMenu(); $("waCountryInput").value = store.get("wp_cc", "1"); $("waTemplateInput").value = store.get("wp_template", ""); $("waSettingsModal").classList.remove("hidden"); });
+  $("menuWaSettingsBtn").addEventListener("click", () => { closeHeaderMenu(); $("waCountryInput").value = store.get("wp_cc", "1"); renderTemplateBoxes(waTemplates()); $("waSettingsModal").classList.remove("hidden"); });
   $("waSettingsCancelBtn").addEventListener("click", () => $("waSettingsModal").classList.add("hidden"));
-  $("waSettingsSaveBtn").addEventListener("click", () => { store.set("wp_cc", $("waCountryInput").value.replace(/\D/g, "") || "1"); store.set("wp_template", $("waTemplateInput").value); $("waSettingsModal").classList.add("hidden"); renderTable(); });
+  $("waAddTemplateBtn").addEventListener("click", () => {
+    const cur = [...document.querySelectorAll("#waTemplateBoxes .wa-tpl-input")].map((t) => t.value);
+    renderTemplateBoxes([...cur, ""]);
+    const boxes = document.querySelectorAll("#waTemplateBoxes .wa-tpl-input");
+    boxes[boxes.length - 1]?.focus();
+  });
+  $("waTemplateBoxes").addEventListener("click", (e) => {
+    const b = e.target.closest?.(".wa-tpl-remove");
+    if (!b) return;
+    const cur = [...document.querySelectorAll("#waTemplateBoxes .wa-tpl-input")].map((t) => t.value);
+    cur.splice(Number(b.dataset.i), 1);
+    renderTemplateBoxes(cur);
+  });
+  $("waSettingsSaveBtn").addEventListener("click", () => { store.set("wp_cc", $("waCountryInput").value.replace(/\D/g, "") || "1"); store.set("wp_templates", JSON.stringify(templateBoxValues())); store.set("wp_template", ""); $("waSettingsModal").classList.add("hidden"); renderTable(); });
   renderCategories();
 
   // Search (all tabs in the current Current/Archived view)

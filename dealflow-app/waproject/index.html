@@ -149,11 +149,10 @@
       <p class="help-text" style="margin-top:0;">Numbers are turned into international format for WhatsApp. A number that already starts with + (or has an 11+ digit country code) is used as is; otherwise this country code is added.</p>
       <label for="waCountryInput">Default country code (digits only)</label>
       <input id="waCountryInput" inputmode="numeric" placeholder="1" />
-      <label for="waTemplateInput">Text message (optional — pre-filled when you tap Text; {name} becomes their first name, {company} their company)</label>
-      <p class="help-text" style="margin:0 0 6px;">Want several versions? Put a line with just <b>---</b> between them. Each time you tap Text, one is picked at random.</p>
-      <textarea id="waTemplateInput" rows="8" placeholder="Hi {name}, I'd like to talk about {company}...
----
-Hello {name}, quick question about {company}..."></textarea>
+      <label>Text message (optional — pre-filled when you tap Text; {name} becomes their first name, {company} their company)</label>
+      <p class="help-text" style="margin:0 0 6px;">Add as many formats as you like. With more than one, each tap on Text picks one at random.</p>
+      <div id="waTemplateBoxes"></div>
+      <button type="button" class="btn secondary" id="waAddTemplateBtn" style="margin-top:6px;">+ Add another format</button>
       <div class="form-actions">
         <button type="button" class="btn" id="waSettingsSaveBtn">Save</button>
         <button type="button" class="btn secondary" id="waSettingsCancelBtn">Cancel</button>
