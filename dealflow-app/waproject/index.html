@@ -150,7 +150,10 @@
       <label for="waCountryInput">Default country code (digits only)</label>
       <input id="waCountryInput" inputmode="numeric" placeholder="1" />
       <label for="waTemplateInput">Text message (optional — pre-filled when you tap Text; {name} becomes their first name, {company} their company)</label>
-      <textarea id="waTemplateInput" placeholder="Hi {name}, I'd like to talk about {company}..."></textarea>
+      <p class="help-text" style="margin:0 0 6px;">Want several versions? Put a line with just <b>---</b> between them. Each time you tap Text, one is picked at random.</p>
+      <textarea id="waTemplateInput" rows="8" placeholder="Hi {name}, I'd like to talk about {company}...
+---
+Hello {name}, quick question about {company}..."></textarea>
       <div class="form-actions">
         <button type="button" class="btn" id="waSettingsSaveBtn">Save</button>
         <button type="button" class="btn secondary" id="waSettingsCancelBtn">Cancel</button>

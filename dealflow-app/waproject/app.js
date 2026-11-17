@@ -40,9 +40,14 @@ function waNumber(raw) {
   if (d.length >= 11) return d; // already has a country code
   return (store.get("wp_cc", "1").replace(/\D/g, "") || "1") + d;
 }
+// The text setting can hold several formats, separated by a line with just --- ; each tap on Text picks one at random.
+function waTemplates() {
+  return String(store.get("wp_template", "") || "").split(/^[ \t]*-{3,}[ \t]*$/m).map((t) => t.trim()).filter(Boolean);
+}
 function waTemplate(dial) {
-  const t = store.get("wp_template", "") || "";
-  if (!t) return "";
+  const all = waTemplates();
+  if (!all.length) return "";
+  const t = all[Math.floor(Math.random() * all.length)];
   const first = String(dial.full_name || "").trim().split(/\s+/)[0] || "";
   const company = String(dial.company_name || "").trim();
   return t.replace(/\{name\}/gi, first).replace(/\{company\}/gi, company);
@@ -63,7 +68,15 @@ async function logContact(dialId) {
 }
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.("a[data-wa-log]");
-  if (a) { e.stopPropagation(); logContact(a.dataset.waLog); }
+  if (a) {
+    e.stopPropagation();
+    // Text buttons: choose a fresh random format at the moment of the tap (the link was built when the row drew).
+    if (a.dataset.waText !== undefined) {
+      const d = [...dials, ...(modalSet || [])].find((x) => x.id === a.dataset.waLog);
+      if (d) a.href = waHref(a.dataset.waText, waTemplate(d)) || a.href;
+    }
+    logContact(a.dataset.waLog);
+  }
 }, true);
 
 // ---------------------------------------------------------------------------
@@ -222,7 +235,7 @@ function renderTable() {
     if (!call) return "";
     return `<div class="contact-actions">
       <a class="contact-action-btn" href="${call}" target="_blank" rel="noopener" data-wa-log="${d.id}" title="WhatsApp (call)">${ICON_CALL}</a>
-      <a class="contact-action-btn" href="${text}" target="_blank" rel="noopener" data-wa-log="${d.id}" title="WhatsApp (text)">${ICON_TEXT}</a>
+      <a class="contact-action-btn" href="${text}" target="_blank" rel="noopener" data-wa-log="${d.id}" data-wa-text="${esc(phone)}" title="WhatsApp (text)">${ICON_TEXT}</a>
     </div>`;
   };
   wrap.innerHTML = `
@@ -299,7 +312,7 @@ function rfPhone(label, phone, dial) {
     <div class="rf-value ${phone ? "" : "empty"}">${phone ? esc(phone) : "Not provided"}</div>
     ${call ? `<div class="wa-actions">
       <a class="btn secondary wa-btn" href="${call}" target="_blank" rel="noopener" data-wa-log="${dial.id}">${ICON_CALL} WhatsApp call</a>
-      <a class="btn secondary wa-btn" href="${text}" target="_blank" rel="noopener" data-wa-log="${dial.id}">${ICON_TEXT} WhatsApp text</a>
+      <a class="btn secondary wa-btn" href="${text}" target="_blank" rel="noopener" data-wa-log="${dial.id}" data-wa-text="${esc(phone)}">${ICON_TEXT} WhatsApp text</a>
     </div>` : ""}</div>`;
 }
 function openDialModal(set, index) {
