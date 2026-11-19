@@ -3261,13 +3261,13 @@ async function updateDialStatus(newStatus) {
     currentDial._scheduleIntroCallUsed = false;
   }
   // Recording rules: "Record accepted" keeps a call's recording only for Accepted intro call (any other category deletes it,
-  // held and saved alike). "Record all calls" keeps it for every category except no_response / busy_callback, which only drop
-  // the recordings still held in memory (ones already saved stay).
+  // held and saved alike). "Record all calls" keeps it for every category except no_response / busy_callback (which only drop
+  // the recordings still held in memory; ones already saved stay) and unable_to_contact (which drops held AND saved ones).
   const recAll = profile.record_all_calls === true;
   const recAccepted = !recAll && profile.record_accepted_calls !== false;
-  const keepThis = recAll ? !["no_response", "busy_callback"].includes(newStatus) : newStatus === "intro_call_scheduled";
+  const keepThis = recAll ? !["no_response", "busy_callback", "unable_to_contact"].includes(newStatus) : newStatus === "intro_call_scheduled";
   if (!keepThis) {
-    discardRecordingsForDial(currentDial.id, { savedToo: !recAll }).then(() => { if (!recAll && wasAlreadyIntroScheduled && currentDial?.id === updatedDialId) loadDialTranscript(); }, () => {});
+    discardRecordingsForDial(currentDial.id, { savedToo: !recAll || newStatus === "unable_to_contact" }).then(() => { if (!recAll && wasAlreadyIntroScheduled && currentDial?.id === updatedDialId) loadDialTranscript(); }, () => {});
   } else if ((recAll || recAccepted) && (recAll || !wasAlreadyIntroScheduled)) {
     const dialId = currentDial.id;
     keepRecordingForDial(profile, dialId, isCallActive()).then(
