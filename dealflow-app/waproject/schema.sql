@@ -10,3 +10,7 @@
 -- No accounts: RLS lets a request through only if it carries the private key in the x-wp-key header
 -- (function wp_key_ok(); the key is only in that function and in the private link). To change the key, replace the
 -- literal in wp_key_ok() and open the new link once on each device.
+
+-- first_name (added later): the name used for {name} in WhatsApp texts. Set per dial (comma names: the part after the comma;
+-- otherwise the first word, fixed by hand where the surname came first). Editable in the dial popup.
+alter table public.wp_dials add column if not exists first_name text;

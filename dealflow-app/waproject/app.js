@@ -48,11 +48,20 @@ function waTemplates() {
   if (!list.length) list = String(store.get("wp_template", "") || "").split(/^[ \t]*-{3,}[ \t]*$/m);
   return list.map((t) => String(t).trim()).filter(Boolean);
 }
+// Best guess at the first name from a full name: "Last Last, First Middle" -> First; otherwise the first word.
+function guessFirstName(full) {
+  const t = String(full || "").trim();
+  if (!t) return "";
+  const given = t.includes(",") ? t.split(",").slice(1).join(" ").trim() : t;
+  const w = given.split(/\s+/)[0] || "";
+  return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+}
 function waTemplate(dial) {
   const all = waTemplates();
   if (!all.length) return "";
   const t = all[Math.floor(Math.random() * all.length)];
-  const first = String(dial.full_name || "").trim().split(/\s+/)[0] || "";
+  // A saved first name wins (it can be blank on purpose); otherwise guess it from the full name.
+  const first = dial.first_name != null ? String(dial.first_name).trim() : guessFirstName(dial.full_name);
   const company = String(dial.company_name || "").trim();
   return t.replace(/\{name\}/gi, first).replace(/\{company\}/gi, company);
 }
@@ -312,7 +321,7 @@ async function completeMove(listId) {
 // ---------------------------------------------------------------------------
 // Dial popup
 // ---------------------------------------------------------------------------
-const emptyDial = () => ({ full_name: "", company_name: "", city: "", state: "", email: "", mobile_phone: "", company_phone: "", linkedin: "", website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted", extra: {} });
+const emptyDial = () => ({ full_name: "", first_name: "", company_name: "", city: "", state: "", email: "", mobile_phone: "", company_phone: "", linkedin: "", website: "", industry: "", summary: "", call_notes: "", contact_status: "uncontacted", extra: {} });
 const rf = (label, v) => `<div class="readonly-field"><div class="rf-label">${esc(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? esc(v) : "Not provided"}</div></div>`;
 const rfLink = (label, v) => {
   const href = v && !/^https?:\/\//i.test(v) ? `https://${v}` : v;
@@ -389,6 +398,7 @@ function editHTML(d) {
   const f = (id, label, v, type = "text") => `<label for="d_${id}">${esc(label)}</label><input id="d_${id}" type="${type}" value="${esc(v)}" />`;
   return `
     ${f("full_name", "Full name", d.full_name)}
+    ${f("first_name", "First name (used in text messages)", d.first_name ?? guessFirstName(d.full_name))}
     ${f("company_name", "Company name", d.company_name)}
     <div class="form-row"><div>${f("city", "City", d.city)}</div><div>${f("state", "State / region", d.state)}</div></div>
     ${f("email", "Email", d.email, "email")}
@@ -400,7 +410,7 @@ function editHTML(d) {
 }
 function collectForm() {
   const v = (id) => $(`d_${id}`).value.trim() || null;
-  return { full_name: v("full_name"), company_name: v("company_name"), city: v("city"), state: v("state"), email: v("email"), mobile_phone: v("mobile_phone"), company_phone: v("company_phone"), linkedin: v("linkedin"), website: v("website"), industry: v("industry"), summary: v("summary") };
+  return { full_name: v("full_name"), first_name: v("first_name") || guessFirstName(v("full_name")), company_name: v("company_name"), city: v("city"), state: v("state"), email: v("email"), mobile_phone: v("mobile_phone"), company_phone: v("company_phone"), linkedin: v("linkedin"), website: v("website"), industry: v("industry"), summary: v("summary") };
 }
 
 function renderModal() {
@@ -523,7 +533,8 @@ function rowsToDials(rows, listId) {
       d[field] = v;
     });
     if (!d.full_name) { const c = `${d.first_name || ""} ${d.last_name || ""}`.trim(); if (c) d.full_name = c; }
-    delete d.first_name; delete d.last_name;
+    if (!d.first_name && d.full_name) d.first_name = guessFirstName(d.full_name);
+    delete d.last_name;
     return d;
   });
 }
