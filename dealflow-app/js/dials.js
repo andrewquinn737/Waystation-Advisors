@@ -3579,7 +3579,30 @@ async function handleScheduleIntroCallFromDial(dial) {
 // call it itself once the real scheduled date/time/timezone is known,
 // instead of this running the moment Calendly opens (see that function's own
 // top comment for why the client is deliberately created this late).
+// A booked intro call keeps the call's recording even when the dial was ALREADY "Accepted intro call" beforehand — in
+// that case the status handler (updateDialStatus) treats the call as a follow-up and skips the save, so the booking
+// itself is what saves it. Does nothing for accounts with recording off, or when no recording is being held.
+function keepRecordingForBookedIntro(dial) {
+  if (profile.record_all_calls !== true && profile.record_accepted_calls === false) return;
+  const dialId = dial.id;
+  keepRecordingForDial(profile, dialId, isCallActive()).then(
+    (saved) => {
+      if (!saved) return;
+      showNotice("The recording of this call was saved. Find it under the dial's Transcript, where you can play it, copy a share link, or download it.", { title: "Recording saved" });
+      if (currentDial?.id === dialId) loadDialTranscript();
+    },
+    (err) => showNotice(`The call recording couldn't be saved: ${err?.message || err}`, { title: "Recording not saved" })
+  );
+}
+
+// Creates the client for a booked intro call (see createClientRecordFromDial) and saves the call's recording.
 async function createClientFromDial(dial) {
+  const client = await createClientRecordFromDial(dial);
+  keepRecordingForBookedIntro(dial);
+  return client;
+}
+
+async function createClientRecordFromDial(dial) {
   // Idempotency guard: openIntroCallTimeConfirmModal's own createdClient
   // variable only protects against a double-click within ONE still-open
   // modal — it resets on a page reload, or on simply reopening "Schedule
