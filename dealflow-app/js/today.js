@@ -50,7 +50,29 @@ function showMsg(text, ok) {
   el.classList.toggle("ok", !!ok);
 }
 
+// Lists whose uploaded copy is waiting for a one-time approval: the first thing to do today.
+async function loadApprovals() {
+  const box = $("todayApprovals");
+  const { data, error } = await supabase.from("dial_lists")
+    .select("id, name, created_by, dials(count)")
+    .eq("copy_status", "pending_review").is("deleted_at", null)
+    .eq("dials.seq_state", "awaiting_copy").limit(50);
+  if (error || !data) { box.innerHTML = ""; return; }
+  const lists = data.filter((l) => (l.dials?.[0]?.count || 0) > 0);
+  box.innerHTML = lists.map((l) => `
+    <div class="today-approve">
+      <div><strong>Approve emails before they send</strong><br>
+        <span class="today-muted">${esc(l.name)} · ${l.dials[0].count} lead${l.dials[0].count === 1 ? "" : "s"} waiting</span></div>
+      <button type="button" class="btn small" data-approve-list="${esc(l.id)}">Review</button>
+    </div>`).join("");
+  box.querySelectorAll("[data-approve-list]").forEach((b) => b.addEventListener("click", () => {
+    try { localStorage.setItem("waystation_dials_list_id", b.dataset.approveList); } catch (_) {}
+    location.href = "dials.html";
+  }));
+}
+
 async function load() {
+  loadApprovals();
   $("todayBody").innerHTML = '<p class="today-muted">Loading your tasks...</p>';
   today = denverDate();
   const cutoff = nextBusinessDays(today, 5).pop();
