@@ -1,0 +1,7 @@
+# test-env tooling outputs (contain live schema / secrets) — never commit
+tools/testenv/schema_live.sql
+tools/testenv/live_side.json
+tools/testenv/live_functions/
+tools/testenv/__pycache__/
+tools/testenv/*.local.json
+dealflow-app/supabase/.temp/

@@ -42,7 +42,7 @@ Deno.serve(async (req: Request) => {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { user_id, message } = await req.json();
+  const { user_id, message, link } = await req.json();
   if (!user_id || !message) {
     return new Response("Missing user_id/message", { status: 400 });
   }
@@ -58,7 +58,12 @@ Deno.serve(async (req: Request) => {
     return new Response("Internal error", { status: 500 });
   }
 
-  const payload = JSON.stringify({ title: "Waystation Advisors", body: message });
+  // Tapping the notification opens this page (see sw.js's notificationclick).
+  // A notification can carry its own link (callback reminders open the dial);
+  // new-email pings open Messages; everything else keeps opening Profile as before.
+  const safeLink = typeof link === "string" && link.startsWith("/") ? link : null;
+  const url = safeLink || (/^New email from /.test(message) ? "/messages.html" : "/profile.html");
+  const payload = JSON.stringify({ title: "Waystation Advisors", body: message, url });
 
   const results = await Promise.allSettled(
     (subs || []).map(async (sub) => {
