@@ -49,8 +49,13 @@ personal free account). The live project (`jabjrhkhnbabfihodqie`) is never writt
    Working Signal M365 boxes: 5/day, credentials never verified (likely why SMTP had issues).
 7. Local test server: `.claude/launch.json` -> `waystation-crm-test` (port 5173). Login verified.
 
+8. `tools/testenv/test_sequences.py`: 45/45 scenario tests pass (classification, approval rights, business-day
+   dates, send window/weekend, 1-per-mailbox-per-run, cap rollover, re-base on real send, threaded follow-up,
+   reply/bounce/outcome stops, double-clicks, RLS for intern/lead/other team, deleted list, name matching).
+9. `tools/testenv/sync_grants.py`: test privileges mirror live exactly (live uses column-level grants on
+   email_accounts so `password` is never readable). FOUND+FIXED in test: my first copy had looser grants.
+
 ## Next
-- SQL scenario tests for the sequence engine (dates, caps, reply/bounce, double-click, approval, rebase).
 - Admin: mailbox management page (assign/unassign, limits, pause) + bulk import endpoint
   (edge function `mailbox-admin`, admin JWT; JSON body so AI tools can call it).
 - Upload: on CSV import call `seq_prepare_list`; show split (email vs call); copy review + one-click approve

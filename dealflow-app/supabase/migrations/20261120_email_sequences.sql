@@ -154,6 +154,7 @@ create index if not exists sequence_tasks_dispatch_idx on public.sequence_tasks 
 alter table public.sequence_tasks enable row level security;
 drop policy if exists sequence_tasks_select on public.sequence_tasks;
 create policy sequence_tasks_select on public.sequence_tasks for select using (owner_id = auth.uid() or is_admin() or is_team_lead_of(owner_id));
+revoke all on public.sequence_tasks from anon, authenticated;
 grant select on public.sequence_tasks to authenticated;
 -- Interns change tasks only through complete_sequence_task(); no direct writes.
 
@@ -335,9 +336,10 @@ create trigger dials_seq_on_status after update of contact_status on public.dial
 -- ---------------------------------------------------------------- auto-send
 -- Every 5 min: queue due email steps inside the send window (weekdays 8:00-17:00 Denver).
 -- At most one queued send per mailbox per run, so sends trickle out (no bursts).
-create or replace function public.sequence_dispatch() returns int
+drop function if exists public.sequence_dispatch();
+create or replace function public.sequence_dispatch(p_now timestamptz default now()) returns int
  language plpgsql security definer set search_path to 'public' as $$
-declare t record; n int := 0; v_now_den timestamp := now() at time zone 'America/Denver';
+declare t record; n int := 0; v_now_den timestamp := p_now at time zone 'America/Denver';
   v_used int; v_lim int; v_subject text; v_body text; v_seen uuid[] := '{}'; v_sid uuid;
 begin
   if not is_business_day(v_now_den::date) or extract(hour from v_now_den) < 8 or extract(hour from v_now_den) >= 17 then
@@ -371,7 +373,7 @@ begin
     values (t.dial_owner, t.sender_account_id, t.dial_id, t.full_name, t.email, v_subject, v_body,
             case when t.kind = 'followup_email' then t.email_1_message_id end,
             case when t.kind = 'followup_email' then t.email_1_thread_id end,
-            now() + make_interval(secs => floor(random() * 240)::int), 'pending')
+            p_now + make_interval(secs => floor(random() * 240)::int), 'pending')
     returning id into v_sid;
     update sequence_tasks set status = 'queued', scheduled_email_id = v_sid, attempts = attempts + 1
      where id = t.id;
@@ -458,12 +460,17 @@ create or replace view public.my_tasks with (security_invoker = true) as
     join profiles p on p.id = t.owner_id
     left join scheduled_emails s on s.id = t.scheduled_email_id
     left join email_accounts a on a.id = d.sender_account_id;
+revoke all on public.my_tasks from anon, authenticated;
 grant select on public.my_tasks to authenticated;
+-- email_accounts uses column-level grants (password is never readable); expose the new non-secret columns
+grant select (daily_send_limit, mandate, send_route, source, needs_assignment, suggested_owner_id, credentials_verified, send_paused_reason)
+  on public.email_accounts to authenticated;
+grant select (sent_message_id) on public.scheduled_emails to authenticated;
 
 grant execute on function public.seq_prepare_list(uuid), public.approve_list_copy(uuid),
   public.complete_sequence_task(uuid, text, text, boolean), public.stop_sequence(uuid, text),
   public.match_mailbox_owner(text, text) to authenticated;
-revoke execute on function public.sequence_dispatch(), public.seq_stop(uuid, text, text, boolean),
+revoke execute on function public.sequence_dispatch(timestamptz), public.seq_stop(uuid, text, text, boolean),
   public.seq_build_tasks(uuid) from public, anon, authenticated;
 
 -- cron (test project): dispatcher every 5 minutes
