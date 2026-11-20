@@ -358,7 +358,8 @@ begin
     return 0;
   end if;
   for m in
-    select a.id, a.owner_id, a.mandate, c.sent + c.scheduled as used, c.daily_limit
+    select a.id, a.owner_id, a.mandate, c.sent + c.scheduled as used, c.daily_limit,
+           (a.sync_enabled and a.last_synced_at > p_now - interval '2 hours' and coalesce(a.last_sync_error,'') = '') as inbox_ok
       from email_accounts a cross join lateral mailbox_send_counts(a.id) c
      where not a.needs_assignment and coalesce(a.send_paused_reason,'') = ''
        and c.sent + c.scheduled < c.daily_limit
@@ -373,7 +374,8 @@ begin
      where st.owner_id = m.owner_id and st.status = 'pending' and st.kind in ('email','followup_email')
        and st.due_on <= v_today and d.seq_state = 'active' and l.copy_status = 'approved' and l.deleted_at is null
        and (l.mandate is null or m.mandate is null or l.mandate = m.mandate)
-       and ( (st.kind = 'followup_email' and d.sender_account_id = m.id and d.email_1_message_id is not null)
+       -- a follow-up only goes out if this mailbox's inbox is being read (otherwise a reply could be missed)
+       and ( (st.kind = 'followup_email' and d.sender_account_id = m.id and d.email_1_message_id is not null and m.inbox_ok)
           or (st.kind = 'email' and (d.sender_account_id is null or d.sender_account_id = m.id)) )
      order by (st.kind = 'followup_email') desc, st.due_on, st.step, st.created_at
      limit 1

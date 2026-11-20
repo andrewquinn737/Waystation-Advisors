@@ -132,6 +132,11 @@ def run():
     fu = q(f"select due_on, status from sequence_tasks where dial_id='{s['dial_id']}' and kind='followup_email'")[0]
     check("sent: follow-up moves to day 3 = Thu", fu["due_on"] == "2026-11-26" and fu["status"] == "pending", fu)
     q("select sequence_dispatch('2026-11-26 09:00-07')")
+    fq0 = q(f"select count(*) n from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id where t.dial_id='{s['dial_id']}' and t.kind='followup_email'")[0]["n"]
+    check("follow-up: held while the mailbox's inbox isn't being read", fq0 == 0, fq0)
+    q(f"update email_accounts set sync_enabled=true, last_synced_at='2026-11-26 08:30-07', last_sync_error=null where id='{s['account_id']}'")
+    q("select sequence_dispatch('2026-11-26 09:05-07')")
+    q(f"update email_accounts set sync_enabled=false where id='{s['account_id']}'")
     fq = q(f"select s.in_reply_to, s.subject from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id where t.dial_id='{s['dial_id']}' and t.kind='followup_email'")
     check("follow-up: queued as a reply in the same thread", fq and fq[0]["in_reply_to"] == "<t1@x>" and fq[0]["subject"].startswith("Re: "), fq)
 
