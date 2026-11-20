@@ -30,10 +30,15 @@ export async function smtpSend(opts: {
   const log: string[] = [];
   const rejected: string[] = [];
   const accepted: string[] = [];
-  const conn = await Deno.connectTls({ hostname: opts.host, port: opts.port });
+  // 465 = implicit TLS (SMTPS). 587/25 = plain connect, then STARTTLS upgrade
+  // (Microsoft 365 only offers 587 + STARTTLS).
+  const startTls = opts.port === 587 || opts.port === 25;
+  let conn: Deno.Conn | Deno.TlsConn = startTls
+    ? await Deno.connect({ hostname: opts.host, port: opts.port })
+    : await Deno.connectTls({ hostname: opts.host, port: opts.port });
   try {
-    const reader = conn.readable.getReader();
-    const writer = conn.writable.getWriter();
+    let reader = conn.readable.getReader();
+    let writer = conn.writable.getWriter();
     const buf = { data: new Uint8Array(0) };
     const encoder = new TextEncoder();
     async function send(line: string) {
@@ -52,7 +57,23 @@ export async function smtpSend(opts: {
     log.push("greeting: " + (await readMulti()).trim());
     await send("EHLO waystation-advisors.app");
     log.push("ehlo");
-    await readMulti();
+    const ehlo = await readMulti();
+
+    if (startTls) {
+      if (!/STARTTLS/i.test(ehlo)) throw new Error("Server on port " + opts.port + " does not offer STARTTLS");
+      await send("STARTTLS");
+      const ready = await readMulti();
+      if (!/^220/.test(ready)) throw new Error("STARTTLS refused: " + ready.trim());
+      reader.releaseLock();
+      writer.releaseLock();
+      buf.data = new Uint8Array(0);
+      conn = await Deno.startTls(conn as Deno.Conn, { hostname: opts.host });
+      reader = conn.readable.getReader();
+      writer = conn.writable.getWriter();
+      await send("EHLO waystation-advisors.app");
+      await readMulti();
+      log.push("starttls ok");
+    }
 
     await send("AUTH LOGIN");
     await readMulti();

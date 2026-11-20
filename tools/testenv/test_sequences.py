@@ -42,7 +42,7 @@ def check(name, cond, detail=""):
 
 def make_list(owner_email, rows, mandate="data", name=None):
     lid = str(uuid.uuid4())
-    q(f"insert into dial_lists (id, name, dial_type, created_by, mandate) values ('{lid}', {lit(name or 'TEST ' + lid[:8])}, 'seller', '{uid(owner_email)}', '{mandate}')")
+    q(f"insert into dial_lists (id, name, dial_type, created_by, mandate) values ('{lid}', {lit(name or 'TEST-SEQ ' + lid[:8])}, 'seller', '{uid(owner_email)}', '{mandate}')")
     for r in rows:
         q(f"""insert into dials (list_id, created_by, company_name, full_name, email, company_phone, email_subject, email_1, email_2)
               values ('{lid}', '{uid(owner_email)}', {lit(r.get('co','Acme'))}, {lit(r.get('name','Pat Owner'))}, {lit(r.get('email'))},
@@ -52,7 +52,7 @@ def make_list(owner_email, rows, mandate="data", name=None):
 COPY = dict(subj="Quick question about Acme", e1="Hi Pat,\n\nShort note.\n\nBest,\nCaleb", e2="Hi Pat, circling back.\n\nCaleb")
 
 def cleanup():
-    q("delete from dial_lists where name like 'TEST %'")
+    q("delete from dial_lists where name like 'TEST-SEQ %'")
 
 def run():
     cleanup()
@@ -208,7 +208,7 @@ def run():
     lid2 = make_list(CALEB, [dict(email=SINKS[0], **COPY)])
     rpc(CALEB, "seq_prepare_list", p_list_id=lid2); rpc(CALEB, "approve_list_copy", p_list_id=lid2)
     q(f"update dials set seq_day0='2026-11-23' where list_id='{lid2}'"); q(f"select seq_build_tasks(id) from dials where list_id='{lid2}'")
-    q(f"update scheduled_emails set status='cancelled' where status='pending'")
+    q(f"update scheduled_emails s set status='cancelled' from dials d where d.id=s.dial_id and d.list_id='{lid2}' and s.status='pending'")
     q(f"update sequence_tasks set status='pending', scheduled_email_id=null where status='queued' and list_id='{lid2}'")
     q(f"update dial_lists set deleted_at=now() where id='{lid2}'")
     q("select sequence_dispatch('2026-11-23 10:00-07')")
@@ -222,13 +222,14 @@ def run():
     check("matching: display name, first.last@, spacing/case", m["a"] == uid(CALEB) and m["b"] == uid(CALEB) and m["d"] == uid(CALEB), m)
     check("matching: first-name-only and typos stay unassigned", m["c"] is None and m["e"] is None, m)
 
-run_ok = True
-try:
-    run()
-except Exception:
-    traceback.print_exc(); run_ok = False
-finally:
-    cleanup()
-    q("delete from email_messages where message_id in ('<t1@x>','<r1@x>','<b1@x>')")
-fails = [r for r in results if not r[1]]
-print(f"\n{len(results) - len(fails)}/{len(results)} passed" + ("" if run_ok else " (run aborted)"))
+if __name__ == "__main__":
+    run_ok = True
+    try:
+        run()
+    except Exception:
+        traceback.print_exc(); run_ok = False
+    finally:
+        cleanup()
+        q("delete from email_messages where message_id in ('<t1@x>','<r1@x>','<b1@x>')")
+    fails = [r for r in results if not r[1]]
+    print(f"\n{len(results) - len(fails)}/{len(results)} passed" + ("" if run_ok else " (run aborted)"))

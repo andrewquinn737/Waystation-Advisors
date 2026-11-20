@@ -4,7 +4,7 @@
 // the network so data stays live.
 const CACHE = "waystation-shell-v105";
 const SHELL = [
-  "/", "/index.html", "/login.html", "/profile.html", "/clients.html",
+  "/", "/index.html", "/login.html", "/profile.html", "/clients.html", "/today.html", "/css/today.css", "/js/today.js",
   "/dials.html", "/messages.html", "/finance.html", "/css/style.css",
   "/js/auth.js", "/js/profile.js", "/js/clients.js", "/js/dials.js",
   "/js/messages.js", "/js/finance.js", "/js/config.js", "/js/supabaseClient.js", "/js/push.js",
