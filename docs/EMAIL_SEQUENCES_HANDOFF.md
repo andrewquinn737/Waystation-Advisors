@@ -55,17 +55,25 @@ personal free account). The live project (`jabjrhkhnbabfihodqie`) is never writt
 9. `tools/testenv/sync_grants.py`: test privileges mirror live exactly (live uses column-level grants on
    email_accounts so `password` is never readable). FOUND+FIXED in test: my first copy had looser grants.
 
-## Next
-- Admin: mailbox management page (assign/unassign, limits, pause) + bulk import endpoint
-  (edge function `mailbox-admin`, admin JWT; JSON body so AI tools can call it).
-- Upload: on CSV import call `seq_prepare_list`; show split (email vs call); copy review + one-click approve
-  with JS lint (<=85 words, no em/en dashes, no {placeholders}, unique sentences across the list,
-  greeting first name present, subject present, follow-up present).
-- Messages: interns get their own mailboxes (owner path already works); leads pick which interns' inboxes
-  to view (accountsVisible picker; RLS already allows leads to read).
-- Today page: per-person task list (overdue + today), call/LinkedIn/company-line actions, email status.
-- Delivery test: real sends from each provider to the 5 sink inboxes; if Supabase SMTP fails for M365,
-  build the Oracle test hub relay (XOAUTH2 via the hub's Entra app) and set `send_route = 'oracle'`.
-- Offline copy generator: script using waystation-seller-outreach / data_rich_ai docs via `claude --print`
-  + llm_pool, outputs the upload CSV.
-- Edge-case + load tests (1k-5k rows, concurrent approvals, cap exhaustion, weekend/holiday, DST).
+10. UI built (all on test branch, verified on localhost against TEST): Today page (tasks + approve-copy prompt),
+    copy review/approval in Dials (copyLint.js, 46 unit tests), per-person Messages inbox (leads view interns
+    read-only), admin Mailboxes page + `mailbox-admin` edge function / API key (41 tests, docs/MAILBOX_ADMIN_API.md).
+11. Load test `tools/testenv/load_test.py` (2,700 leads, 9 interns): prepare/approve < 0.5s per list; dispatcher
+    < 1.3s/run; 223/225 daily capacity used, no mailbox over its limit; Today query 0.4s. Fixed: single-mailbox
+    pinning at approval + dispatcher starvation (mailbox now chosen at send time, then pinned).
+12. Microsoft 365 (Working Signal): sending fixed (STARTTLS on 587). Reading their inboxes is BLOCKED: IMAP basic
+    auth is disabled and the Nov 13 app-permission grants failed in all 17 tenants (ManagementObjectNotFound).
+    Safety: follow-up emails are held unless the sender's inbox synced in the last 2h, so no follow-up goes to
+    someone whose reply we couldn't see.
+13. TEST cron `sequence-dispatch` is PAUSED (it would really send to the test inboxes). Use
+    `tools/testenv/apply_migration.py` to re-apply the migration (keeps it paused).
+
+## Open / next
+- Mason: redo Microsoft admin consent + mailbox grants in the 17 tenants (email_hub_oauth/SETUP.md), then add
+  XOAUTH2 IMAP to email-sync (or the Oracle test hub) so Working Signal inboxes sync.
+- Mason: check inbox placement of the 4 delivery-test emails.
+- Assign the 4 first-name-only mailboxes (austin@, jonah@ x2, andrew@) on mailboxes.html.
+- Holidays are not skipped (weekends only). Oracle test hub not built (not needed for sending now).
+- Offline copy generator: outreach/sequence_copygen (in progress).
+- Live rollout (needs Mason's go-ahead): set CRON_SHARED_SECRET on live, run migration, deploy functions,
+  merge test -> main.
