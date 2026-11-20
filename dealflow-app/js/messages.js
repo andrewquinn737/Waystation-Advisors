@@ -25,7 +25,7 @@ import { requireSession, showError } from "./auth.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireNotificationsToggle } from "./notifications.js";
-import { wireAccountsVisiblePopup, getVisibleAccountIds } from "./accountsVisible.js";
+import { MAILBOX_KEY, loadMailboxes, buildGroups, selectedMailboxIds, loadUnreadCounts, loadSequenceBadges, loadQuotas, wireMailboxPicker, ownerFirstName } from "./mailboxScope.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -33,12 +33,11 @@ const { profile } = session;
 
 const isAdmin = profile?.role === "admin";
 const isTeamLead = profile?.role === "team_lead";
-const canManageMail = isAdmin || isTeamLead;
-
-// Independent from the shared app-wide "Accounts visible" key used
-// elsewhere — this page's mailbox selection has nothing to do with which
-// ACCOUNTS' dials/clients are visible on other pages.
-const MAILBOX_STORAGE_KEY = "waystation_messages_mailboxes";
+// "Inbox mode" = the full mail client (folders, reply, compose, picker). Admins/team leads always; anyone else
+// (interns) once they own at least one mailbox — set after loadAccounts(). An intern who owns none keeps the old
+// read-only feed of mail matched to their clients. NOTE: Mailboxes picker selection lives in mailboxScope.js
+// (MAILBOX_KEY), independent of the app-wide "Accounts visible" setting.
+let canManageMail = isAdmin || isTeamLead;
 
 const els = {
   pageMenuToggle: document.getElementById("pageMenuToggle"),
@@ -93,7 +92,13 @@ function escapeHtml(str) {
 }
 
 let accounts = []; // every mailbox the signed-in account can see (RLS-scoped)
-let accountOwnerNames = {}; // owner_id -> full_name, admin-only
+let mailboxGroups = []; // picker groups (see mailboxScope.buildGroups)
+let unreadByAccount = new Map();
+let seqBadges = new Map(); // counterpart address (lowercase) -> { label, replied }
+const acctById = (id) => accounts.find((a) => a.id === id);
+// Read-only = a mailbox someone else owns (a lead viewing an intern's inbox). Admins can still act on any mailbox.
+const isReadOnlyAccount = (id) => { const a = acctById(id); return !!a && !a.mine && !isAdmin; };
+const canWriteAccount = (id) => { const a = acctById(id); return !!a && (a.mine || isAdmin); };
 let detailThreadId = null; // null = list view
 let pendingCompose = null; // { attachments: [{filename, contentType, base64}] }
 let threadListSelectMode = false;
@@ -111,61 +116,54 @@ let currentThreadRows = []; // the list currently rendered, for Select all / bul
 // ---------------------------------------------------------------------------
 
 async function loadAccounts() {
-  if (!canManageMail) return;
-  const { data, error } = await supabase.from("email_accounts").select("id, owner_id, label, email_address, imap_host, smtp_host, sync_enabled, last_synced_at, last_sync_error").order("owner_id").order("email_address");
-  if (error) return showError(els.errorBox, error);
-  accounts = data || [];
-  if (isAdmin) {
-    const ids = [...new Set(accounts.map((a) => a.owner_id))];
-    if (ids.length) {
-      const { data: owners } = await supabase.from("profiles").select("id, full_name").in("id", ids);
-      accountOwnerNames = Object.fromEntries((owners || []).map((p) => [p.id, p.full_name]));
-    }
+  try {
+    accounts = await loadMailboxes(profile, { isAdmin, isTeamLead });
+  } catch (error) {
+    return showError(els.errorBox, error);
   }
+  canManageMail = isAdmin || isTeamLead || accounts.some((a) => a.mine);
+  mailboxGroups = buildGroups(accounts, { isAdmin });
 }
 
-// The label shown for one mailbox — its actual email address (per spec:
-// "instead of having names have the emails listed"), with the owning
-// account's name in parentheses for an admin viewing someone else's box.
+async function refreshUnread() {
+  if (!canManageMail) return;
+  unreadByAccount = await loadUnreadCounts(accounts.map((a) => a.id));
+}
+
+// The label shown for one mailbox: its email address, with the owner's name for someone else's.
 function mailboxLabel(a) {
-  const ownerSuffix = isAdmin ? ` (${accountOwnerNames[a.owner_id] || "Unknown"})` : "";
-  return `${a.email_address}${ownerSuffix}`;
+  return a.mine ? a.email_address : `${a.email_address} (${a.ownerName})`;
 }
 
 function updateTitle() {
-  const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
   const suffix = folderView === "received" ? "" : ` · ${FOLDER_LABELS[folderView]}`;
-  if (!visible || visible.size !== 1) {
+  const visible = canManageMail ? selectedMailboxIds(accounts) : [];
+  if (visible.length !== 1) {
     els.messagesTitle.textContent = `Messages${suffix}`;
     return;
   }
-  const acct = accounts.find((a) => visible.has(a.id));
+  const acct = acctById(visible[0]);
   els.messagesTitle.textContent = `${acct ? acct.email_address : "Messages"}${suffix}`;
-}
-
-if (canManageMail) {
-  els.pageMenuToggle.classList.remove("hidden");
-  els.composeFabBtn.classList.remove("hidden");
 }
 
 wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.mailboxesPopup });
 wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
 
-if (canManageMail) {
-  wireAccountsVisiblePopup({
+function setupInboxUi() {
+  if (!canManageMail) return;
+  els.pageMenuToggle.classList.remove("hidden");
+  els.composeFabBtn.classList.remove("hidden");
+  wireMailboxPicker({
     menuBtn: els.menuMailboxesBtn,
     popupEl: els.mailboxesPopup,
     bodyEl: els.mailboxesPopupBody,
     closeBtn: els.mailboxesPopupClose,
     closePageHeaderMenu,
-    myProfileId: profile.id,
-    storageKey: MAILBOX_STORAGE_KEY,
-    // One synthetic "account" row per connected MAILBOX, not per person —
-    // id is the email_accounts row's own id, so the shared popup's
-    // selection Set ends up holding mailbox ids, which is exactly what
-    // accountIdsForQuery() below needs.
-    getAllAccounts: async () => accounts.map((a) => ({ id: a.id, full_name: mailboxLabel(a) })),
+    getAccounts: () => accounts,
+    getGroups: () => mailboxGroups,
+    getUnread: () => unreadByAccount,
+    refreshUnread,
     onChange: () => {
       updateTitle();
       exitDetail();
@@ -276,8 +274,8 @@ els.viewingPopup.querySelectorAll(".viewing-option").forEach((btn) => {
 });
 els.selectBackBtn.addEventListener("click", exitThreadSelectMode);
 els.selectAllBtn.addEventListener("click", () => {
-  if (selectedThreadIds.size === currentThreadRows.length) selectedThreadIds = new Set();
-  else selectedThreadIds = new Set(currentThreadRows.map((t) => t.latest.thread_id));
+  if (selectedThreadIds.size === currentThreadRows.filter((t) => !isReadOnlyAccount(t.latest.account_id)).length) selectedThreadIds = new Set();
+  else selectedThreadIds = new Set(currentThreadRows.filter((t) => !isReadOnlyAccount(t.latest.account_id)).map((t) => t.latest.thread_id));
   renderThreadList();
 });
 
@@ -318,58 +316,80 @@ els.confirmDeleteThreadsYesBtn.addEventListener("click", async () => {
 // Thread list
 // ---------------------------------------------------------------------------
 
-const PAGE_SIZE = 300; // messages fetched to derive the thread list from
+const PAGE_SIZE = 100; // messages fetched per page; "Load more" pages back by sent_at
 
 function accountIdsForQuery() {
-  if (!canManageMail) return null; // intern: RLS alone scopes this to their own clients' messages
-  const visible = getVisibleAccountIds(MAILBOX_STORAGE_KEY);
-  if (!visible) return accounts.map((a) => a.id); // "select all" (default) — every mailbox this user can see
-  return accounts.filter((a) => visible.has(a.id)).map((a) => a.id);
+  if (!canManageMail) return null; // intern without a mailbox: RLS alone scopes this to their own clients' messages
+  return selectedMailboxIds(accounts);
 }
 
-async function loadThreadList() {
+// Accumulated paging state for the Received/feed list. Threads are derived from the fetched messages (newest first).
+let listState = null; // { msgs: Map(id -> msg), oldest, hasMore, clientNames, loading }
+
+const counterpart = (m) => (m.direction === "outbound" ? (m.to_addresses || [])[0]?.address : m.from_address) || "";
+
+async function loadThreadList(loadMore = false) {
   if (canManageMail && folderView !== "received") return loadLiveFolder();
   els.errorBox.classList.add("hidden");
-  els.wrap.innerHTML = `<div class="empty-state">Loading…</div>`;
+  const ids = accountIdsForQuery();
+  if (ids && !ids.length) {
+    els.wrap.innerHTML = `<div class="empty-state">No email connected yet — go to Profile → Edit to connect one.</div>`;
+    return;
+  }
+  if (!loadMore || !listState) {
+    els.wrap.innerHTML = `<div class="empty-state">Loading…</div>`;
+    listState = { msgs: new Map(), oldest: null, hasMore: false, clientNames: {}, loading: false };
+  }
+  const state = listState;
+  if (state.loading) return;
+  state.loading = true;
 
   let query = supabase
     .from("email_messages")
     .select("id, thread_id, account_id, direction, from_address, from_name, to_addresses, subject, snippet, is_read, client_id, sent_at")
     .order("sent_at", { ascending: false })
     .limit(PAGE_SIZE);
-  const ids = accountIdsForQuery();
-  if (ids) {
-    if (!ids.length) {
-      els.wrap.innerHTML = `<div class="empty-state">No email connected yet — go to Profile → Edit to connect one.</div>`;
-      return;
-    }
-    query = query.in("account_id", ids);
-  }
+  if (ids) query = query.in("account_id", ids);
   if (canManageMail) query = query.eq("direction", folderView === "sent" ? "outbound" : "inbound");
+  if (loadMore && state.oldest) query = query.lte("sent_at", state.oldest);
   const { data, error } = await query;
+  state.loading = false;
+  if (listState !== state) return; // selection/folder changed while loading
   if (error) {
     els.wrap.innerHTML = "";
     return showError(els.errorBox, error);
   }
 
-  const clientIds = [...new Set((data || []).map((m) => m.client_id).filter(Boolean))];
-  let clientNames = {};
+  const fresh = (data || []).filter((m) => !state.msgs.has(m.id));
+  fresh.forEach((m) => state.msgs.set(m.id, m));
+  state.hasMore = (data || []).length === PAGE_SIZE && fresh.length > 0;
+  if (data?.length) state.oldest = data[data.length - 1].sent_at;
+
+  const clientIds = [...new Set(fresh.map((m) => m.client_id).filter((id) => id && !(id in state.clientNames)))];
   if (clientIds.length) {
     const { data: clients } = await supabase.from("clients").select("id, full_name").in("id", clientIds);
-    clientNames = Object.fromEntries((clients || []).map((c) => [c.id, c.full_name]));
+    for (const c of clients || []) state.clientNames[c.id] = c.full_name;
   }
+  if (listState !== state) return;
 
-  const threads = new Map(); // thread_id -> latest message (first one seen, since sorted desc) + unread flag
-  for (const m of data || []) {
-    if (!threads.has(m.thread_id)) {
-      threads.set(m.thread_id, { latest: m, unread: false, clientName: m.client_id ? clientNames[m.client_id] : null });
-    }
+  const threads = new Map(); // thread_id -> latest message (first seen, since sorted desc) + unread flag
+  const ordered = [...state.msgs.values()].sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
+  for (const m of ordered) {
+    if (!threads.has(m.thread_id)) threads.set(m.thread_id, { latest: m, unread: false, clientName: m.client_id ? state.clientNames[m.client_id] : null });
     const t = threads.get(m.thread_id);
     if (m.direction === "inbound" && !m.is_read) t.unread = true;
   }
-
   currentThreadRows = [...threads.values()];
   renderThreadList();
+
+  // Light enrichment after first paint: one dials query for the sequence badges, one count query for the picker.
+  loadSequenceBadges(fresh.map(counterpart))
+    .then((b) => {
+      b.forEach((v, k) => seqBadges.set(k, v));
+      if (listState === state && !detailThreadId && b.size) renderThreadList();
+    })
+    .catch(() => {});
+  if (!loadMore) refreshUnread().catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -430,7 +450,8 @@ function liveFormatDate(iso) {
 }
 
 function mailboxEmail(accountId) {
-  return accounts.find((a) => a.id === accountId)?.email_address || "";
+  const a = acctById(accountId);
+  return a ? (a.mine ? a.email_address : `${a.email_address} (${a.ownerName})`) : "";
 }
 
 async function loadLiveFolder(loadMore = false) {
@@ -502,7 +523,7 @@ function renderLiveFolder() {
           <div class="mc-sub">${escapeHtml(r.subject || "(no subject)")}</div>
           <div class="mc-sub faint">${r.status === "failed" ? escapeHtml(r.error || "Send failed") : `Goes out ${escapeHtml(new Date(r.send_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}`}${multi ? ` · ${escapeHtml(mailboxEmail(r.account_id))}` : ""}</div>
         </div>
-        ${r.status === "pending" ? `<button type="button" class="btn secondary small" data-cancel-scheduled="${escapeHtml(r.id)}" style="flex-shrink:0;">Cancel</button>` : ""}
+        ${r.status === "pending" && canWriteAccount(r.account_id) ? `<button type="button" class="btn secondary small" data-cancel-scheduled="${escapeHtml(r.id)}" style="flex-shrink:0;">Cancel</button>` : ""}
       </div>`
         )
         .join("")
@@ -640,10 +661,16 @@ function renderThreadList() {
     return m.from_name || m.from_address;
   };
 
+  const multi = canManageMail && (accountIdsForQuery() || []).length > 1;
+  const hasMore = !!listState?.hasMore;
   els.wrap.innerHTML = `<div class="team-member-list">${rows
-    .map(
-      (t) => `
-    <div class="mobile-card message-thread-row ${t.unread ? "unread" : ""}" data-thread-id="${escapeHtml(t.latest.thread_id)}">
+    .map((t) => {
+      const acct = acctById(t.latest.account_id);
+      const ro = isReadOnlyAccount(t.latest.account_id);
+      const seq = seqBadges.get(counterpart(t.latest).toLowerCase());
+      t.readOnly = ro;
+      return `
+    <div class="mobile-card message-thread-row ${t.unread ? "unread" : ""} ${ro ? "readonly" : ""}" data-thread-id="${escapeHtml(t.latest.thread_id)}">
       <div class="mc-main">
         <div class="mc-name">
           ${t.unread ? `<span class="message-unread-dot"></span>` : ""}${escapeHtml(participantLabel(t.latest))}
@@ -651,20 +678,30 @@ function renderThreadList() {
         </div>
         <div class="mc-sub">${escapeHtml(t.latest.subject || "(no subject)")}</div>
         <div class="mc-sub faint">${escapeHtml(t.latest.snippet || "")}</div>
+        ${(multi && acct) || seq ? `<div>${multi && acct ? `<span class="message-mailbox-chip">${escapeHtml(acct.email_address)}${acct.mine ? "" : ` · ${escapeHtml(ownerFirstName(acct))}`}</span>` : ""}${seq ? `<span class="message-seq-badge ${seq.replied ? "replied" : ""}">${escapeHtml(seq.label)}</span>` : ""}</div>` : ""}
       </div>
       ${
         threadListSelectMode
           ? `<div class="select-circle ${selectedThreadIds.has(t.latest.thread_id) ? "selected" : ""}"></div>`
           : `<div class="mc-sub faint" style="flex-shrink:0;">${escapeHtml(formatDate(t.latest.sent_at))}</div>`
       }
-    </div>`
-    )
-    .join("")}</div>`;
+    </div>`;
+    })
+    .join("")}${hasMore ? `<button type="button" class="btn secondary" id="threadLoadMoreBtn" style="margin:8px auto; display:block;">Load more</button>` : ""}</div>`;
+  const moreBtn = document.getElementById("threadLoadMoreBtn");
+  if (moreBtn)
+    moreBtn.addEventListener("click", async () => {
+      moreBtn.disabled = true;
+      moreBtn.textContent = "Loading…";
+      await loadThreadList(true);
+    });
 
   els.wrap.querySelectorAll(".message-thread-row").forEach((row) => {
     row.addEventListener("click", () => {
       const id = row.dataset.threadId;
       if (threadListSelectMode) {
+        // Someone else's mailbox (a lead viewing an intern) is read-only: can't be marked unread or deleted.
+        if (currentThreadRows.find((t) => t.latest.thread_id === id)?.readOnly) return;
         if (selectedThreadIds.has(id)) selectedThreadIds.delete(id);
         else selectedThreadIds.add(id);
         renderThreadList();
@@ -749,10 +786,21 @@ async function openThread(threadId) {
   }
 
   const last = msgs[msgs.length - 1];
-  const canReply = canManageMail && accounts.some((a) => a.id === last.account_id);
+  const readOnly = isReadOnlyAccount(last.account_id);
+  const canReply = canManageMail && canWriteAccount(last.account_id);
+  const acct = acctById(last.account_id);
+  const showChip = canManageMail && acct && (accountIdsForQuery() || []).length > 1;
+  const seqAddr = counterpart(last).toLowerCase();
+  if (seqAddr && !seqBadges.has(seqAddr)) {
+    const b = await loadSequenceBadges([seqAddr]).catch(() => new Map());
+    b.forEach((v, k) => seqBadges.set(k, v));
+  }
+  const seq = seqBadges.get(seqAddr);
 
   els.wrap.innerHTML = `
     <div class="thread-detail">
+      ${readOnly ? `<div class="readonly-banner">Viewing ${escapeHtml(ownerFirstName(acct))}'s inbox (read-only)</div>` : ""}
+      ${showChip || seq ? `<div style="margin-bottom:6px;">${showChip ? `<span class="message-mailbox-chip">${escapeHtml(acct.email_address)}</span>` : ""}${seq ? `<span class="message-seq-badge ${seq.replied ? "replied" : ""}">${escapeHtml(seq.label)}</span>` : ""}</div>` : ""}
       <h2 class="thread-detail-subject">${escapeHtml(msgs.find((m) => m.subject)?.subject || "(no subject)")}</h2>
       ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [], liveById[m.id])).join("")}
       <div class="thread-detail-actions">
@@ -858,9 +906,11 @@ async function openThread(threadId) {
   });
 
   // Mark inbound unread messages in this thread as read.
-  const unreadIds = msgs.filter((m) => m.direction === "inbound" && !m.is_read).map((m) => m.id);
+  // (Skipped on someone else's mailbox: read-only for a lead, and RLS would reject the update anyway.)
+  const unreadIds = readOnly ? [] : msgs.filter((m) => m.direction === "inbound" && !m.is_read).map((m) => m.id);
   if (unreadIds.length) {
     await supabase.from("email_messages").update({ is_read: true }).in("id", unreadIds);
+    refreshUnread().catch(() => {});
   }
 }
 
@@ -979,11 +1029,11 @@ function renderComposeAttachments() {
 
 function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }) {
   // Sending needs one of YOUR OWN connected mailboxes (Profile -> Edit).
-  if (!accounts.some((a) => a.owner_id === profile.id)) {
+  if (!accounts.some((a) => a.mine)) {
     showConnectEmailNotice();
     return;
   }
-  pendingCompose = { mode, inReplyTo, threadId, attachments: [] };
+  pendingCompose = { mode, inReplyTo, threadId, accountId, attachments: [] };
   els.composeError.classList.add("hidden");
   els.composeTitle.textContent = mode === "reply" ? "Reply" : "New message";
   els.composeToInput.value = (to || []).join(", ");
@@ -992,15 +1042,17 @@ function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }
   els.composeBody.innerHTML = body ? escapeHtml(body).replace(/\n/g, "<br>") : "";
   renderComposeAttachments();
 
-  const usable = accounts.filter((a) => isAdmin || a.owner_id === profile.id);
+  // From: only mailboxes you own (an admin may also send from anyone's, listed after their own).
+  const usable = accounts.filter((a) => a.mine || isAdmin).sort((x, y) => Number(y.mine) - Number(x.mine));
   els.composeFromSelect.innerHTML = usable.map((a) => `<option value="${a.id}">${escapeHtml(mailboxLabel(a))}</option>`).join("");
   // Default sender: the email at the top of your list (Profile -> Edit), if
   // it's connected; otherwise your first connected one.
   const topEmail = (profile.email || "").toLowerCase();
   const defaultAccountId =
     accountId ||
-    usable.find((a) => a.owner_id === profile.id && (a.email_address || "").toLowerCase() === topEmail)?.id ||
-    usable.find((a) => a.owner_id === profile.id)?.id ||
+    usable.find((a) => a.mine && (a.email_address || "").toLowerCase() === topEmail)?.id ||
+    usable.find((a) => a.mine && !(quotaCache.get(a.id) && quotaCache.get(a.id).left <= 0))?.id ||
+    usable.find((a) => a.mine)?.id ||
     usable[0]?.id;
   if (defaultAccountId) els.composeFromSelect.value = defaultAccountId;
   els.composeFromRow.classList.toggle("hidden", mode === "reply");
@@ -1008,18 +1060,63 @@ function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }
   els.composeModal.classList.remove("hidden");
   lockPageScroll();
   els.composeToInput.focus();
+  refreshComposeQuota(usable);
 }
+
+// Remaining sends today per mailbox (rpc mailbox_daily_quota). Cached per page load, dropped after each send.
+let quotaCache = new Map();
+function currentComposeAccountId() {
+  return pendingCompose?.mode === "reply" && pendingCompose.accountId ? pendingCompose.accountId : els.composeFromSelect.value;
+}
+function renderComposeQuota() {
+  const note = document.getElementById("composeQuotaNote");
+  const id = currentComposeAccountId();
+  const a = acctById(id);
+  const q = quotaCache.get(id);
+  let text = "";
+  let full = false;
+  if (q) {
+    full = q.left <= 0;
+    text = full
+      ? `${a?.email_address || "This mailbox"} has reached its daily limit (${q.sent} sent${q.scheduled ? `, ${q.scheduled} scheduled` : ""} of ${q.daily_limit}). Pick another mailbox or try again later.`
+      : `${q.left} of ${q.daily_limit} sends left today from ${a?.email_address || "this mailbox"}${q.scheduled ? ` (${q.scheduled} scheduled)` : ""}.`;
+  }
+  if (a?.send_paused_reason) text += `${text ? " " : ""}Sending is paused on this mailbox: ${a.send_paused_reason}`;
+  note.textContent = text;
+  note.classList.toggle("hidden", !text);
+  note.classList.toggle("full", full);
+  els.composeSendBtn.disabled = full;
+  [...els.composeFromSelect.options].forEach((o) => {
+    const oq = quotaCache.get(o.value);
+    const base = mailboxLabel(acctById(o.value));
+    o.textContent = oq ? `${base} — ${oq.left}/${oq.daily_limit} left today` : base;
+    o.disabled = !!oq && oq.left <= 0 && o.value !== els.composeFromSelect.value;
+  });
+}
+async function refreshComposeQuota(usable) {
+  const own = usable.filter((a) => a.mine).map((a) => a.id);
+  const ids = [...new Set([...own, currentComposeAccountId()].filter(Boolean))].slice(0, 12);
+  quotaCache = new Map([...quotaCache].filter(([k]) => !ids.includes(k)));
+  (await loadQuotas(ids)).forEach((v, k) => quotaCache.set(k, v));
+  if (pendingCompose) renderComposeQuota();
+}
+els.composeFromSelect.addEventListener("change", async () => {
+  const id = els.composeFromSelect.value;
+  if (!quotaCache.has(id)) (await loadQuotas([id])).forEach((v, k) => quotaCache.set(k, v));
+  if (pendingCompose) renderComposeQuota();
+});
 function closeCompose() {
   els.composeModal.classList.add("hidden");
   unlockPageScroll();
   pendingCompose = null;
+  els.composeSendBtn.disabled = false;
 }
 els.composeCancelBtn.addEventListener("click", closeCompose);
 els.composeCloseBtn.addEventListener("click", closeCompose);
 els.composeFabBtn.addEventListener("click", () => openCompose({ mode: "new" }));
 
 els.composeSendBtn.addEventListener("click", async () => {
-  const accountId = els.composeFromSelect.value;
+  const accountId = currentComposeAccountId();
   const to = els.composeToInput.value.split(",").map((s) => s.trim()).filter(Boolean);
   const cc = els.composeCcInput.value.split(",").map((s) => s.trim()).filter(Boolean);
   const subject = els.composeSubjectInput.value.trim();
@@ -1052,6 +1149,7 @@ els.composeSendBtn.addEventListener("click", async () => {
   });
   els.composeSendBtn.disabled = false;
   els.composeSendBtn.textContent = "Send";
+  quotaCache.delete(accountId);
 
   if (error || data?.error) {
     return showError(els.composeError, error || new Error(data.error));
@@ -1074,8 +1172,10 @@ els.composeSendBtn.addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 
 await loadAccounts();
+setupInboxUi();
 updateTitle();
 await loadThreadList();
+refreshUnread().catch(() => {});
 
 // Auto-sync on opening the Messages tab (team leads/admins only — an intern
 // has no mailboxes of their own, and email-sync rejects them anyway). Runs

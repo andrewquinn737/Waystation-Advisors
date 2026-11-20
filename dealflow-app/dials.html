@@ -23,6 +23,7 @@
   })();
 </script>
 <link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/copyReview.css" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
@@ -192,6 +193,7 @@
            dial_lists.buyer_id) is attached to. See openClientMenu() in
            js/dials.js. -->
       <button type="button" class="page-header-menu-item hidden" id="dialTabClientBtn">Client</button>
+      <button type="button" class="page-header-menu-item" id="dialTabSeqBtn">Run sequence setup</button>
       <button type="button" class="page-header-menu-item danger" id="dialTabDeleteBtn">Delete</button>
     </div>
 
@@ -215,6 +217,7 @@
       <div class="dial-tab-transfer-list" id="dialTabClientList"></div>
     </div>
 
+    <div id="copyBanner"></div>
     <div id="dialsTableWrap"></div>
   </main>
 

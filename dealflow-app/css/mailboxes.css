@@ -1,0 +1,63 @@
+/* Mailboxes admin page (mailboxes.html / js/mailboxAdmin.js) */
+.mbx-main { max-width: 1080px; }
+.mbx-head-actions { display: flex; gap: 8px; }
+.mbx-muted { color: var(--text-muted); font-size: 13px; margin: 4px 0 10px; line-height: 1.45; }
+.mbx-denied { padding: 40px 0; text-align: center; font-size: 16px; color: var(--text-muted); }
+.mbx-msg { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius); font-size: 13px; background: #fdecec; border: 1px solid #f7d2ce; color: #8a2b24; }
+.mbx-msg.ok { background: #e7f8ee; border-color: #c9ebd4; color: #14683a; }
+.mbx-summary { margin: 4px 0 12px; font-size: 13px; color: var(--text-muted-strong); }
+.mbx-panel { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px; margin: 0 0 16px; }
+.mbx-panel h2 { font-size: 15px; margin: 0 0 4px; }
+.mbx-panel textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.mbx-panel code, .mbx-api pre { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.mbx-api summary, .mbx-one summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.mbx-api pre { background: #f6f4ee; border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre; margin: 8px 0; }
+.mbx-one { margin: 10px 0; }
+.mbx-one-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.mbx-check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 10px 0; }
+.mbx-check input { width: auto; }
+.mbx-row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.mbx-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.mbx-toolbar input { flex: 1 1 200px; min-width: 0; }
+.mbx-toolbar select { flex: 0 1 170px; width: auto; }
+.mbx-toolbar input { width: auto; }
+.mbx-bulk { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 10px; border: 1px solid var(--gold); background: var(--gold-soft); border-radius: var(--radius); font-size: 13px; }
+.mbx-bulk select { flex: 1 1 160px; min-width: 0; width: auto; }
+.mbx-group { margin-bottom: 18px; }
+.mbx-group-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+.mbx-group-head.warn { color: var(--warn); }
+.mbx-group-count { font-weight: 400; color: var(--text-muted); }
+.mbx-card { display: grid; grid-template-columns: 24px minmax(0, 2.2fr) minmax(0, 1.4fr) 92px 70px 64px 78px 104px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); margin-bottom: 6px; font-size: 13px; }
+.mbx-card.paused { background: #fff8ec; }
+.mbx-card input[type="checkbox"] { width: 16px; height: 16px; margin: 0; }
+.mbx-card select, .mbx-card input[type="number"] { width: 100%; min-width: 0; box-sizing: border-box; font-size: 13px; padding: 5px 6px; }
+.mbx-addr { min-width: 0; }
+.mbx-addr b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mbx-addr small { color: var(--text-muted); }
+.mbx-badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--border); margin-right: 4px; }
+.mbx-badge.good { background: #e7f8ee; border-color: #c9ebd4; color: #14683a; }
+.mbx-badge.warn { background: #fff2d6; border-color: #f6e0b2; color: #8a5a00; }
+.mbx-badge.bad { background: #fdecec; border-color: #f7d2ce; color: #8a2b24; }
+.mbx-usage { font-variant-numeric: tabular-nums; text-align: center; }
+.mbx-usage.full { color: var(--danger); font-weight: 700; }
+.mbx-sync { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted-strong); }
+.mbx-empty, .mbx-loading { padding: 28px 0; text-align: center; color: var(--text-muted); }
+.mbx-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+.mbx-table th, .mbx-table td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.mbx-table-wrap { overflow-x: auto; }
+.mbx-st-error { color: var(--danger); }
+.mbx-st-ok { color: var(--success); }
+
+@media (max-width: 720px) {
+  .mbx-main { padding: 14px 12px 84px; }
+  .mbx-one-grid { grid-template-columns: 1fr 1fr; }
+  .mbx-card { grid-template-columns: 24px repeat(3, minmax(0, 1fr)); grid-template-areas: "chk addr addr usage" "owner owner owner owner" "mand mand lim lim" "pause pause sync sync"; row-gap: 6px; }
+  .mbx-card > .c-chk { grid-area: chk; }
+  .mbx-card > .mbx-addr { grid-area: addr; }
+  .mbx-card > .mbx-usage { grid-area: usage; }
+  .mbx-card > .c-owner { grid-area: owner; }
+  .mbx-card > .c-mand { grid-area: mand; }
+  .mbx-card > .c-lim { grid-area: lim; }
+  .mbx-card > .c-pause { grid-area: pause; }
+  .mbx-card > .mbx-sync { grid-area: sync; }
+}

@@ -329,3 +329,21 @@ export function wireAccountsVisiblePopup({ menuBtn, popupEl, bodyEl, closeBtn, c
     popupEl.classList.add("hidden");
   });
 }
+
+// Programmatic setter for pages that build their own picker UI (Messages' mailbox picker). ids = array/Set of ids,
+// or null for "everyone". Persists under the same storage key + "_initialized" flag the popup above uses.
+export function setVisibleAccountIds(ids, storageKey = KEY) {
+  const initKey = storageKey === KEY ? INIT_KEY : `${storageKey}_initialized`;
+  load(storageKey);
+  stateFor(storageKey).visibleAccountIds = ids === null ? null : new Set(ids);
+  persist(storageKey, initKey);
+}
+
+export function isVisibleSelectionInitialized(storageKey = KEY) {
+  const initKey = storageKey === KEY ? INIT_KEY : `${storageKey}_initialized`;
+  try {
+    return !!localStorage.getItem(initKey);
+  } catch {
+    return false;
+  }
+}

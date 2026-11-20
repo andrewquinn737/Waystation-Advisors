@@ -9,7 +9,7 @@
 //   attachment: { kind, uid, index } -> { filename, content_type, base64 }
 // kind: inbox | sent | spam | trash | drafts | scheduled
 //
-// Access: the mailbox's owner or an admin (same rule as email-send), by the
+// Access: the mailbox's owner, an admin, or the team lead of the owner's team (read-only), by the
 // caller's own JWT. Read-only — EXAMINE + BODY.PEEK, so nothing is marked
 // read or changed on the server.
 
@@ -59,7 +59,15 @@ async function handle(req: Request): Promise<Response> {
   const { data: account } = await admin.from("email_accounts").select("*").eq("id", account_id).maybeSingle();
   if (!account) return jsonResponse({ error: "That email account was not found." }, 404);
   const { data: prof } = await admin.from("profiles").select("role").eq("id", caller.user.id).single();
-  if (account.owner_id !== caller.user.id && prof?.role !== "admin") return jsonResponse({ error: "You don't have access to that mailbox." }, 403);
+  let allowed = account.owner_id === caller.user.id || prof?.role === "admin";
+  if (!allowed && prof?.role === "team_lead") {
+    // A team lead may read (never send from) the mailboxes of interns/independent leads on any team they lead —
+    // same rule as the is_team_lead_of() RLS helper used for email_accounts/email_messages.
+    const { data: teamIds } = await admin.rpc("my_team_ids", { uid: caller.user.id });
+    const { data: ownerProf } = await admin.from("profiles").select("role, team_id").eq("id", account.owner_id).single();
+    allowed = !!ownerProf?.team_id && ["intern", "independent_lead"].includes(ownerProf.role) && (teamIds || []).includes(ownerProf.team_id);
+  }
+  if (!allowed) return jsonResponse({ error: "You don't have access to that mailbox." }, 403);
 
   const c = await imapConnect(account.imap_host, account.imap_port);
   try {

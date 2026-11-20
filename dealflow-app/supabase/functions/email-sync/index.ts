@@ -288,8 +288,8 @@ Deno.serve(async (req: Request) => {
     const { data: callerData, error: callerErr } = await admin.auth.getUser(jwt);
     if (callerErr || !callerData?.user) return jsonResponse({ error: "Your session isn't valid." }, 401);
     const { data: callerProfile } = await admin.from("profiles").select("role").eq("id", callerData.user.id).single();
-    if (!callerProfile || !["team_lead", "admin"].includes(callerProfile.role)) {
-      return jsonResponse({ error: "Only team leads and admins can sync mail." }, 403);
+    if (!callerProfile || !["team_lead", "admin", "intern", "independent_lead"].includes(callerProfile.role)) {
+      return jsonResponse({ error: "You can't sync mail." }, 403);
     }
     if (callerProfile.role !== "admin") ownerFilter = callerData.user.id;
   }

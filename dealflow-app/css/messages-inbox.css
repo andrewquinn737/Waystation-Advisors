@@ -1,0 +1,14 @@
+/* Messages: mailbox picker, address chips, sequence badges, read-only banner, quota note. */
+.mailbox-unread-badge { margin-left: auto; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; flex-shrink: 0; }
+.mailbox-group-row { display: flex; align-items: center; gap: 8px; }
+.mailbox-group-toggle { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 4px 0; font: inherit; font-weight: 700; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailbox-row { display: flex; align-items: center; gap: 8px; padding-left: 26px; }
+.mailbox-row-addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailbox-filter { width: 100%; box-sizing: border-box; margin-top: 8px; }
+.message-mailbox-chip { display: inline-block; max-width: 100%; margin-top: 2px; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.message-seq-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--gold-soft); color: var(--accent); font-size: 11px; font-weight: 700; vertical-align: middle; }
+.message-seq-badge.replied { background: #fdecc8; color: #8a5a00; }
+.message-thread-row.readonly { opacity: .92; }
+.readonly-banner { margin: 0 0 10px; padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--border); color: var(--text-muted); font-size: 12.5px; }
+.compose-quota-note { margin: 0 0 8px; font-size: 12.5px; color: var(--text-muted); }
+.compose-quota-note.full { color: var(--danger); font-weight: 600; }

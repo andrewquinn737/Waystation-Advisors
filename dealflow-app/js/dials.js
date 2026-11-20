@@ -29,6 +29,7 @@ import { skeletonListHtml } from "./placeholders.js";
 import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 import { keepRecordingForDial, discardRecordingsForDial, signedRecordingUrl } from "./callRecordings.js";
+import { renderCopyBanner, seqBadgeHTML, seqPanelHTML, wireSeqPanel, mountMandatePicker, defaultMandateForBuyer, prepareList, describePrepare, runSequenceSetupFlow } from "./copyReview.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -216,6 +217,8 @@ const els = {
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
   addTabBtn: document.getElementById("addTabBtn"),
   dialsTableWrap: document.getElementById("dialsTableWrap"),
+  copyBanner: document.getElementById("copyBanner"),
+  dialTabSeqBtn: document.getElementById("dialTabSeqBtn"),
   dialModalBackdrop: document.getElementById("dialModalBackdrop"),
   dialModalHeader: document.getElementById("dialModalHeader"),
   dialModalError: document.getElementById("dialModalError"),
@@ -605,7 +608,11 @@ const DIAL_FIELD_ALIASES = {
   email_1_greeting: ["email 1 greeting"],
   email_1_pitch: ["email 1 pitch"],
   email_1_cta: ["email 1 cta", "email 1 call to action"],
-  email_subject: ["subject", "email subject", "subject line"],
+  email_subject: ["subject", "email subject", "subject line", "email 1 subject", "first email subject", "subject 1", "email subject line"],
+  // Whole-email columns (copy written offline, uploaded with the list). Used as-is;
+  // the greeting/pitch/CTA part columns above still win when a CSV has those instead.
+  email_1: ["email 1", "email1", "email 1 body", "first email", "first email body", "email body", "email one"],
+  email_2: ["email 2", "email2", "follow up", "followup", "follow up email", "followup email", "follow up body", "second email", "email two"],
   email_2_greeting: ["email 2 greeting"],
   email_2_body: ["email 2 body"],
 };
@@ -1277,6 +1284,13 @@ els.dialTabArchiveBtn.addEventListener("click", () => {
   setListArchived(archiveMenuTabId, currentStatus === "current");
 });
 
+els.dialTabSeqBtn.addEventListener("click", async () => {
+  if (!archiveMenuTabId) return;
+  const list = allLists.find((l) => l.id === archiveMenuTabId);
+  closeArchiveMenu();
+  if (list) await runSequenceSetupFlow(list, loadLists);
+});
+
 els.dialTabDeleteBtn.addEventListener("click", () => {
   if (!archiveMenuTabId) return;
   const tabId = archiveMenuTabId;
@@ -1909,13 +1923,41 @@ function openImportDialsModal() {
   els.importDialsFileInput.value = "";
   selectedImportFiles = [];
   els.importDialsModal.classList.remove("hidden");
+  resetImportResult();
+  importMandate = mountMandatePicker(els.importDialsImportBtn.parentNode);
   // Same seller-tab-only buyer attachment as els.addTabBtn's click handler
   // above.
   const isBuyerTab = currentType === "buyer";
   els.importDialsBuyerRow.classList.toggle("hidden", isBuyerTab);
-  if (!isBuyerTab) populateBuyerSelect(els.importDialsBuyerSelect);
+  if (isBuyerTab) importMandate.hide();
+  else populateBuyerSelect(els.importDialsBuyerSelect);
 }
 
+// ---- email-sequence additions to the import flow (see js/copyReview.js) ----
+let importMandate = { get: () => null, set() {}, hide() {}, flagMissing() {} };
+function resetImportResult() {
+  document.getElementById("importDialsResult")?.remove();
+  els.importDialsImportBtn.classList.remove("hidden");
+  els.importDialsCancelBtn.textContent = "Cancel";
+}
+function showImportResult(items, failures) {
+  resetImportResult();
+  const box = document.createElement("div");
+  box.id = "importDialsResult";
+  box.className = "cr-import-result";
+  box.innerHTML = items
+    .map((it) => `<div class="f"><b>${escapeHtml(it.name)}</b><br>${it.error ? `<span class="bad">Sequence setup failed: ${escapeHtml(it.error)}. Use "Run sequence setup" in the list menu.</span>` : escapeHtml(describePrepare(it.result))}</div>`)
+    .join("");
+  els.importDialsImportBtn.parentNode.parentNode.insertBefore(box, els.importDialsImportBtn.parentNode);
+  els.importDialsImportBtn.classList.add("hidden");
+  els.importDialsCancelBtn.textContent = "Done";
+}
+
+els.importDialsBuyerSelect.addEventListener("change", () => {
+  const sel = els.importDialsBuyerSelect;
+  const m = defaultMandateForBuyer(sel.options[sel.selectedIndex]?.textContent);
+  if (m) importMandate.set(m);
+});
 els.menuImportBtn.addEventListener("click", () => {
   closePageHeaderMenu();
   openImportDialsModal();
@@ -1974,7 +2016,15 @@ wireImportDropzone();
 els.importDialsImportBtn.addEventListener("click", async () => {
   if (!selectedImportFiles.length) return;
   els.importDialsError.classList.add("hidden");
+  const mandate = currentType === "buyer" ? null : importMandate.get();
+  if (currentType !== "buyer" && !mandate) {
+    importMandate.flagMissing();
+    els.importDialsError.textContent = "Pick what this list is for: M&A or Data sales.";
+    els.importDialsError.classList.remove("hidden");
+    return;
+  }
   els.importDialsImportBtn.disabled = true;
+  const seqResults = [];
 
   // sort_order is computed once up front and incremented locally (rather
   // than re-reading allLists.length each iteration, which stays stale until
@@ -2005,6 +2055,7 @@ els.importDialsImportBtn.addEventListener("click", async () => {
           sort_order: sortOrder,
           // Same reasoning as createNewList's own buyer_id — see there.
           buyer_id: currentType === "seller" ? els.importDialsBuyerSelect.value || null : null,
+          ...(mandate ? { mandate } : {}),
         })
         .select()
         .single();
@@ -2019,6 +2070,12 @@ els.importDialsImportBtn.addEventListener("click", async () => {
       if (insertErr) throw insertErr;
 
       lastNewListId = newList.id;
+      // Classify rows into email vs call sequences (seq_prepare_list). A failure here
+      // must not fail the import itself: rows are in, setup can be re-run from the list menu.
+      if (mandate) {
+        try { seqResults.push({ name: tabName, result: await prepareList(newList.id) }); }
+        catch (e) { seqResults.push({ name: tabName, error: e.message || String(e) }); }
+      }
     } catch (err) {
       failures.push(`${file.name} (${err.message || "could not import"})`);
     }
@@ -2052,6 +2109,9 @@ els.importDialsImportBtn.addEventListener("click", async () => {
     els.importDialsError.textContent = `${failures.length} of ${totalAttempted} file(s) failed — ${failures.join("; ")}. Re-select just those to try again.`;
     els.importDialsError.classList.remove("hidden");
     els.importDialsImportBtn.disabled = false;
+    if (seqResults.length) showImportResult(seqResults, failures);
+  } else if (seqResults.length) {
+    showImportResult(seqResults, failures);
   } else {
     els.importDialsModal.classList.add("hidden");
   }
@@ -2640,7 +2700,12 @@ function searchTabName(d) {
   return allLists.find((l) => l.id === d.list_id)?.name || "";
 }
 
+function refreshCopyBanner() {
+  renderCopyBanner(els.copyBanner, allLists.find((l) => l.id === currentListId), { onChanged: async () => { await loadLists(); } });
+}
+
 async function loadDials() {
+  refreshCopyBanner();
   if (dialSearchQuery.trim() && (await loadSearchPool())) {
     renderDialsTable();
     return;
@@ -2767,7 +2832,7 @@ function renderDialsTable() {
             (d, i) => `
           <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             ${selectMode ? `<td>${selectCircleHTML(d)}</td>` : ""}
-            <td data-label="Name">${escapeHtml(dialDisplayName(d))}</td>
+            <td data-label="Name">${escapeHtml(dialDisplayName(d))}${seqBadgeHTML(d)}</td>
             <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</td>
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
             <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || "—")}</td>
@@ -2788,7 +2853,7 @@ function renderDialsTable() {
           (d, i) => `
         <div class="mobile-card clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
           <div class="mc-main">
-            <div class="mc-name">${escapeHtml(dialDisplayName(d))}</div>
+            <div class="mc-name">${escapeHtml(dialDisplayName(d))}${seqBadgeHTML(d)}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</div>
           </div>
           ${
@@ -3057,6 +3122,7 @@ function renderDialModal() {
       <div class="dial-modal-header-main">
         <h2>${escapeHtml(isCreate ? "New dial" : dialDisplayName(currentDial))}</h2>
         ${subtitleHTML ? `<div class="dial-modal-subtitle">${subtitleHTML}</div>` : ""}
+        ${isViewingExisting ? seqPanelHTML(currentDial) : ""}
       </div>
       <div class="dial-modal-header-right">
         <div class="dial-modal-header-actions">
@@ -3103,6 +3169,14 @@ function renderDialModal() {
     </div>
   `;
   document.getElementById("dialModalClose").addEventListener("click", closeDialModal);
+  if (isViewingExisting) {
+    wireSeqPanel(currentDial, (d) => {
+      const i = dials.findIndex((x) => x.id === d.id);
+      if (i >= 0) Object.assign(dials[i], { seq_state: d.seq_state, seq_stop_reason: d.seq_stop_reason });
+      renderDialModal();
+      renderDialsTable();
+    });
+  }
   if (isViewingExisting) {
     if (showScheduleIntroBtn) {
       document.getElementById("scheduleIntroCallFromDialBtn").addEventListener("click", () => handleScheduleIntroCallFromDial(currentDial));

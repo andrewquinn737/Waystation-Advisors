@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Mailboxes — Waystation Advisors</title>
+<script>
+  (function () {
+    var ua = navigator.userAgent || navigator.vendor || "";
+    var isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile/i.test(ua);
+    var isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    document.documentElement.classList.add(isMobileUA || isIpadOS ? "is-mobile-device" : "is-desktop-device");
+  })();
+</script>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/mailboxes.css" />
+<link rel="icon" href="favicon.ico" sizes="any" />
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
+<link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
+<script src="js/pwa.js" defer></script>
+<script src="js/noZoom.js" defer></script>
+</head>
+<body data-page="mailboxes.html">
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content"><p class="mbx-muted" style="padding:24px">Loading...</p></div></div>
+  <script type="module">
+    import { skeletonTopnavHtml } from "./js/placeholders.js";
+    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
+  </script>
+  <nav class="topnav" id="topnav"></nav>
+
+  <main class="mbx-main">
+    <div class="page-header">
+      <div class="page-header-left"><h1>Mailboxes</h1></div>
+      <div class="mbx-head-actions">
+        <button type="button" class="btn secondary small" id="mbxRefresh">Refresh</button>
+        <button type="button" class="btn small" id="mbxAddToggle">Add mailboxes</button>
+      </div>
+    </div>
+
+    <p class="mbx-denied hidden" id="mbxDenied">Admins only.</p>
+    <div id="mbxApp" class="hidden">
+      <div class="mbx-msg hidden" id="mbxMsg" role="alert"></div>
+      <p class="mbx-summary" id="mbxSummary" aria-live="polite"></p>
+
+      <section class="mbx-panel hidden" id="mbxAddPanel">
+        <h2>Add mailboxes</h2>
+        <p class="mbx-muted">Paste one mailbox per line (CSV or tab-separated, e.g. from a spreadsheet):
+          <code>email, password, display name, owner, limit, mandate</code>. Only email and password are required.
+          Owner can be an email or a full name; with none, the display name is matched to a person, else it goes to Unassigned.
+          Hosts are filled in for Microsoft 365 and Google automatically.</p>
+        <textarea id="mbxPaste" rows="6" spellcheck="false" placeholder="sam@example-sales.com, Pw-here, Sam Lee, , 25, ma"></textarea>
+        <details class="mbx-one">
+          <summary>Add one by hand</summary>
+          <div class="mbx-one-grid">
+            <input id="oneEmail" type="email" placeholder="Email" autocomplete="off" />
+            <input id="onePass" type="text" placeholder="Password" autocomplete="off" />
+            <input id="oneName" type="text" placeholder="Display name (optional)" />
+            <input id="oneOwner" type="text" placeholder="Owner name or email (optional)" />
+            <input id="oneLimit" type="number" min="0" max="200" placeholder="Daily limit" />
+            <select id="oneMandate"><option value="">Mandate: any</option><option value="ma">M&amp;A</option><option value="data">Data</option></select>
+            <button type="button" class="btn secondary small" id="oneAdd">Add to list</button>
+          </div>
+        </details>
+        <label class="mbx-check"><input type="checkbox" id="mbxVerify" /> Check logins against the mail server (max 25 rows; slow)</label>
+        <div class="mbx-row-actions">
+          <button type="button" class="btn secondary small" id="mbxPreview">Preview (nothing saved)</button>
+          <button type="button" class="btn small" id="mbxImport" disabled>Import</button>
+        </div>
+        <div id="mbxPreviewOut"></div>
+      </section>
+
+      <div class="mbx-toolbar">
+        <input id="mbxSearch" type="search" placeholder="Search address or owner" />
+        <select id="mbxFilterStatus">
+          <option value="">All mailboxes</option>
+          <option value="unassigned">Unassigned only</option>
+          <option value="paused">Paused only</option>
+        </select>
+        <select id="mbxFilterMandate">
+          <option value="">Any mandate</option>
+          <option value="ma">M&amp;A</option>
+          <option value="data">Data</option>
+          <option value="none">No mandate</option>
+        </select>
+        <select id="mbxFilterDomain"><option value="">All domains</option></select>
+      </div>
+      <div class="mbx-bulk hidden" id="mbxBulk">
+        <span id="mbxSelCount"></span>
+        <select id="mbxBulkOwner"></select>
+        <button type="button" class="btn small" id="mbxBulkAssign">Assign</button>
+        <button type="button" class="btn secondary small" id="mbxSelClear">Clear</button>
+      </div>
+
+      <div id="mbxList"></div>
+
+      <details class="mbx-panel mbx-api" id="mbxApi">
+        <summary>API for AI tools and bulk use</summary>
+        <p class="mbx-muted">Same actions as this page: <code>bulk_upsert</code> (supports <code>dry_run</code>), <code>assign</code>, <code>update</code>, <code>remove</code>, <code>list</code>. Passwords are write-only.
+          Full reference: <code>docs/MAILBOX_ADMIN_API.md</code>.</p>
+        <pre id="mbxCurl"></pre>
+        <div class="mbx-row-actions">
+          <button type="button" class="btn secondary small" id="mbxShowKey">Show API key</button>
+          <button type="button" class="btn secondary small hidden" id="mbxCopyCurl">Copy command</button>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <script type="module">
+    import "./js/mailboxAdmin.js";
+  </script>
+</body>
+</html>

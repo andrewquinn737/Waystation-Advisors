@@ -150,7 +150,8 @@ create table if not exists public.sequence_tasks (
   unique (dial_id, step)
 );
 create index if not exists sequence_tasks_owner_due_idx on public.sequence_tasks (owner_id, due_on) where status in ('pending','queued');
-create index if not exists sequence_tasks_dispatch_idx on public.sequence_tasks (due_on) where status = 'pending' and kind in ('email','followup_email');
+create index if not exists sequence_tasks_dispatch_idx on public.sequence_tasks (owner_id, due_on) where status = 'pending' and kind in ('email','followup_email');
+drop index if exists public.sequence_tasks_dispatch_idx_old;
 alter table public.sequence_tasks enable row level security;
 drop policy if exists sequence_tasks_select on public.sequence_tasks;
 create policy sequence_tasks_select on public.sequence_tasks for select using (owner_id = auth.uid() or is_admin() or is_team_lead_of(owner_id));
@@ -249,28 +250,35 @@ $$;
 -- The list owner (or their lead/admin) approves the uploaded copy once; sequences start.
 create or replace function public.approve_list_copy(p_list_id uuid) returns jsonb
  language plpgsql security definer set search_path to 'public' as $$
-declare v_list record; n int := 0; n_skip int := 0; r record; v_sender uuid; v_day0 date;
+declare v_list record; n int := 0; n_skip int := 0; r record; v_day0 date; v_boxes int;
 begin
   select * into v_list from dial_lists where id = p_list_id;
   if v_list is null then raise exception 'List not found'; end if;
   if not (auth.uid() = v_list.created_by or is_admin() or is_team_lead_of(v_list.created_by)) then
     raise exception 'Only the list owner, their team lead, or an admin can approve this copy';
   end if;
-  -- first email goes out today if it's a business day and still inside the send window, else next business day
+  select count(*) into v_boxes from email_accounts a
+   where a.owner_id = v_list.created_by and not a.needs_assignment and coalesce(a.send_paused_reason,'') = ''
+     and (v_list.mandate is null or a.mandate is null or a.mandate = v_list.mandate);
+  if v_boxes = 0 then
+    raise exception 'The list owner has no sending mailbox for this kind of outreach yet. Ask an admin to assign one.';
+  end if;
+  -- first email goes out today if it's a business day before 3pm MT, else the next business day
   v_day0 := case when is_business_day(denver_today()) and extract(hour from now() at time zone 'America/Denver') < 15
                  then denver_today() else next_business_day(denver_today() + 1) end;
   for r in select * from dials where list_id = p_list_id and sequence = 'email5' and seq_state = 'awaiting_copy' loop
     if coalesce(btrim(r.email_1),'') = '' or coalesce(btrim(r.email_subject),'') = '' or coalesce(btrim(r.email_2),'') = '' then
       n_skip := n_skip + 1; continue;   -- stays awaiting_copy; shows as "missing copy"
     end if;
-    v_sender := coalesce(r.sender_account_id, seq_pick_sender(r.created_by, v_list.mandate));
-    if v_sender is null then raise exception 'The list owner has no sending mailbox for this mandate. Assign one first.'; end if;
-    update dials set seq_state = 'active', seq_day0 = v_day0, sender_account_id = v_sender where id = r.id;
+    update dials set seq_state = 'active', seq_day0 = v_day0 where id = r.id;   -- sender picked at send time
     perform seq_build_tasks(r.id);
     n := n + 1;
   end loop;
   update dial_lists set copy_status = 'approved', copy_approved_at = now(), copy_approved_by = auth.uid() where id = p_list_id;
-  return jsonb_build_object('started', n, 'missing_copy', n_skip, 'first_send_day', v_day0);
+  return jsonb_build_object('started', n, 'missing_copy', n_skip, 'first_send_day', v_day0, 'mailboxes', v_boxes,
+                            'daily_capacity', (select coalesce(sum(coalesce(daily_send_limit, mailbox_daily_limit())),0) from email_accounts a
+                               where a.owner_id = v_list.created_by and not a.needs_assignment and coalesce(a.send_paused_reason,'') = ''
+                                 and (v_list.mandate is null or a.mandate is null or a.mandate = v_list.mandate)));
 end $$;
 
 -- ---------------------------------------------------------------- intern actions
@@ -337,47 +345,57 @@ create trigger dials_seq_on_status after update of contact_status on public.dial
 -- Every 5 min: queue due email steps inside the send window (weekdays 8:00-17:00 Denver).
 -- At most one queued send per mailbox per run, so sends trickle out (no bursts).
 drop function if exists public.sequence_dispatch();
+-- Every 5 min: for each sending mailbox with room today, queue ONE due email step of its owner
+-- (follow-ups first, they are time-sensitive). First emails take whichever of the owner's eligible
+-- mailboxes has room; after that the lead is pinned to that mailbox so the follow-up threads.
+-- Send window: weekdays 8:00-17:00 Denver.
 create or replace function public.sequence_dispatch(p_now timestamptz default now()) returns int
  language plpgsql security definer set search_path to 'public' as $$
-declare t record; n int := 0; v_now_den timestamp := p_now at time zone 'America/Denver';
-  v_used int; v_lim int; v_subject text; v_body text; v_seen uuid[] := '{}'; v_sid uuid;
+declare m record; t record; n int := 0; v_now_den timestamp := p_now at time zone 'America/Denver';
+  v_today date := (p_now at time zone 'America/Denver')::date; v_subject text; v_body text; v_sid uuid;
 begin
-  if not is_business_day(v_now_den::date) or extract(hour from v_now_den) < 8 or extract(hour from v_now_den) >= 17 then
+  if not is_business_day(v_today) or extract(hour from v_now_den) < 8 or extract(hour from v_now_den) >= 17 then
     return 0;
   end if;
-  for t in
-    select st.*, d.email, d.full_name, d.email_subject, d.email_1, d.email_2, d.sender_account_id,
-           d.email_1_message_id, d.email_1_thread_id, d.created_by as dial_owner, l.copy_status
-      from sequence_tasks st join dials d on d.id = st.dial_id join dial_lists l on l.id = st.list_id
-     where st.status = 'pending' and st.kind in ('email','followup_email') and st.due_on <= v_now_den::date
-       and d.seq_state = 'active' and l.copy_status = 'approved' and l.deleted_at is null
-     order by st.due_on, st.step, st.created_at
-     for update of st skip locked
-     limit 200
+  for m in
+    select a.id, a.owner_id, a.mandate, c.sent + c.scheduled as used, c.daily_limit
+      from email_accounts a cross join lateral mailbox_send_counts(a.id) c
+     where not a.needs_assignment and coalesce(a.send_paused_reason,'') = ''
+       and c.sent + c.scheduled < c.daily_limit
+       and exists (select 1 from sequence_tasks st where st.owner_id = a.owner_id and st.status = 'pending'
+                     and st.kind in ('email','followup_email') and st.due_on <= v_today)
+     order by c.sent + c.scheduled, a.id
   loop
-    continue when t.sender_account_id is null or t.sender_account_id = any (v_seen);
-    -- follow-up only after the first email really went out, threaded under it
-    if t.kind = 'followup_email' and t.email_1_message_id is null then continue; end if;
-    select c.sent + c.scheduled, c.daily_limit into v_used, v_lim from mailbox_send_counts(t.sender_account_id) c;
-    if v_used >= v_lim then continue; end if;      -- full today; stays pending, retried next run/day
-    if exists (select 1 from email_accounts where id = t.sender_account_id and coalesce(send_paused_reason,'') <> '') then continue; end if;
-    v_seen := v_seen || t.sender_account_id;
+    select st.id, st.kind, st.dial_id, d.email, d.full_name, d.email_subject, d.email_1, d.email_2,
+           d.email_1_message_id, d.email_1_thread_id, d.created_by as dial_owner
+      into t
+      from sequence_tasks st join dials d on d.id = st.dial_id join dial_lists l on l.id = st.list_id
+     where st.owner_id = m.owner_id and st.status = 'pending' and st.kind in ('email','followup_email')
+       and st.due_on <= v_today and d.seq_state = 'active' and l.copy_status = 'approved' and l.deleted_at is null
+       and (l.mandate is null or m.mandate is null or l.mandate = m.mandate)
+       and ( (st.kind = 'followup_email' and d.sender_account_id = m.id and d.email_1_message_id is not null)
+          or (st.kind = 'email' and (d.sender_account_id is null or d.sender_account_id = m.id)) )
+     order by (st.kind = 'followup_email') desc, st.due_on, st.step, st.created_at
+     limit 1
+     for update of st skip locked;
+    continue when t.id is null;
     if t.kind = 'email' then
       v_subject := t.email_subject; v_body := t.email_1;
+      update dials set sender_account_id = m.id where id = t.dial_id and sender_account_id is null;
     else
       v_subject := case when t.email_subject ~* '^re:' then t.email_subject else 'Re: ' || t.email_subject end;
       v_body := t.email_2;
     end if;
     insert into scheduled_emails (created_by, account_id, dial_id, recipient_name, to_address, subject, body_text,
                                   in_reply_to, thread_id, send_at, status)
-    values (t.dial_owner, t.sender_account_id, t.dial_id, t.full_name, t.email, v_subject, v_body,
+    values (t.dial_owner, m.id, t.dial_id, t.full_name, t.email, v_subject, v_body,
             case when t.kind = 'followup_email' then t.email_1_message_id end,
             case when t.kind = 'followup_email' then t.email_1_thread_id end,
             p_now + make_interval(secs => floor(random() * 240)::int), 'pending')
     returning id into v_sid;
-    update sequence_tasks set status = 'queued', scheduled_email_id = v_sid, attempts = attempts + 1
-     where id = t.id;
+    update sequence_tasks set status = 'queued', scheduled_email_id = v_sid, attempts = attempts + 1 where id = t.id;
     n := n + 1;
+    t := null;
   end loop;
   return n;
 end $$;

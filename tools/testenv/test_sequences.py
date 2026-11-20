@@ -79,8 +79,7 @@ def run():
     code, res = rpc(CALEB, "approve_list_copy", p_list_id=lid)
     check("approve: owner approves, 2 start, 1 missing copy", code == 200 and res["started"] == 2 and res["missing_copy"] == 1, res)
     rows = q(f"select d.full_name, d.seq_state, d.sender_account_id, a.owner_id, a.mandate from dials d left join email_accounts a on a.id=d.sender_account_id where d.list_id='{lid}' and d.sequence='email5'")
-    check("approve: senders are the owner's own data mailboxes",
-          all(r["owner_id"] == uid(CALEB) and r["mandate"] == "data" for r in rows if r["seq_state"] == "active"), rows)
+    check("approve: no mailbox pinned yet (picked at send time)", all(r["sender_account_id"] is None for r in rows), rows)
     check("approve: lead without copy stays awaiting_copy", any(r["seq_state"] == "awaiting_copy" for r in rows), rows)
     code, res = rpc(CALEB, "approve_list_copy", p_list_id=lid)
     check("approve: double-click is harmless", code == 200 and res["started"] == 0, res)
@@ -104,11 +103,16 @@ def run():
     queued = q(f"select s.account_id, s.to_address, s.subject, s.in_reply_to from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id where t.list_id='{lid}'")
     check("dispatch: first emails queued in window", n1 >= 1 and len(queued) == n1, (n1, queued))
     check("dispatch: max one per mailbox per run", len({x["account_id"] for x in queued}) == len(queued), queued)
+    own = q(f"""select a.owner_id, a.mandate from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id
+                join email_accounts a on a.id=s.account_id where t.list_id='{lid}'""")
+    check("dispatch: sends only from the owner's own data mailboxes", own and all(o["owner_id"] == uid(CALEB) and o["mandate"] == "data" for o in own), own)
+    pinned = q(f"select count(*) n from dials where list_id='{lid}' and seq_state='active' and sender_account_id is not null")[0]["n"]
+    check("dispatch: lead pinned to its mailbox once queued", pinned == n1, (pinned, n1))
     check("dispatch: follow-up not queued before email 1 is sent", all(x["in_reply_to"] is None for x in queued), queued)
     n2 = q("select sequence_dispatch('2026-11-23 09:05-07') n")[0]["n"]
     n3 = q("select sequence_dispatch('2026-11-23 09:10-07') n")[0]["n"]
     total = q(f"select count(*) n from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id where t.list_id='{lid}'")[0]["n"]
-    check("dispatch: every first email eventually queued exactly once", total == 2 and n3 == 0, (n1, n2, n3, total))
+    check("dispatch: every first email queued exactly once (2 mailboxes -> both in the first run)", total == 2 and n2 == 0 and n3 == 0, (n1, n2, n3, total))
 
     # ---- 4. mailbox cap: fill one mailbox, its leads wait
     acct = q(f"select sender_account_id a from dials where list_id='{lid}' and seq_state='active' and sequence='email5' limit 1")[0]["a"]
