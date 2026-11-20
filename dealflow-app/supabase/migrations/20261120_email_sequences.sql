@@ -30,6 +30,16 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 create unique index if not exists email_accounts_address_uniq on public.email_accounts (lower(email_address));
 
+-- The 3-mailbox cap is for mailboxes people connect themselves on their profile.
+-- Admin-provisioned sending mailboxes (source set) don't count toward it.
+create or replace function public.enforce_email_account_cap() returns trigger language plpgsql as $$
+begin
+  if new.source is null and (select count(*) from email_accounts where owner_id = new.owner_id and source is null) >= 3 then
+    raise exception 'You can connect up to 3 email accounts.';
+  end if;
+  return new;
+end $$;
+
 -- per-mailbox cap (falls back to the global 25)
 create or replace function public.mailbox_send_counts(p_account_id uuid)
  returns table(sent integer, scheduled integer, daily_limit integer)
