@@ -18,10 +18,18 @@ sb.test_sql("insert into public.teams (name, sort_order) select x, o from (value
 teams = {r["name"]: r["id"] for r in sb.test_sql("select id, name from public.teams")}
 people = [("Test Admin", "admin", None), ("Taylor Lead", "team_lead", "Test Team A"),
           ("Jordan Intern", "intern", "Test Team A"), ("Riley Intern", "intern", "Test Team A"),
-          ("Casey Intern", "intern", "Test Team B")]
+          ("Casey Intern", "intern", "Test Team B"),
+          # real names from the hub's mailboxes (fake @example.com logins) so name-matching can be tested
+          ("Andrew Quinn", "team_lead", "Test Team A"), ("Jonah Johnson", "team_lead", "Test Team B"),
+          ("Austin Price", "team_lead", "Test Team B"),
+          ("Caleb Hong", "intern", "Test Team A"), ("Gavin Hopkinson", "intern", "Test Team A"),
+          ("Cteel Olsen", "intern", "Test Team A"), ("Jacob Farnsworth", "intern", "Test Team A"),
+          ("Yaseen Chaudhry", "intern", "Test Team A"), ("Daren Mumford", "intern", "Test Team B"),
+          ("Mikaela Harris", "intern", "Test Team B"), ("Harry Kouyoumjian", "intern", "Test Team B"),
+          ("Kayden Hyde", "intern", "Test Team B")]
 accts = sec.get("accounts", {})
 for name, role, team in people:
-    email = name.lower().replace(" ", ".") + "@example.com"
+    email = "test." + name.lower().replace(" ", ".") + "@example.com" if not name.startswith(("Test ","Taylor ","Jordan ","Riley ","Casey ")) else name.lower().replace(" ", ".") + "@example.com"
     pw = accts.get(email, {}).get("password") or secrets.token_urlsafe(14)
     uid = admin_create(email, pw, name)
     t = f"'{teams[team]}'" if team else "null"

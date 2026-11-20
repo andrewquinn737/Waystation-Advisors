@@ -182,7 +182,33 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     callerUserId = callerData.user.id;
   }
 
-  const { account_id, to, cc, subject, text, html, in_reply_to, thread_id, attachments } = body;
+  let { account_id, to, cc, subject, text, html, in_reply_to, thread_id, attachments } = body;
+
+  // TEST SAFETY NET. Set only on the test project (never on live):
+  // TEST_REDIRECT_TO = comma-separated allowlist. Any recipient not on it is
+  // swapped for an allowlisted address, so a test deployment can never email a
+  // real business owner. Unset = normal behavior.
+  const testSinks = (Deno.env.get("TEST_REDIRECT_TO") || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const IS_LIVE_PROJECT = (Deno.env.get("SUPABASE_URL") || "").includes("jabjrhkhnbabfihodqie");
+  if (!IS_LIVE_PROJECT && !testSinks.length) {
+    return jsonResponse({ error: "Test project without TEST_REDIRECT_TO: sending is disabled." }, 503);
+  }
+  if (testSinks.length && to?.length) {
+    const redirect = (addr: string) => {
+      const a = String(addr).trim().toLowerCase();
+      if (testSinks.includes(a)) return a;
+      let h = 0;
+      for (const ch of a) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      return testSinks[h % testSinks.length];
+    };
+    const original = [...to, ...(cc || [])].join(", ");
+    to = to.map(redirect);
+    cc = (cc || []).map(redirect);
+    if (original.toLowerCase() !== [...to, ...cc].join(", ")) {
+      subject = `[TEST to ${original}] ${subject || ""}`.trim();
+    }
+  }
   if (!account_id || !to?.length || (!text && !html)) {
     return jsonResponse({ error: "account_id, at least one recipient, and a message body are required." }, 400);
   }
@@ -394,7 +420,9 @@ Deno.serve(async (req: Request) => {
       .from("scheduled_emails")
       .update(
         sent
-          ? { status: "sent", sent_at: new Date().toISOString(), error: (j.warning as string) || null }
+          ? { status: "sent", sent_at: new Date().toISOString(), error: (j.warning as string) || null,
+              // links the queued row to the stored message (sequence threading); needs the 20261120 migration
+              ...(typeof j.message_id === "string" ? { sent_message_id: j.message_id } : {}) }
           : { status: "failed", error: String(j.error || "Send failed").slice(0, 500) }
       )
       .eq("id", ctx.scheduledId);
