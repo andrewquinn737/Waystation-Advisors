@@ -21,14 +21,15 @@ export function mountClaudeConnect(host, { profile }) {
   let shownToken = null, working = false;
 
   async function load() {
-    const { data, error } = await supabase.from("claude_connector_tokens").select("id, created_at, last_used_at, revoked_at")
+    const { data, error } = await supabase.from("claude_connector_tokens").select("id, created_at, last_used_at, revoked_at, expires_at")
       .eq("profile_id", profile.id).order("created_at", { ascending: false }).limit(1);
     if (error) { bodyEl.innerHTML = `<div class="error-msg">Could not load your link status: ${escapeHtml(msg(error))}</div><div class="cc-actions"><button type="button" class="btn secondary" data-a="retry">Try again</button></div>`; return; }
     render(data?.[0] || null);
   }
 
   function render(tok, err = "") {
-    const live = tok && !tok.revoked_at;
+    const expired = tok && !tok.revoked_at && tok.expires_at && new Date(tok.expires_at) < new Date();
+    const live = tok && !tok.revoked_at && !expired;
     let h = err ? `<div class="error-msg">${escapeHtml(err)}</div>` : "";
     if (shownToken) {
       h += `<p class="cc-warn">Treat this link like a password. It is shown only once; anyone with it can read and edit your drafts.</p>
@@ -36,10 +37,10 @@ export function mountClaudeConnect(host, { profile }) {
         <div class="cc-actions"><button type="button" class="btn" data-a="copy">Copy link</button></div>${STEPS}`;
     }
     if (live) {
-      h += `<div class="cc-status">Connected link created ${escapeHtml(when(tok.created_at))} · ${tok.last_used_at ? `last used ${escapeHtml(when(tok.last_used_at))}` : "not used yet"}</div>
+      h += `<div class="cc-status">Connected link created ${escapeHtml(when(tok.created_at))} · ${tok.last_used_at ? `last used ${escapeHtml(when(tok.last_used_at))}` : "not used yet"}${tok.expires_at ? ` · expires ${escapeHtml(when(tok.expires_at))}` : ""}</div>
         <div class="cc-actions"><button type="button" class="btn secondary" data-a="regen">Regenerate</button><button type="button" class="btn danger" data-a="disc">Disconnect</button></div>`;
     } else {
-      h += `${tok ? `<div class="cc-status">Link revoked ${escapeHtml(when(tok.revoked_at))}.</div>` : ""}${shownToken ? "" : `<div class="cc-actions"><button type="button" class="btn" data-a="create">Create my Claude link</button></div>`}`;
+      h += `${expired ? `<div class="cc-status">Your link expired ${escapeHtml(when(tok.expires_at))}. Make a new one.</div>` : tok ? `<div class="cc-status">Link revoked ${escapeHtml(when(tok.revoked_at))}.</div>` : ""}${shownToken ? "" : `<div class="cc-actions"><button type="button" class="btn" data-a="create">Create my Claude link</button></div>`}`;
     }
     bodyEl.innerHTML = h;
     bodyEl.querySelectorAll("button").forEach((b) => (b.disabled = working));
