@@ -32,4 +32,4 @@
 .today-upcoming summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
 
 .today-approve { display:flex; align-items:center; justify-content:space-between; gap:12px;
-  border:2px solid #3b5bdb; border-radius:12px; padding:12px 14px; margin:0 0 12px; background:#eef2ff; }
+  border:2px solid #3b5bdb; border-radius:12px; padding:12px 14px; margin:0 0 12px; background:rgba(59,91,219,.12); color:inherit; }
