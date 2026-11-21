@@ -77,3 +77,23 @@ personal free account). The live project (`jabjrhkhnbabfihodqie`) is never writt
 - Offline copy generator: outreach/sequence_copygen (in progress).
 - Live rollout (needs Mason's go-ahead): set CRON_SHARED_SECRET on live, run migration, deploy functions,
   merge test -> main.
+
+## 2026-11-21 session state (compact hand-off)
+Goal (Mason): imported drafts can be (a) rewritten via the person's own Claude account, (b) edited by hand,
+or (c) bulk sent. Any in-app AI MUST follow our copy guidelines. Decisions: Claude CONNECTOR (remote MCP,
+personal URL token), bulk send = send the clean ones, hold the rest. Copy writer default model = Sonnet
+(outreach/sequence_copygen in First Project; batch 3, 600s timeout; 4/7 passed on fake list).
+Done:
+- `20261121_copy_gate.sql` + edge fn `copy-gate` (runs `_shared/copyLint.js`, byte-identical to
+  `js/copyLint.js`, checked by `tools/testenv/check_shared.sh`). Nothing sends unless the server passed the
+  exact current text (copy_hash). Clients can't set copy/sequence columns (guard trigger). approve_list_copy
+  starts clean leads, holds the rest; fixed leads auto-join via copy_gate_record. copy_revisions history,
+  copy_guidelines table, claude_connector_tokens (hash only). Applied + deployed on TEST.
+- `docs/copy_guidelines/{ma_seller,data_sales,README}.md` loaded via `tools/testenv/load_guidelines.py`.
+  They list OPEN CONFLICTS for Mason (close rule, 75 vs 85 words, $ in copy, data 50+ vs 30+ employees, etc.).
+In progress (background agents): `claude-connector` edge fn + `20261121b_claude_connector.sql` +
+`tools/testenv/test_claude_connector.py` + docs/CLAUDE_CONNECTOR.md; review-screen/Profile UI for server
+statuses, "Send the N ready", Rewrite-with-Claude panel, Connect Claude card.
+Next: review both agents' work, run all suites (test_sequences.py needs copy-gate before approve now;
+load_test.py too), commit; one-command test runner + release checklist.
+Flagged to Mason: `.mcp.json` live `supabase` entry lost `--read-only` (not by me; not reverted).
