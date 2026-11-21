@@ -2702,15 +2702,11 @@ function searchTabName(d) {
   return allLists.find((l) => l.id === d.list_id)?.name || "";
 }
 
-// Dials home (Follow up now / Emails / Backup numbers) — see js/dialsHome.js.
+// Dials home (Emails bar + one priority call sheet) — see js/dialsHome.js. The sheet replaces the plain list; leads/admins can
+// switch to the plain list of every company from the page menu, and Search / Select mode always use the plain list.
 let home = null;
-// Backup numbers: the dials of a sequenced list that still need a call. Lists with no sequence at all (older lists) show
-// every dial; leads/admins can switch to every dial from the page menu, and Search always looks at everything.
-const OPEN_STATUSES = new Set(["uncontacted", "no_response", "busy_callback", "unable_to_contact"]);
 let showAll = false;
-const isSequenced = () => dials.some((d) => d.sequence);
-const backupMode = () => !showAll && !dialSearchQuery.trim() && isSequenced();
-const isBackup = (d) => (d.sequence === "backup" || d.sequence === "call3") && OPEN_STATUSES.has(d.contact_status || "uncontacted");
+const sheetMode = () => !showAll && !dialSearchQuery.trim() && !selectMode;
 // Open a company's card from a list that is not the one on screen (Follow up now rows): prev/next stay within that set.
 function openCardFrom(set, index) {
   if (index < 0 || !set[index]) return;
@@ -2770,10 +2766,8 @@ function searchPhoneDigits(q) {
 function visibleDials() {
   const q = dialSearchQuery.trim().toLowerCase();
   const qd = searchPhoneDigits(q);
-  const bm = backupMode();
   return dials.filter(
     (d) =>
-      (!bm || isBackup(d)) &&
       !hiddenStatuses.has(d.contact_status || "uncontacted") &&
       (!q ||
         (d.full_name || "").toLowerCase().includes(q) ||
@@ -2789,7 +2783,6 @@ function visibleDials() {
 // always reflects however many dials are actually visible right now in the
 // selected tab, after the Categories filter (hiddenStatuses) is applied.
 function updateProspectCount(count) {
-  home?.setBackup({ count, title: backupMode() || !isSequenced() ? (isSequenced() ? "Backup numbers" : "Companies") : "All companies" });
   if (!els.dialsProspectCount) return;
   // In Select mode the header counts what's ticked instead of what's shown.
   if (selectMode) {
@@ -2802,6 +2795,11 @@ function updateProspectCount(count) {
 
 function renderDialsTable() {
   home?.refreshEmails();
+  if (home && sheetMode()) {
+    home.renderSheet(!currentListId ? "No lists yet for this category — tap + next to the tabs to create one."
+      : dials.length === 0 ? `No dials in this list yet — use the arrow next to "Dials" and tap "Add new".` : "You're all caught up.");
+    return;
+  }
   if (!currentListId) {
     els.dialsTableWrap.innerHTML = `<div class="empty-state">No lists yet for this category — tap + next to the tabs to create one.</div>`;
     updateProspectCount(0);
@@ -2823,7 +2821,6 @@ function renderDialsTable() {
   if (visible.length === 0) {
     els.dialsTableWrap.innerHTML = dialSearchQuery.trim()
       ? `<div class="empty-state">No dials in any tab match "${escapeHtml(dialSearchQuery.trim())}".</div>`
-      : backupMode() ? `<div class="empty-state">No backup numbers to call right now.</div>`
       : `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
     return;
   }
@@ -4230,14 +4227,20 @@ home = initDialsHome({
   getDials: () => dials,
   openCard: openCardFrom,
   onSent: async () => { await loadLists(); },
-  isPhone: isMobileViewport,
+  isSheet: sheetMode,
+  isHidden: (d) => hiddenStatuses.has(d.contact_status || "uncontacted"),
+  rowIcons: (d) => contactActionIcons({
+    dialId: d.id, linkedin: d.linkedin, method: d.mobile_phone ? "mobile" : "company", phone: d.mobile_phone || d.company_phone, email: d.email,
+    personalizedEmailBody: resolveEmailBody(d), personalizedEmailSubject: resolveEmailSubject(d), personalizedTextingBody: resolvePersonalizedTextingBody(profile, d),
+  }),
+  wireIcons: (root) => { stopContactActionPropagation(root); wireQuickSendButtons(root); },
 });
 // Page menu: leads/admins can see every company in the list instead of only Backup numbers; interns get the short menu.
 if (isAdmin || isTeamLead) {
   els.menuShowAllBtn.classList.remove("hidden");
   els.menuShowAllBtn.addEventListener("click", () => {
     showAll = !showAll;
-    els.menuShowAllLabel.textContent = showAll ? "Show backup numbers" : "Show all companies";
+    els.menuShowAllLabel.textContent = showAll ? "Show call sheet" : "Show all companies";
     closePageHeaderMenu();
     renderDialsTable();
   });

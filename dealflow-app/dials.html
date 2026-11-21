@@ -221,20 +221,10 @@
       <div class="dial-tab-transfer-list" id="dialTabClientList"></div>
     </div>
 
-    <!-- Intern home (js/dialsHome.js): Follow up now, Emails, Backup numbers. The third section holds the dials list. -->
+    <!-- Dials home (js/dialsHome.js): a one-line Emails bar, then the priority call sheet (rendered into #dialsTableWrap). -->
     <div class="dh" id="dialsHome">
-      <section class="dh-sec" id="dhFollow">
-        <button type="button" class="dh-head" aria-expanded="false"><span class="dh-title">Follow up now</span><span class="dh-count" id="dhFollowCount"></span><span class="dh-chev" aria-hidden="true"></span></button>
-        <div class="dh-body" id="dhFollowBody"></div>
-      </section>
-      <section class="dh-sec" id="dhEmails">
-        <button type="button" class="dh-head" aria-expanded="false"><span class="dh-title">Emails</span><span class="dh-count" id="dhEmailsCount"></span><span class="dh-chev" aria-hidden="true"></span></button>
-        <div class="dh-body" id="dhEmailsBody"></div>
-      </section>
-      <section class="dh-sec" id="dhBackup">
-        <button type="button" class="dh-head" aria-expanded="false"><span class="dh-title" id="dhBackupTitle">Backup numbers</span><span class="dh-count" id="dhBackupCount"></span><span class="dh-chev" aria-hidden="true"></span></button>
-        <div class="dh-body"><div id="dialsTableWrap"></div></div>
-      </section>
+      <div class="dh-bar" id="dhBar" hidden></div>
+      <div id="dialsTableWrap"></div>
     </div>
   </main>
 
