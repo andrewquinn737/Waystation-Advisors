@@ -29,7 +29,17 @@ def api(email, method, path, body=None):
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
 
-def rpc(email, fn, **args): return api(email, "POST", "/rpc/" + fn, args)
+def rpc(email, fn, **args):
+    if fn == "approve_list_copy":   # the server copy gate must have checked the text first
+        gate(email, args["p_list_id"])
+    return api(email, "POST", "/rpc/" + fn, args)
+
+def gate(email, lid):
+    r = urllib.request.Request(URL + "/functions/v1/copy-gate", method="POST", data=json.dumps({"list_id": lid}).encode(),
+        headers={"apikey": ANON, "Authorization": "Bearer " + login(email), "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(r, timeout=120) as f: return f.status, json.load(f)
+    except urllib.error.HTTPError as e: return e.code, e.read().decode()
 def q(sql): return sb.test_sql(sql)
 def uid(email): return SEC["accounts"][email]["id"]
 def lit(v): return "null" if v is None else "'" + str(v).replace("'", "''") + "'"
@@ -43,7 +53,9 @@ def check(name, cond, detail=""):
 def make_list(owner_email, rows, mandate="data", name=None):
     lid = str(uuid.uuid4())
     q(f"insert into dial_lists (id, name, dial_type, created_by, mandate) values ('{lid}', {lit(name or 'TEST-SEQ ' + lid[:8])}, 'seller', '{uid(owner_email)}', '{mandate}')")
-    for r in rows:
+    for i, r in enumerate(rows):
+        r = dict(r)
+        if r.get("e2"): r["e2"] = r["e2"].replace("circling back", f"circling back on note {i}")
         q(f"""insert into dials (list_id, created_by, company_name, full_name, email, company_phone, email_subject, email_1, email_2)
               values ('{lid}', '{uid(owner_email)}', {lit(r.get('co','Acme'))}, {lit(r.get('name','Pat Owner'))}, {lit(r.get('email'))},
                       {lit(r.get('phone','(801) 555-0100'))}, {lit(r.get('subj'))}, {lit(r.get('e1'))}, {lit(r.get('e2'))})""")
@@ -77,7 +89,7 @@ def run():
     code, res = rpc(GAVIN, "approve_list_copy", p_list_id=lid)
     check("approve: another intern is refused", code != 200 and "approve" in str(res).lower(), (code, res))
     code, res = rpc(CALEB, "approve_list_copy", p_list_id=lid)
-    check("approve: owner approves, 2 start, 1 missing copy", code == 200 and res["started"] == 2 and res["missing_copy"] == 1, res)
+    check("approve: owner approves, 2 clean start, 1 without copy held", code == 200 and res["started"] == 2 and res["held"] == 1, res)
     rows = q(f"select d.full_name, d.seq_state, d.sender_account_id, a.owner_id, a.mandate from dials d left join email_accounts a on a.id=d.sender_account_id where d.list_id='{lid}' and d.sequence='email5'")
     check("approve: no mailbox pinned yet (picked at send time)", all(r["sender_account_id"] is None for r in rows), rows)
     check("approve: lead without copy stays awaiting_copy", any(r["seq_state"] == "awaiting_copy" for r in rows), rows)

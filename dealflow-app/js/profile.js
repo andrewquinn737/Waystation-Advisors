@@ -15,6 +15,7 @@ import { getMainAdmin } from "./mainAdmin.js";
 import { wireReportsPopup } from "./reports.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
 import { wireDeletedTabsPopup } from "./deletedTabs.js";
+import { mountClaudeConnect } from "./claudeConnect.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -2657,3 +2658,5 @@ if (isAdminSync || isTeamLeadSync) {
 showCallsView("outreach");
 loadUpcomingEvents();
 loadCallbacksToday();
+
+mountClaudeConnect(document.getElementById("claudeConnectHost"), { profile });
