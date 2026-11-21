@@ -121,3 +121,14 @@ Email accounts, Clients, settings); 5 outcome buttons; slim company card; remove
 Build split: A = security + deliverability backend (migration 20261124_hardening.sql), B = campaigns + Admin page +
 admin onboarding/Claude pairing + connector campaign tools, C = intern simplification + nav. Live-only fixes
 (hardcoded secrets in DB, anon access to wp_* tables) are listed in CRM_DESIGN.md §5 for the live rollout.
+
+## 2026-11-21: Mason's review of the walkthrough -> next build
+- Admin: remove the Clients tab. Remove team.html entirely; restore the ORIGINAL Profile page (as on origin/main / before commit 9be6979) and
+  put "Profile" first in the nav. Pages without a clear purpose go.
+- Visual: the all-white + blocky blue buttons look is "horrible"; match the app's existing style, refined.
+- Campaign stats like Instantly: Emails sent, Companies contacted, Replied, Interested, Intro calls booked, Bounced. Drop "Need a fix /
+  Sending / Sent first" jargon.
+- Mailbox check: show Sending vs Reading separately (Microsoft blocks IMAP password login; SMTP works) instead of "login failed".
+- Drafting: drafts arrive in the CSV (Email Subject / Email 1 / Email 2 columns, made by outreach/sequence_copygen with the .md
+  guidelines). Mason wants an IN-APP Claude bot to bulk-edit a campaign's drafts, routed through the Oracle VM on HIS Claude account
+  (he accepted the terms risk). Worker: separate OS user, own systemd unit, never touch the live email hub; token set by Mason himself.
