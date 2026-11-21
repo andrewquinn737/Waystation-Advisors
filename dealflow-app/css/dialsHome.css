@@ -39,3 +39,8 @@
 .dh-link { background: none; border: 0; padding: 0 4px; min-height: 44px; font: inherit; font-size: 14px; color: var(--accent); text-decoration: underline; cursor: pointer; }
 #dialsTableWrap .list-table { width: 100%; }
 .dh #dialsTableWrap .mobile-card { margin-left: 0; margin-right: 0; }
+
+/* follow-up rows: the task in words + one obvious button */
+.dh-do { color: var(--text); font-weight: 600; }
+.dh-go { white-space: nowrap; }
+.dh-side .dh-act + .dh-act { margin-left: 2px; }

@@ -10,6 +10,7 @@ const PAGE = 100; // rows rendered per group before "Show more"
 const $ = (id) => document.getElementById(id);
 const KIND = { call: "Call", call_company: "Call company line", linkedin: "LinkedIn", reply: "Reply" };
 const CALL_KINDS = ["call", "call_company"];
+const DO = { call: "Call", call_company: "Call the office", linkedin: "Connect on LinkedIn", reply: "Answer their email" };
 const validTz = (z) => { try { new Intl.DateTimeFormat("en-CA", { timeZone: z }); return true; } catch { return false; } };
 const localDate = (tz) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
 const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
@@ -112,10 +113,10 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     const { d, t } = it, who = [d.full_name, [d.city, d.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
     const bits = [g.label];
     if (t) {
-      bits.push(esc(KIND[t.kind]));
-      if (t.seq_day) bits.push(`Day ${esc(t.seq_day)}`);
-      if (it.late) bits.push(`${it.late}d late`);
-      if (t.kind === "reply") bits.push(`<a class="dh-msg" href="messages.html" data-stop>Messages</a>`);
+      // follow-up: say what to do, plainly, first
+      bits.length = 0;
+      bits.push(`<b class="dh-do">${esc(DO[t.kind] || KIND[t.kind])}</b>`);
+      bits.push(it.late ? `${it.late} day${it.late === 1 ? "" : "s"} late` : "today");
     } else if (g.n === 8) {
       const nx = it.next, NEXT = { email: "Email", followup_email: "Follow-up email", ...KIND };
       if (d.seq_state === "awaiting_copy") bits.push("First email not sent yet");
@@ -125,13 +126,33 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       const c = callbackText(d.callback_at);
       bits.push(`${c.missed ? "Missed · " : ""}${esc(c.text)}`);
     }
-    const done = t && (t.kind === "reply" || t.kind === "linkedin") ? `<button type="button" class="btn secondary small dh-act" data-done="${esc(t.id)}">Done</button>` : "";
+    const done = t ? actionHtml(t, d) : "";
     const icons = done || !rowIcons ? "" : rowIcons(d);
     return `<div class="mobile-card clickable-row dh-row dh-g${g.n}" role="button" tabindex="0" data-d="${esc(d.id)}">
       <div class="mc-main"><div class="mc-name">${esc(d.company_name || d.full_name || "(no name)")}</div>
         <div class="dh-meta">${bits.join(" · ")}</div>
         <div class="mc-sub">${esc(who || "—")}</div></div>
       <div class="dh-side">${done}${icons}</div></div>`;
+  }
+  // One clear button per follow-up: what to do, in words. Calls open the company card too, so the outcome is right there.
+  function actionHtml(t, d) {
+    const first = esc(String(d.full_name || "").trim().split(/\s+/)[0] || "");
+    const tel = (n) => "tel:" + String(n).replace(/[^\d+]/g, "");
+    if (t.kind === "call" || t.kind === "call_company") {
+      const num = t.kind === "call" ? (d.mobile_phone || d.company_phone) : (d.company_phone || d.mobile_phone);
+      const label = t.kind === "call" ? (first ? `Call ${first}` : "Call") : "Call office";
+      return num ? `<a class="btn small dh-act dh-go" href="${esc(tel(num))}" data-call="${esc(d.id)}">${label}</a>`
+                 : `<button type="button" class="btn small dh-act dh-go" data-open="${esc(d.id)}">Open</button>`;
+    }
+    const doneBtn = `<button type="button" class="btn secondary small dh-act" data-done="${esc(t.id)}">Done</button>`;
+    if (t.kind === "linkedin") {
+      const url = d.linkedin || ("https://www.linkedin.com/search/results/people/?keywords=" + encodeURIComponent([d.full_name, d.company_name].filter(Boolean).join(" ")));
+      return `<a class="btn small dh-act dh-go" href="${esc(url)}" target="_blank" rel="noopener" data-stop>Open LinkedIn</a>${doneBtn}`;
+    }
+    if (t.kind === "reply") {
+      return `<a class="btn small dh-act dh-go" href="messages.html?from=${encodeURIComponent(d.email || "")}" data-stop>Read reply</a>${doneBtn}`;
+    }
+    return doneBtn;
   }
   function bodyHtml(g) {
     const n = Math.min(g.items.length, shown.get(g.n) || PAGE), more = g.items.length - n;
@@ -169,6 +190,12 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     if (head) { const g = groups.find((x) => x.n === +head.parentElement.dataset.g); openState.set(g.n, !isOpen(g)); return redrawGroup(g.n); }
     const done = e.target.closest("[data-done]");
     if (done) return finishTask(done);
+    const call = e.target.closest("[data-call], [data-open]");
+    if (call) { // let the tel: link dial, and open the card so the outcome can be logged straight after
+      const id = call.dataset.call || call.dataset.open, set = visibleDials();
+      setTimeout(() => openCard(set, set.findIndex((x) => x.id === id)), call.dataset.call ? 400 : 0);
+      return;
+    }
     const row = e.target.closest("[data-d]");
     if (row) { const set = visibleDials(); openCard(set, set.findIndex((d) => d.id === row.dataset.d)); }
   };

@@ -1235,6 +1235,16 @@ if (canManageMail && accounts.length) {
 // Deep link from the Clients/Dials email quick-action icon (team lead/admin
 // only — see contactIcons.js's emailActionHTML): ?compose=1&to=&subject=&body=
 // opens straight into a new-message compose, prefilled.
+// ?from=<address>: open the newest email from that person (Dials "Read reply" button).
+{
+  const from = new URLSearchParams(window.location.search).get("from");
+  if (from) {
+    window.history.replaceState({}, "", "messages.html");
+    const { data: hit } = await supabase.from("email_messages").select("thread_id")
+      .eq("direction", "inbound").ilike("from_address", from.trim()).order("sent_at", { ascending: false }).limit(1);
+    if (hit && hit[0]?.thread_id) await openThread(hit[0].thread_id);
+  }
+}
 if (canManageMail) {
   const params = new URLSearchParams(window.location.search);
   if (params.get("compose") === "1") {
