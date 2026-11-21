@@ -12,3 +12,11 @@
 .readonly-banner { margin: 0 0 10px; padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--border); color: var(--text-muted); font-size: 12.5px; }
 .compose-quota-note { margin: 0 0 8px; font-size: 12.5px; color: var(--text-muted); }
 .compose-quota-note.full { color: var(--danger); font-weight: 600; }
+/* Plain-inbox chrome: Inbox/Sent tabs + one Mailboxes button + a single quiet note. */
+.mail-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; flex-wrap: wrap; }
+.mail-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.mail-tab { background: none; border: 0; padding: 8px 18px; font: inherit; font-weight: 600; color: var(--text-muted); cursor: pointer; min-height: 40px; }
+.mail-tab.active { background: var(--gold-soft); color: var(--text); }
+.mail-mailboxes-btn { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 40px; }
+.mail-note { margin: 0 0 10px; padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--border); color: var(--text-muted); font-size: 12.5px; }
+.team-member-list .mail-note { margin-bottom: 8px; }

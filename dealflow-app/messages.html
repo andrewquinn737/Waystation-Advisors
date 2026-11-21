@@ -41,16 +41,6 @@
   <main>
     <div class="page-header">
       <div class="page-header-left">
-        <!-- Mailbox picker (see js/messages.js) — "All mailboxes" (unified
-             inbox, Apple Mail-style) plus one entry per connected mailbox the
-             signed-in account can see: their own, for a team lead; every
-             connected mailbox, for an admin. Hidden entirely for interns —
-             they have no mailbox of their own, so there's nothing to pick;
-             their view is always their own clients' matched messages (see
-             email_messages' own RLS in supabase migrations). -->
-        <button type="button" class="page-header-toggle hidden" id="pageMenuToggle" title="Choose mailbox">
-          <svg viewBox="0 0 16 16" width="10" height="10"><path d="M2 10 L8 4 L14 10 Z" fill="currentColor"/></svg>
-        </button>
         <h1 id="messagesTitle">Messages</h1>
         <!-- Shown right of the title while a mailbox sync is running (on page
              open, or from "Sync now") — same two-arrows icon as the Sync now
@@ -62,32 +52,16 @@
       </button>
     </div>
 
-    <!-- Triangle dropdown: "Mailboxes" (opens mailboxesPopup below to
-         multi-select which connected mailbox(es) to view), "Sync now", and
-         "Select" (thread-list select mode — see selectModeBar below). All
-         three only ever shown for team leads/admins (see js/messages.js) —
-         an intern has no mailbox concept, nothing to sync on demand, and no
-         bulk actions here. -->
-    <div class="page-header-menu hidden" id="pageHeaderMenu" style="right:auto; left:16px;">
-      <button type="button" class="page-header-menu-item" id="menuMailboxesBtn">
-        <span class="menu-item-label">Mailboxes</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg></span>
-      </button>
-      <button type="button" class="page-header-menu-item" id="menuSyncNowBtn">
-        <span class="menu-item-label">Sync now</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></span>
-      </button>
-      <!-- Opens the "Viewing" popup (Received / Sent / Spam / Trash /
-           Scheduled). Label shows the view you're in now. -->
-      <button type="button" class="page-header-menu-item" id="menuFolderBtn">
-        <span class="menu-item-label" id="menuFolderLabel">Viewing: Received</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span>
-      </button>
-      <button type="button" class="page-header-menu-item" id="menuSelectBtn">
-        <span class="menu-item-label">Select</span>
-        <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
-      </button>
+    <!-- Inbox / Sent switch + one "Mailboxes" button (picker popup below). Shown only when the person has a mailbox
+         (js/messages.js setupInboxUi). Spam / Trash / Scheduled, Sync now and Select live in the gear menu. -->
+    <div class="mail-toolbar hidden" id="mailToolbar">
+      <div class="mail-tabs" role="tablist">
+        <button type="button" class="mail-tab active" data-folder="received" role="tab">Inbox</button>
+        <button type="button" class="mail-tab" data-folder="sent" role="tab">Sent</button>
+      </div>
+      <button type="button" class="btn secondary small mail-mailboxes-btn hidden" id="menuMailboxesBtn"><span id="mailboxesBtnLabel">Mailboxes</span></button>
     </div>
+    <div class="mail-note hidden" id="mailNote"></div>
 
     <!-- "Mailboxes" popup — a plain wireAccountsVisiblePopup instance (same
          module Profile/Clients/Dials use for "Accounts visible"), just fed
@@ -114,8 +88,6 @@
       <div class="modal">
         <h2>Viewing</h2>
         <div class="advanced-settings-list">
-          <button type="button" class="advanced-settings-row viewing-option" data-folder="received"><span class="advanced-settings-row-label">Received</span><span class="viewing-check">&#10003;</span></button>
-          <button type="button" class="advanced-settings-row viewing-option" data-folder="sent"><span class="advanced-settings-row-label">Sent</span><span class="viewing-check">&#10003;</span></button>
           <button type="button" class="advanced-settings-row viewing-option" data-folder="spam"><span class="advanced-settings-row-label">Spam</span><span class="viewing-check">&#10003;</span></button>
           <button type="button" class="advanced-settings-row viewing-option" data-folder="trash"><span class="advanced-settings-row-label">Trash</span><span class="viewing-check">&#10003;</span></button>
           <button type="button" class="advanced-settings-row viewing-option" data-folder="scheduled"><span class="advanced-settings-row-label">Scheduled</span><span class="viewing-check">&#10003;</span></button>
@@ -130,6 +102,15 @@
          a stub that did nothing and has been removed; "Sync now" moved up
          to the triangle menu above). -->
     <div class="page-header-menu hidden" id="settingsMenu">
+      <button type="button" class="page-header-menu-item" id="menuSyncNowBtn">
+        <span class="menu-item-label">Sync now</span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="menuFolderBtn">
+        <span class="menu-item-label" id="menuFolderLabel">Spam, Trash, Scheduled</span>
+      </button>
+      <button type="button" class="page-header-menu-item" id="menuSelectBtn">
+        <span class="menu-item-label">Select</span>
+      </button>
       <button type="button" class="page-header-menu-item" id="menuNotificationsBtn">
         <span class="menu-item-label" id="notificationsLabel">Notifications: On</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><line class="notif-slash" x1="3" y1="21" x2="21" y2="3"/></svg></span>

@@ -4,10 +4,13 @@
 import { supabase } from "./supabaseClient.js";
 import { getVisibleAccountIds, setVisibleAccountIds, isVisibleSelectionInitialized } from "./accountsVisible.js";
 
-export const MAILBOX_KEY = "waystation_messages_mailboxes_v2";
+export const MAILBOX_KEY = "waystation_messages_mailboxes_v3";
 const COLS = "id, owner_id, label, email_address, imap_host, smtp_host, sync_enabled, last_synced_at, last_sync_error, daily_send_limit, mandate, needs_assignment, send_paused_reason";
 
 const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "";
+// Microsoft 365 mailboxes can't be read yet: Microsoft has turned off the IMAP login the app uses.
+export const isMsMailbox = (a) => /(^|\.)(outlook|office365)\.com$/i.test(String(a.imap_host || ""));
+export const MS_PENDING_NOTE = "This mailbox can't be read yet (Microsoft sign-in pending)";
 export const ownerFirstName = (a) => firstName(a.ownerName) || "someone";
 
 // Mailboxes visible to this user (RLS-scoped). An intern also gets read access to their lead's mailboxes (for quick
@@ -51,14 +54,13 @@ export function buildGroups(accounts, { isAdmin }) {
 }
 
 // Selected mailbox ids, always a subset of `accounts`. First visit (or a stale/empty saved selection) defaults to
-// "all of mine"; a lead/admin who owns none starts with everything they can see.
+// EVERYTHING the person can see, so nothing is hidden until they narrow it in the picker.
 export function selectedMailboxIds(accounts) {
   const valid = new Set(accounts.map((a) => a.id));
   const saved = getVisibleAccountIds(MAILBOX_KEY);
   let ids = saved && isVisibleSelectionInitialized(MAILBOX_KEY) ? [...saved].filter((id) => valid.has(id)) : [];
   if (!ids.length) {
-    const mine = accounts.filter((a) => a.mine).map((a) => a.id);
-    ids = mine.length ? mine : accounts.map((a) => a.id);
+    ids = accounts.map((a) => a.id);
     setVisibleAccountIds(ids, MAILBOX_KEY);
   }
   return ids;

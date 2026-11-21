@@ -22,10 +22,10 @@ import { supabase } from "./supabaseClient.js";
 import { showConnectEmailNotice } from "./notice.js";
 import { findPriorOutbound, isReplySubject, stripReplyPrefix } from "./followUp.js";
 import { requireSession, showError } from "./auth.js";
-import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
+import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireNotificationsToggle } from "./notifications.js";
-import { MAILBOX_KEY, loadMailboxes, buildGroups, selectedMailboxIds, loadUnreadCounts, loadSequenceBadges, loadQuotas, wireMailboxPicker, ownerFirstName } from "./mailboxScope.js";
+import { MAILBOX_KEY, loadMailboxes, buildGroups, selectedMailboxIds, loadUnreadCounts, loadSequenceBadges, loadQuotas, wireMailboxPicker, ownerFirstName, isMsMailbox, MS_PENDING_NOTE } from "./mailboxScope.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -40,8 +40,9 @@ const isTeamLead = profile?.role === "team_lead";
 let canManageMail = isAdmin || isTeamLead;
 
 const els = {
-  pageMenuToggle: document.getElementById("pageMenuToggle"),
-  pageHeaderMenu: document.getElementById("pageHeaderMenu"),
+  mailToolbar: document.getElementById("mailToolbar"),
+  mailNote: document.getElementById("mailNote"),
+  mailboxesBtnLabel: document.getElementById("mailboxesBtnLabel"),
   menuMailboxesBtn: document.getElementById("menuMailboxesBtn"),
   messagesTitle: document.getElementById("messagesTitle"),
   pageSettingsBtn: document.getElementById("pageSettingsBtn"),
@@ -136,24 +137,29 @@ function mailboxLabel(a) {
 }
 
 function updateTitle() {
-  const suffix = folderView === "received" ? "" : ` · ${FOLDER_LABELS[folderView]}`;
-  const visible = canManageMail ? selectedMailboxIds(accounts) : [];
-  if (visible.length !== 1) {
-    els.messagesTitle.textContent = `Messages${suffix}`;
-    return;
-  }
-  const acct = acctById(visible[0]);
-  els.messagesTitle.textContent = `${acct ? acct.email_address : "Messages"}${suffix}`;
+  els.messagesTitle.textContent = folderView === "received" || folderView === "sent" ? "Messages" : `Messages · ${FOLDER_LABELS[folderView]}`;
+  const ids = canManageMail ? selectedMailboxIds(accounts) : [];
+  els.mailboxesBtnLabel.textContent = ids.length === accounts.length ? `Mailboxes (${accounts.length})` : ids.length === 1 ? acctById(ids[0])?.email_address || "Mailboxes" : `${ids.length} of ${accounts.length} mailboxes`;
+  document.querySelectorAll(".mail-tab").forEach((t) => t.classList.toggle("active", t.dataset.folder === folderView));
 }
 
-wirePageHeaderMenu({ toggleBtn: els.pageMenuToggle, menuEl: els.pageHeaderMenu, extraCloseEl: els.mailboxesPopup });
-wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu });
+// One quiet line (never an error) when some of the selected mailboxes are Microsoft 365 ones we can't read yet.
+function updateMailNote() {
+  const pending = (accountIdsForQuery() || []).filter((id) => { const a = acctById(id); return a && isMsMailbox(a); }).length;
+  els.mailNote.textContent = pending > 1 ? `${pending} mailboxes can't be read yet (Microsoft sign-in pending)` : pending ? `${MS_PENDING_NOTE}` : "";
+  els.mailNote.classList.toggle("hidden", !pending);
+}
+
+wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu, extraCloseEl: els.mailboxesPopup });
 wireNotificationsToggle(els.menuNotificationsBtn, els.notificationsLabel, profile);
+const closePageHeaderMenu = closeAllPageHeaderMenus;
 
 function setupInboxUi() {
   if (!canManageMail) return;
-  els.pageMenuToggle.classList.remove("hidden");
+  els.mailToolbar.classList.remove("hidden");
   els.composeFabBtn.classList.remove("hidden");
+  els.menuMailboxesBtn.classList.toggle("hidden", accounts.length < 2); // one mailbox = nothing to pick
+  document.querySelectorAll(".mail-tab").forEach((t) => t.addEventListener("click", () => t.dataset.folder !== folderView && setFolderView(t.dataset.folder)));
   wireMailboxPicker({
     menuBtn: els.menuMailboxesBtn,
     popupEl: els.mailboxesPopup,
@@ -166,6 +172,7 @@ function setupInboxUi() {
     refreshUnread,
     onChange: () => {
       updateTitle();
+      updateMailNote();
       exitDetail();
       loadThreadList();
     },
@@ -247,11 +254,12 @@ function renderViewingPopup() {
 
 function setFolderView(next) {
   folderView = next;
-  els.menuFolderLabel.textContent = `Viewing: ${FOLDER_LABELS[folderView]}`;
+  els.menuFolderLabel.textContent = folderView === "spam" || folderView === "trash" || folderView === "scheduled" ? `Viewing: ${FOLDER_LABELS[folderView]}` : "Spam, Trash, Scheduled";
   // Select mode (mark unread / delete) only means something on the synced inbox.
   els.menuSelectBtn.classList.toggle("hidden", folderView !== "received");
   if (threadListSelectMode) exitThreadSelectMode();
   updateTitle();
+  updateMailNote();
   exitDetail();
   loadThreadList();
 }
@@ -329,7 +337,10 @@ let listState = null; // { msgs: Map(id -> msg), oldest, hasMore, clientNames, l
 const counterpart = (m) => (m.direction === "outbound" ? (m.to_addresses || [])[0]?.address : m.from_address) || "";
 
 async function loadThreadList(loadMore = false) {
-  if (canManageMail && folderView !== "received") return loadLiveFolder();
+  // Sent is read live from the mailbox, except when every selected mailbox is a Microsoft one (nothing to read live):
+  // then the copies the app itself saved when sending are shown instead.
+  const liveReadable = (accountIdsForQuery() || []).some((id) => { const a = acctById(id); return !(a && isMsMailbox(a)); });
+  if (canManageMail && folderView !== "received" && !(folderView === "sent" && !liveReadable)) return loadLiveFolder();
   els.errorBox.classList.add("hidden");
   const ids = accountIdsForQuery();
   if (ids && !ids.length) {
@@ -410,9 +421,23 @@ async function liveCall(body) {
     body,
     headers: { Authorization: `Bearer ${authSession?.access_token || ""}` },
   });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
+  if (error) {
+    // supabase-js hides the function's own message behind a generic "non-2xx" one; read the real text.
+    let msg = "";
+    try { msg = (await error.context.json())?.error || ""; } catch { /* keep generic */ }
+    throw new Error(friendlyMailError(msg || error.message));
+  }
+  if (data?.error) throw new Error(friendlyMailError(data.error));
   return data;
+}
+
+// One short, plain line for a mailbox failure (never a raw IMAP/stack message).
+function friendlyMailError(msg) {
+  const m = String(msg || "");
+  if (/basic authentication is disabled|office ?365|outlook/i.test(m)) return MS_PENDING_NOTE;
+  if (/login failed|AUTHENTICATIONFAILED|invalid credentials/i.test(m)) return "The mailbox sign-in was refused";
+  if (/timed? ?out|ECONN|network|connect/i.test(m)) return "The mailbox didn't respond";
+  return "Couldn't read this mailbox right now";
 }
 
 // Downloads one attachment of a live-read message: asks email-live for the
@@ -457,9 +482,16 @@ function mailboxEmail(accountId) {
 async function loadLiveFolder(loadMore = false) {
   const kind = folderView;
   els.errorBox.classList.add("hidden");
-  const ids = accountIdsForQuery() || [];
-  if (!ids.length) {
+  const all = accountIdsForQuery() || [];
+  if (!all.length) {
     els.wrap.innerHTML = `<div class="empty-state">No email connected yet — go to Profile → Edit to connect one.</div>`;
+    return;
+  }
+  // Microsoft 365 mailboxes can't be opened over IMAP yet: skip them (the note above the list says so once).
+  const ids = all.filter((id) => { const a = acctById(id); return !(a && isMsMailbox(a)); });
+  if (!ids.length && kind !== "scheduled") {
+    liveState = null;
+    els.wrap.innerHTML = `<div class="empty-state">${MS_PENDING_NOTE}.</div>`;
     return;
   }
   if (!loadMore) {
@@ -468,17 +500,23 @@ async function loadLiveFolder(loadMore = false) {
   }
   const state = liveState;
   const targets = ids.filter((id) => !loadMore || state.accountState.get(id)?.hasMore);
-  const results = await Promise.all(
-    targets.map(async (id) => {
-      const offset = loadMore ? state.accountState.get(id).offset : 0;
-      try {
-        const data = await liveCall({ action: "list", account_id: id, kind: kind === "scheduled" ? "scheduled" : kind, offset, limit: LIVE_PAGE });
-        return { id, data };
-      } catch (e) {
-        return { id, error: e };
-      }
-    })
-  );
+  // A few mailboxes at a time (each is a live IMAP login), never all of them at once.
+  const results = [];
+  for (let i = 0; i < targets.length; i += 5) {
+    results.push(
+      ...(await Promise.all(
+        targets.slice(i, i + 5).map(async (id) => {
+          const offset = loadMore ? state.accountState.get(id).offset : 0;
+          try {
+            return { id, data: await liveCall({ action: "list", account_id: id, kind, offset, limit: LIVE_PAGE }) };
+          } catch (e) {
+            return { id, error: e };
+          }
+        })
+      ))
+    );
+    if (folderView !== kind || liveState !== state) return;
+  }
   if (folderView !== kind || liveState !== state) return; // user switched away while loading
   for (const r of results) {
     if (r.error) {
@@ -495,7 +533,7 @@ async function loadLiveFolder(loadMore = false) {
     const { data } = await supabase
       .from("scheduled_emails")
       .select("id, account_id, recipient_name, to_address, subject, send_at, status, error")
-      .in("account_id", ids)
+      .in("account_id", all)
       .in("status", ["pending", "sending", "failed"])
       .order("send_at", { ascending: true });
     state.scheduled = (data || []).filter((r) => r.status !== "failed" || Date.now() - new Date(r.send_at).getTime() < 3 * 86400000);
@@ -509,7 +547,9 @@ function renderLiveFolder() {
   const showTo = state.kind === "sent" || state.kind === "scheduled";
   const parts = [];
   if (state.failures.length) {
-    parts.push(`<div class="error-msg">${state.failures.map(escapeHtml).join("<br>")}</div>`);
+    const shown = state.failures.slice(0, 3).map(escapeHtml);
+    if (state.failures.length > 3) shown.push(`and ${state.failures.length - 3} more mailboxes couldn't be read`);
+    parts.push(`<div class="mail-note">${shown.join("<br>")}</div>`);
   }
   if (state.kind === "scheduled") {
     parts.push(
@@ -641,7 +681,7 @@ async function openLiveMessage(item) {
 function renderThreadList() {
   const rows = currentThreadRows;
   if (!rows.length) {
-    els.wrap.innerHTML = `<div class="empty-state">${folderView === "sent" && canManageMail ? "No sent messages yet." : "No messages yet."}</div>`;
+    els.wrap.innerHTML = `<div class="empty-state">${folderView === "sent" && canManageMail ? "No sent messages yet." : "Your inbox is empty."}</div>`;
     return;
   }
 
@@ -1174,6 +1214,7 @@ els.composeSendBtn.addEventListener("click", async () => {
 await loadAccounts();
 setupInboxUi();
 updateTitle();
+updateMailNote();
 await loadThreadList();
 refreshUnread().catch(() => {});
 
