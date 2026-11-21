@@ -373,6 +373,8 @@ begin
       from sequence_tasks st join dials d on d.id = st.dial_id join dial_lists l on l.id = st.list_id
      where st.owner_id = m.owner_id and st.status = 'pending' and st.kind in ('email','followup_email')
        and st.due_on <= v_today and d.seq_state = 'active' and l.copy_status = 'approved' and l.deleted_at is null
+       -- only text the server-side copy gate passed, unchanged since (columns from 20261121_copy_gate.sql)
+       and d.copy_ok and d.copy_hash = md5(coalesce(d.email_subject,'') || chr(30) || coalesce(d.email_1,'') || chr(30) || coalesce(d.email_2,''))
        and (l.mandate is null or m.mandate is null or l.mandate = m.mandate)
        -- a follow-up only goes out if this mailbox's inbox is being read (otherwise a reply could be missed)
        and ( (st.kind = 'followup_email' and d.sender_account_id = m.id and d.email_1_message_id is not null and m.inbox_ok)
