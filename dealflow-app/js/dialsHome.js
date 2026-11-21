@@ -1,6 +1,6 @@
 // Dials home: ONE call sheet sorted by priority, under a one-line Emails bar.
 //   Bar:   status only: "X of Y sent today · next 2:14pm" (email_queue_status). Launching/reviewing emails is on campaigns.html (admins).
-//   Sheet: ten priority groups built from my_followups (groups 1-2) and the list's dials (groups 3-10); a company shows once,
+//   Sheet: eleven priority groups built from my_followups (groups 1-2) and the list's dials (groups 3-11); a company shows once,
 //          in the highest group it qualifies for. dials.js owns the list data and the company card; this file owns the sheet.
 import { supabase } from "./supabaseClient.js";
 import { escapeHtml as esc } from "./clientForm.js";
@@ -19,11 +19,13 @@ const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000)
 const GROUPS = [
   { n: 1, label: "Past due" }, { n: 2, label: "Due today" }, { n: 3, label: "Not called yet" }, { n: 4, label: "Intro calls" },
   { n: 5, label: "Callback · Interested" }, { n: 6, label: "Callback · Busy" }, { n: 7, label: "No response" },
-  { n: 8, label: "Finished sequence", closed: true }, { n: 9, label: "Dead number", closed: true }, { n: 10, label: "Not interested", closed: true },
+  { n: 8, label: "In sequence", closed: true }, // emailing now; no call due yet (shows the next step + date)
+  { n: 9, label: "Finished sequence", closed: true }, { n: 10, label: "Dead number", closed: true }, { n: 11, label: "Not interested", closed: true },
 ];
 const byName = (a, b) => (a.d.company_name || a.d.full_name || "").localeCompare(b.d.company_name || b.d.full_name || "", undefined, { sensitivity: "base" });
 const byCallback = (a, b) => (a.d.callback_at ? Date.parse(a.d.callback_at) : Infinity) - (b.d.callback_at ? Date.parse(b.d.callback_at) : Infinity) || byName(a, b);
-const SORT = { 1: null, 2: null, 4: byCallback, 5: byCallback, 6: byCallback };
+const byNext = (a, b) => String(a.next?.due_on || "9999").localeCompare(String(b.next?.due_on || "9999")) || byName(a, b);
+const SORT = { 1: null, 2: null, 4: byCallback, 5: byCallback, 6: byCallback, 8: byNext };
 const sameDay = (a, b) => a.toDateString() === b.toDateString();
 function callbackText(iso) {
   const d = new Date(iso), now = new Date(), day = 86400000;
@@ -35,6 +37,7 @@ function callbackText(iso) {
 
 export function initDialsHome({ profile, getList, getDials, openCard, isSheet, isHidden, rowIcons, wireIcons }) {
   let tasks = [], taskDials = [], followErr = "", queue = null, queueErr = false;
+  let nextByDial = new Map(); // dial_id -> its next upcoming step (for group 8 "In sequence")
   let emptyText = "You're all caught up.", groups = [];
   const tz = validTz(profile?.timezone) ? profile.timezone : TZ;
   const wrap = () => $("dialsTableWrap");
@@ -55,6 +58,11 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     }
     const byId = new Map(rows.map((d) => [d.id, d]));
     taskDials = ids.map((id) => byId.get(id)).filter(Boolean);
+    // next upcoming step per company in a running sequence (one query; RLS limits rows to what this person may see)
+    const { data: up } = await supabase.from("sequence_tasks").select("dial_id, kind, due_on, seq_day")
+      .in("status", ["pending", "queued"]).gt("due_on", localDate(tz)).order("due_on").limit(5000);
+    nextByDial = new Map();
+    for (const u of up || []) if (!nextByDial.has(u.dial_id)) nextByDial.set(u.dial_id, u);
     tasks = tasks.filter((t) => byId.has(t.dial_id));
     if (isSheet()) renderSheet();
   }
@@ -66,11 +74,11 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     if (st === "intro_call_scheduled") return 4;
     if (st === "callback_interested") return 5;
     if (st === "busy_callback") return 6;
-    if (running) return 0;
+    if (running) return 8; // in sequence, nothing due today (due steps were already placed in groups 1-2)
     if (st === "no_response") return 7;
-    if (st === "unable_to_contact") return 9;
-    if (st === "not_interested") return 10;
-    if (st === "uncontacted") return d.sequence === "email5" && d.seq_state === "completed" ? 8 : 3;
+    if (st === "unable_to_contact") return 10;
+    if (st === "not_interested") return 11;
+    if (st === "uncontacted") return d.sequence === "email5" && d.seq_state === "completed" ? 9 : 3;
     return 0;
   }
   function buildGroups() {
@@ -89,7 +97,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     }
     for (const d of mine) {
       if (placed.has(d.id) || (isHidden && isHidden(d))) continue;
-      const g = groupFor(d); if (g) buckets[g - 1].push({ d });
+      const g = groupFor(d); if (g) buckets[g - 1].push(g === 8 ? { d, next: nextByDial.get(d.id) } : { d });
     }
     return GROUPS.map((g, i) => {
       const items = buckets[i], sort = SORT[g.n] === undefined ? byName : SORT[g.n];
@@ -108,6 +116,11 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       if (t.seq_day) bits.push(`Day ${esc(t.seq_day)}`);
       if (it.late) bits.push(`${it.late}d late`);
       if (t.kind === "reply") bits.push(`<a class="dh-msg" href="messages.html" data-stop>Messages</a>`);
+    } else if (g.n === 8) {
+      const nx = it.next, NEXT = { email: "Email", followup_email: "Follow-up email", ...KIND };
+      if (d.seq_state === "awaiting_copy") bits.push("First email not sent yet");
+      else if (nx) bits.push(`Next: ${esc(NEXT[nx.kind] || nx.kind)} · ${esc(new Date(nx.due_on + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }))}`);
+      else bits.push("Waiting for the first email to send");
     } else if (d.callback_at && [4, 5, 6].includes(g.n)) {
       const c = callbackText(d.callback_at);
       bits.push(`${c.missed ? "Missed · " : ""}${esc(c.text)}`);

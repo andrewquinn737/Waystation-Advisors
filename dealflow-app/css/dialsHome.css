@@ -1,13 +1,13 @@
 /* Dials home (js/dialsHome.js): status line + one priority call sheet. Mobile first; uses style.css tokens.
    Colour is deliberately quiet: a muted 3px stripe on each row and a muted number circle on each header. Meaning is carried by
    the number and the text, so nothing depends on colour. No coloured backgrounds, bands or pills. */
-.dh { --g1: #b8736d; --g2: #bf8b5f; --g3: #7191c2; --g4: #6ea283; --g5: #69a29c; --g6: #b39a5d; --g7: #9097a2; --g8: #a0a7b2; --g9: #a3a3a3; --g10: #adadad;
+.dh { --g1: #b8736d; --g2: #bf8b5f; --g3: #7191c2; --g4: #6ea283; --g5: #69a29c; --g6: #b39a5d; --g7: #9097a2; --g8: #8f9fb5; --g9: #a0a7b2; --g10: #a3a3a3; --g11: #adadad;
   display: flex; flex-direction: column; gap: 6px; }
 @media (prefers-color-scheme: dark) {
-  .dh { --g1: #b3736d; --g2: #b88a60; --g3: #7088b5; --g4: #62977a; --g5: #5f9791; --g6: #a89158; --g7: #8a919c; --g8: #7f8793; --g9: #777; --g10: #6e6e6e; }
+  .dh { --g1: #b3736d; --g2: #b88a60; --g3: #7088b5; --g4: #62977a; --g5: #5f9791; --g6: #a89158; --g7: #8a919c; --g8: #75859c; --g9: #7f8793; --g10: #777; --g11: #6e6e6e; }
 }
 .dh-g1 { --gc: var(--g1); } .dh-g2 { --gc: var(--g2); } .dh-g3 { --gc: var(--g3); } .dh-g4 { --gc: var(--g4); } .dh-g5 { --gc: var(--g5); }
-.dh-g6 { --gc: var(--g6); } .dh-g7 { --gc: var(--g7); } .dh-g8 { --gc: var(--g8); } .dh-g9 { --gc: var(--g9); } .dh-g10 { --gc: var(--g10); }
+.dh-g6 { --gc: var(--g6); } .dh-g7 { --gc: var(--g7); } .dh-g8 { --gc: var(--g8); } .dh-g9 { --gc: var(--g9); } .dh-g10 { --gc: var(--g10); } .dh-g11 { --gc: var(--g11); }
 
 /* Status line (plain text) */
 .dh-bar { min-height: 28px; display: flex; align-items: center; padding: 0 4px; font-size: 13px; color: var(--text-muted-strong); }
@@ -23,8 +23,8 @@
 .dh-grp.open .dh-chev { transform: rotate(45deg); }
 .dh-gb { padding: 0 0 8px; }
 .dh-grp:not(.open) .dh-gb { display: none; }
-.dh-g9 .mc-name, .dh-g10 .mc-name { color: var(--text-muted-strong); font-weight: 500; }
-.dh-row.dh-g9 .mc-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+.dh-g10 .mc-name, .dh-g11 .mc-name { color: var(--text-muted-strong); font-weight: 500; }
+.dh-row.dh-g10 .mc-name { text-decoration: line-through; text-decoration-thickness: 1px; }
 
 /* Rows (reuse .mobile-card): 3px muted stripe, group label as small gray text on line 2 */
 .dh-row { min-height: 56px; padding-top: 6px; padding-bottom: 6px; cursor: pointer; border-left: 3px solid var(--gc); }
