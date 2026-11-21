@@ -4226,7 +4226,6 @@ home = initDialsHome({
   getList: () => allLists.find((l) => l.id === currentListId) || null,
   getDials: () => dials,
   openCard: openCardFrom,
-  onSent: async () => { await loadLists(); },
   isSheet: sheetMode,
   isHidden: (d) => hiddenStatuses.has(d.contact_status || "uncontacted"),
   rowIcons: (d) => contactActionIcons({

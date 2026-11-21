@@ -2659,4 +2659,5 @@ showCallsView("outreach");
 loadUpcomingEvents();
 loadCallbacksToday();
 
-mountClaudeConnect(document.getElementById("claudeConnectHost"), { profile });
+// Admins only (interns no longer review or launch emails; the connector backend stays in place).
+if (profile.role === "admin") mountClaudeConnect(document.getElementById("claudeConnectHost"), { profile });

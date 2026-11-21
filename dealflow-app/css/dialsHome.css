@@ -1,47 +1,35 @@
-/* Dials home (js/dialsHome.js): Emails bar + one priority call sheet. Mobile first; uses style.css tokens.
-   Group colours are secondary: every row and header also carries its number and label. Tints are translucent so they sit on
-   the page background in both light and dark mode; --gc is the text/accent colour (>= 4.5:1 on its own tint). */
-.dh { --g1: #b42318; --g2: #b54708; --g3: #1d4ed8; --g4: #166534; --g5: #0f766e; --g6: #92600a; --g7: #4b5563; --g8: #475569; --g9: #3f4651; --g10: #626977;
-  --tint: .09; display: flex; flex-direction: column; gap: 10px; }
+/* Dials home (js/dialsHome.js): status line + one priority call sheet. Mobile first; uses style.css tokens.
+   Colour is deliberately quiet: a muted 3px stripe on each row and a muted number circle on each header. Meaning is carried by
+   the number and the text, so nothing depends on colour. No coloured backgrounds, bands or pills. */
+.dh { --g1: #b8736d; --g2: #bf8b5f; --g3: #7191c2; --g4: #6ea283; --g5: #69a29c; --g6: #b39a5d; --g7: #9097a2; --g8: #a0a7b2; --g9: #a3a3a3; --g10: #adadad;
+  display: flex; flex-direction: column; gap: 6px; }
 @media (prefers-color-scheme: dark) {
-  .dh { --g1: #ff8a80; --g2: #ffb066; --g3: #9db8ff; --g4: #6ee7a0; --g5: #5eead4; --g6: #fcd34d; --g7: #c1c8d2; --g8: #b3bfd1; --g9: #9aa1ab; --g10: #9aa1ab; --tint: .16; }
+  .dh { --g1: #b3736d; --g2: #b88a60; --g3: #7088b5; --g4: #62977a; --g5: #5f9791; --g6: #a89158; --g7: #8a919c; --g8: #7f8793; --g9: #777; --g10: #6e6e6e; }
 }
-.dh-grp { --gc: var(--g1); }
 .dh-g1 { --gc: var(--g1); } .dh-g2 { --gc: var(--g2); } .dh-g3 { --gc: var(--g3); } .dh-g4 { --gc: var(--g4); } .dh-g5 { --gc: var(--g5); }
 .dh-g6 { --gc: var(--g6); } .dh-g7 { --gc: var(--g7); } .dh-g8 { --gc: var(--g8); } .dh-g9 { --gc: var(--g9); } .dh-g10 { --gc: var(--g10); }
 
-/* Emails bar: one line */
-.dh-bar { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+/* Status line (plain text) */
+.dh-bar { min-height: 28px; display: flex; align-items: center; padding: 0 4px; font-size: 13px; color: var(--text-muted-strong); }
 .dh-bar[hidden] { display: none; }
-.dh-bar-text { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); }
-.dh-send { min-height: 40px; min-width: 64px; font-weight: 700; }
 
-/* Groups */
+/* Group headers: plain small label, no band, box or border */
 .dh-grp { margin: 0; }
-.dh-gh { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-bottom: 2px solid var(--gc); border-radius: 0;
-  background: var(--bg); font: inherit; font-size: 15px; font-weight: 700; color: var(--text); text-align: left; cursor: pointer; }
-.dh-gh::before { content: ""; position: absolute; inset: 0; background: var(--gc); opacity: var(--tint); pointer-events: none; }
-.dh-num { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--gc); color: var(--gc); font-size: 13px; font-style: normal; font-weight: 800; }
-.dh-gl { position: relative; flex: 1; min-width: 0; }
-.dh-gc { position: relative; font-size: 13px; font-weight: 700; color: var(--gc); }
-.dh-chev { position: relative; width: 8px; height: 8px; border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted); transform: rotate(-45deg); transition: transform .15s; margin: 0 4px 0 2px; }
+.dh-gh { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 4px; border: 0; border-radius: 0;
+  background: var(--bg); font: inherit; font-size: 13px; font-weight: 600; color: var(--text); text-align: left; cursor: pointer; }
+.dh-num { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--gc); color: var(--text-muted-strong); font-size: 11px; font-style: normal; font-weight: 600; }
+.dh-gl { flex: 1; min-width: 0; }
+.dh-chev { width: 7px; height: 7px; border-right: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted); transform: rotate(-45deg); transition: transform .15s; margin: 0 6px 0 2px; }
 .dh-grp.open .dh-chev { transform: rotate(45deg); }
-.dh-gb { padding: 8px 0 12px; }
+.dh-gb { padding: 0 0 8px; }
 .dh-grp:not(.open) .dh-gb { display: none; }
 .dh-g9 .mc-name, .dh-g10 .mc-name { color: var(--text-muted-strong); font-weight: 500; }
 .dh-row.dh-g9 .mc-name { text-decoration: line-through; text-decoration-thickness: 1px; }
 
-/* Rows (reuse .mobile-card) */
-.dh-row { min-height: 64px; cursor: pointer; border-left: 4px solid var(--gc); position: relative; }
-.dh-row::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--gc); opacity: calc(var(--tint) * .6); pointer-events: none; }
-.dh-row > * { position: relative; }
+/* Rows (reuse .mobile-card): 3px muted stripe, group label as small gray text on line 2 */
+.dh-row { min-height: 56px; padding-top: 6px; padding-bottom: 6px; cursor: pointer; border-left: 3px solid var(--gc); }
 .dh-row .mc-main { flex: 1; }
-.dh-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; font-size: 12.5px; color: var(--text-muted-strong); }
-.dh-tag { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 2px; border: 1.5px solid var(--gc); border-radius: 12px; color: var(--gc); font-size: 11.5px; font-weight: 700; white-space: nowrap; }
-.dh-tag i { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; background: var(--gc); color: var(--bg); font-style: normal; font-size: 10.5px; font-weight: 800; }
-.dh-bits b { color: var(--text); }
-.dh-late { color: var(--g1); font-weight: 700; }
-.dh-when { font-weight: 600; color: var(--text); }
+.dh-meta { margin-top: 0; font-size: 12px; color: var(--text-muted-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dh-msg { color: var(--accent); text-decoration: underline; padding: 8px 0; }
 .dh-side { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .dh-act { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
@@ -49,19 +37,5 @@
 .dh-empty { font-size: 14px; color: var(--text-muted-strong); padding: 6px 4px; }
 .dh-done { text-align: center; padding: 32px 8px; font-size: 16px; font-weight: 600; }
 .dh-link { background: none; border: 0; padding: 0 4px; min-height: 44px; font: inherit; font-size: 14px; color: var(--accent); text-decoration: underline; cursor: pointer; }
-
-/* Send sheet (unchanged) */
-.dh-sheet-bd { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; justify-content: center; }
-.dh-sheet { width: 100%; max-width: 480px; box-sizing: border-box; background: var(--bg); color: var(--text); border-radius: 14px 14px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 10px; }
-.dh-sheet h2 { margin: 0 0 6px; font-size: 18px; }
-.dh-lbl { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-.dh-cnt { width: 100%; box-sizing: border-box; min-height: 48px; font: inherit; font-size: 20px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
-.dh-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.dh-chip { min-height: 44px; padding: 0 18px; font: inherit; font-weight: 600; border: 1px solid var(--border); border-radius: 22px; background: var(--surface); color: var(--text); cursor: pointer; }
-.dh-note { font-size: 13px; color: var(--text-muted-strong); margin: 10px 0 0; }
-.dh-result { font-size: 15px; line-height: 1.45; margin: 0; }
-.dh-sheet-err { color: var(--danger); font-size: 13px; }.dh-sheet-err:empty { display: none; }
-.dh-sheet-btns { display: flex; gap: 8px; }
-.dh-sheet-btns .btn { flex: 1; min-height: 48px; font-size: 16px; }
 #dialsTableWrap .list-table { width: 100%; }
 .dh #dialsTableWrap .mobile-card { margin-left: 0; margin-right: 0; }

@@ -230,6 +230,8 @@ export async function signOut() {
 }
 
 const NAV_ICONS = {
+  send:
+    '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>',
   server:
     '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>',
   person:
@@ -270,6 +272,7 @@ export function renderNav(profile) {
         ${link("clients.html", "Clients")}
         ${link("dials.html", "Dials")}
         ${link("messages.html", "Messages")}
+        ${profile.role === "admin" ? link("campaigns.html", "Campaigns") : ""}
         ${profile.role === "admin" ? link("mailboxes.html", "Mailboxes") : ""}
       </div>
       <div class="who">
@@ -283,6 +286,7 @@ export function renderNav(profile) {
       ${iconLink("clients.html", NAV_ICONS.handshake, "Clients")}
       ${iconLink("dials.html", NAV_ICONS.phone, "Dials")}
       ${iconLink("messages.html", NAV_ICONS.mail, "Messages")}
+      ${profile.role === "admin" ? iconLink("campaigns.html", NAV_ICONS.send, "Campaigns") : ""}
       ${profile.role === "admin" ? iconLink("mailboxes.html", NAV_ICONS.server, "Mailboxes") : ""}
     </div>
   `;
