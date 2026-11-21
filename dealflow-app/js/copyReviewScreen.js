@@ -31,14 +31,19 @@ export async function openCopyReview(list, { onChanged, all = false } = {}) {
   const title = all ? `Review emails${list.name ? " · " + list.name : ""}` : "Fix emails";
   lockPageScroll();
   let changed = false;
-  const panel = $(`<div class="cr-panel" role="dialog" aria-label="${escapeHtml(title)}">
+  const panel = $(`<div class="cr-panel" role="dialog" data-list-id="${escapeHtml(String(list.id))}" aria-label="${escapeHtml(title)}">
     <div class="cr-head"><div class="cr-head-row"><h2>${escapeHtml(title)}</h2><button type="button" class="fs-close cr-close" aria-label="Close">&times;</button></div></div>
+    <!-- Mount point for the in-app Claude chat panel (js/aiChat.js, added by another builder). Leave empty. -->
+    <div id="aiChatMount"></div>
     <div class="cr-body"><div class="help-text">Loading...</div></div></div>`);
   document.body.appendChild(panel);
   const body = panel.querySelector(".cr-body");
-  const close = () => { panel.remove(); unlockPageScroll(); document.removeEventListener("keydown", onKey); if (changed) onChanged && onChanged(); };
+  const close = () => { panel.remove(); unlockPageScroll(); document.removeEventListener("keydown", onKey); document.removeEventListener("ws:drafts-changed", onDrafts); if (changed) onChanged && onChanged(); };
   const onKey = (e) => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", onKey);
+  // "Edit with Claude" (aiChat.js) saved changes: reload the drafts
+  const onDrafts = (e) => { if (e.detail?.listId === list.id) { changed = true; loadHeld(list.id, all).then(render).catch(() => {}); } };
+  document.addEventListener("ws:drafts-changed", onDrafts);
   panel.querySelector(".cr-close").onclick = close;
 
   const issues = (l) => (l.copy_errors || []).map((e) => `<li class="e">${escapeHtml(e)}</li>`).join("") + (l.copy_warnings || []).map((w) => `<li class="w">${escapeHtml(w)}</li>`).join("");

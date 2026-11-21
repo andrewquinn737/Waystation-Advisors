@@ -1,0 +1,27 @@
+[Unit]
+Description=Waystation AI worker (Claude Code for the in-app draft chat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=waystation-ai
+Group=waystation-ai
+WorkingDirectory=/opt/waystation-ai
+EnvironmentFile=/etc/waystation-ai/env
+ExecStart=/usr/bin/python3 /opt/waystation-ai/worker.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+# the worker only needs to talk to Supabase and Anthropic and write under /opt/waystation-ai and its home
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/waystation-ai /home/waystation-ai
+ProtectKernelTunables=true
+ProtectControlGroups=true
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

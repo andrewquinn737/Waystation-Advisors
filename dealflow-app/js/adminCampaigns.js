@@ -11,7 +11,7 @@ const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const day = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${MON[d.getMonth()]} ${d.getDate()}`; };
 const MANDATE = { ma: "M&A", data: "Data" };
-const CHIP = { draft: "Draft", ready: "Ready", live: "Live", paused: "Paused", done: "Done" };
+const CHIP = { draft: "Draft", ready: "Ready to launch", live: "Running", paused: "Paused", done: "Finished" };
 let camps = [], showDone = false;
 
 function msg(text, ok = false) { const el = $("cpMsg"); el.textContent = text || ""; el.classList.toggle("hidden", !text); el.classList.toggle("ok", ok); }
@@ -29,33 +29,51 @@ async function load() {
   msg(""); camps = data || []; render();
 }
 
-const stat = (label, n) => `<div class="ad-stat${n ? "" : " zero"}"><b>${n}</b><span>${label}</span></div>`;
+const STATS = [["emails_sent", "Emails sent"], ["contacted", "Companies contacted"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls booked"], ["bounced", "Bounced"]];
+const pct = (n, of) => (of > 0 && n > 0 ? `<small>${Math.round((n / of) * 100)}%</small>` : "");
+const statRow = (n, cls = "") => `<div class="ad-stats ${cls}">${STATS.map(([k, label], i) => {
+  const v = n[k] ?? 0;
+  return `<div class="ad-stat${v ? "" : " zero"}"><b>${v.toLocaleString()}${i > 1 ? pct(v, n.contacted) : ""}</b><span>${label}</span></div>`;
+}).join("")}</div>`;
 export const designPrompt = (c) => `Use the Waystation CRM connector: design_campaign for list ${c.name} (list_id ${c.list_id})`;
 
+function totals() {
+  const t = {};
+  for (const [k] of STATS) t[k] = camps.reduce((s, c) => s + (c.counts?.[k] ?? 0), 0);
+  return t;
+}
 function hint(c) {
   const n = c.counts;
   if (!c.mailboxes) return `<p class="ad-note warn">${esc(c.owner || "The owner")} has no sending mailbox yet. Add one under Email accounts before launching.</p>`;
   if (c.status === "paused") return `<p class="ad-note warn">Paused${c.paused_reason ? ": " + esc(c.paused_reason) : ""}. Nothing is sent until you resume.</p>`;
-  if (c.status === "draft") return `<p class="ad-note">${c.has_spintax ? `${plural(n.need_fix, "email needs", "emails need")} a fix.` : "No emails yet. Design them in Claude."}</p>`;
-  if (c.status === "ready") return `<p class="ad-note">${c.launched_at ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "email is", "emails are")} ready to launch.`}${n.active ? ` ${n.active} still sending.` : ""}</p>`;
+  if (c.status === "draft" && !c.has_spintax) return `<p class="ad-note">No emails yet. Design them in Claude.</p>`;
+  if (c.status === "ready") return `<p class="ad-note">${c.launched_at ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "email is", "emails are")} ready to launch.`}</p>`;
   return "";
 }
 function card(c) {
   const n = c.counts, live = c.status === "live", paused = c.status === "paused", canLaunch = n.ready > 0 && !paused;
   const sub = [c.owner || "Unknown owner", "Uploaded " + day(c.created_at), MANDATE[c.mandate] || ""].filter(Boolean).join(" · ");
-  const design = c.status !== "done" ? `<button type="button" class="btn ${c.status === "draft" ? "" : "secondary"}" data-a="design">Design in Claude</button>` : "";
-  const launch = canLaunch ? `<button type="button" class="btn" data-a="launch">${c.launched_at ? "Launch again " : "Launch "}${n.ready}</button>` : "";
-  const pause = live ? `<button type="button" class="btn secondary" data-a="pause">Pause</button>` : paused ? `<button type="button" class="btn" data-a="resume">Resume</button>` : "";
+  const primary = canLaunch ? "launch" : paused ? "resume" : c.status === "draft" ? "design" : "";
+  const btn = (a, label) => `<button type="button" class="btn${primary === a ? "" : " secondary"}" data-a="${a}">${label}</button>`;
+  const acts = [
+    canLaunch ? btn("launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`) : "",
+    paused ? btn("resume", "Resume") : "",
+    c.status !== "done" ? btn("design", "Design in Claude") : "",
+    n.ready + n.need_fix > 0 ? btn("review", "Review emails") : "",
+    live ? btn("pause", "Pause") : "",
+  ].filter(Boolean);
+  const held = n.need_fix > 0 ? `<p class="ad-note warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></p>` : "";
   return `<article class="ad-card" data-id="${esc(c.list_id)}">
     <div class="ad-top"><div class="ad-name">${esc(c.name || "(untitled)")}</div><span class="ad-chip ${esc(c.status)}">${CHIP[c.status] || ""}</span></div>
     <div class="ad-sub">${esc(sub)}</div>
-    <div class="ad-stats">${stat("Ready", n.ready)}${stat("Need a fix", n.need_fix)}${stat("Sending", n.active)}${stat("Sent first", n.sent_first)}${stat("Replied", n.replied)}${stat("Bounced", n.bounced)}</div>
-    ${hint(c)}<div class="ad-actions" style="margin-top:10px">${canLaunch && c.status === "ready" ? launch + design : design + launch}
-      ${n.ready + n.need_fix > 0 ? `<button type="button" class="btn secondary" data-a="review">Review</button>` : ""}${pause}</div></article>`;
+    ${statRow(n)}
+    ${hint(c)}${held}<div class="ad-actions">${acts.join("")}</div></article>`;
 }
 function render() {
   const open = camps.filter((c) => c.status !== "done"), done = camps.filter((c) => c.status === "done");
   $("cpSummary").textContent = camps.length ? `${plural(open.length, "campaign", "campaigns")} in progress${done.length ? `, ${done.length} finished` : ""}.` : "";
+  $("cpTotals").innerHTML = camps.length ? `<div class="ad-totals-h">All campaigns</div>${statRow(totals())}` : "";
+  $("cpTotals").classList.toggle("hidden", !camps.length);
   const shown = showDone ? camps : open;
   $("cpList").innerHTML = shown.length ? shown.map(card).join("") : `<p class="ad-empty">${camps.length ? "Nothing in progress." : "No campaigns yet. One appears here as soon as a list with email leads is uploaded."}</p>`;
   const t = $("cpToggleDone"); t.classList.toggle("hidden", !done.length); t.textContent = showDone ? "Hide finished" : `Show finished (${done.length})`;
@@ -98,7 +116,7 @@ async function startEmails(listId, count) {
 function resultSentence(r) {
   const parts = [`${plural(r.started ?? 0, "email", "emails")} started`];
   if (r.moved_to_backup) parts.push(`${r.moved_to_backup} moved to backup after the address check`);
-  if (r.held_for_copy) parts.push(`${r.held_for_copy} need a fix`);
+  if (r.held_for_copy) parts.push(`${r.held_for_copy} need edits`);
   if (r.unverified) parts.push(`${r.unverified} couldn't be checked, still ready`);
   let s = parts.join(", ") + ".";
   if (r.remaining_ready) s += ` ${r.remaining_ready} still ready.`;
@@ -110,7 +128,7 @@ function openLaunch(c) {
   sheet.className = "ad-sheet-bd";
   sheet.innerHTML = `<div class="ad-sheet" role="dialog" aria-label="Launch emails"><div class="ad-sheet-main"><h2>Launch ${esc(c.name)}</h2>
       <p class="ad-muted">${esc(c.owner || "The owner")}'s mailboxes send up to 20 a day each, 8:30am to 5pm their time, a few minutes apart. Addresses are checked first. You can pause any time.</p>
-      <button type="button" class="btn" id="adAll" style="width:100%">Send all ${n} ready</button>
+      <div class="ad-row"><button type="button" class="btn" id="adAll">Send all ${n} ready</button></div>
       <label class="ad-lbl" for="adCount">Or send a number</label>
       <div class="ad-num"><input id="adCount" type="number" inputmode="numeric" min="1" max="${n}" placeholder="1 to ${n}" /><button type="button" class="btn secondary" id="adSome">Send</button></div></div>
     <div class="ad-err" id="adErr" role="alert"></div><button type="button" class="btn secondary" id="adCancel">Cancel</button></div>`;

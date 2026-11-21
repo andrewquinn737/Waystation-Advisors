@@ -30,41 +30,8 @@ body.role-intern[data-page="messages.html"] #pageSettingsBtn,
 body.role-intern[data-page="messages.html"] #menuMailboxesBtn { display: none !important; }
 
 /* ---- One place for each setting ---- */
-/* Sellers/Buyers and Accounts visible live on Team (leads/admins) only */
-body:not([data-page="team.html"]) #dealSideToggleBtn,
-body:not([data-page="team.html"]) #menuAccountsVisibleBtn { display: none !important; }
-/* Clients' gear only held those two (and Notifications, now on Me) */
+/* Sellers/Buyers and Accounts visible live on Profile only */
+body:not([data-page="profile.html"]) #dealSideToggleBtn,
+body:not([data-page="profile.html"]) #menuAccountsVisibleBtn { display: none !important; }
+/* Clients' gear only held those two (and Notifications, which is on Profile) */
 body[data-page="clients.html"] #pageSettingsBtn { display: none !important; }
-
-/* ---- Me ---- */
-.me-simple { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 14px 0 6px; }
-.me-today { margin: 0; font-size: 15px; color: var(--text-muted-strong); }
-.me-today b { font-size: 28px; color: var(--text); margin-right: 4px; }
-.me-notif { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; }
-.me-simple .help-text { margin: 0; }
-body[data-page="profile.html"] #reportsBtn,
-body[data-page="profile.html"] #menuTeamsBtn,
-body[data-page="profile.html"] #menuDeletedTabsBtn { display: none !important; } /* moved to Team */
-body.role-intern[data-page="profile.html"] #calendlyLinkSection,
-body.role-intern[data-page="profile.html"] #calendlyPreferenceSection,
-body.role-intern[data-page="profile.html"] #outreachCallsSection,
-body.role-intern[data-page="profile.html"] #introCallsSection,
-body.role-intern[data-page="profile.html"] #upcomingEventsSection,
-body.role-intern[data-page="profile.html"] #callbacksTodaySection,
-body.role-intern[data-page="profile.html"] #claudeConnectHost,
-body.role-intern[data-page="profile.html"] #surveyBtn,
-body.role-intern[data-page="profile.html"] #pageSettingsBtn,
-body.role-intern[data-page="profile.html"] #menuLinksBtn,
-body.role-intern[data-page="profile.html"] #menuCallsViewBtn { display: none !important; }
-
-/* ---- Team (reuses profile.js; only the big buttons show) ---- */
-.team-panel { display: flex; flex-direction: column; gap: 10px; }
-.team-big { min-height: 52px; font-size: 16px; text-align: center; display: flex; align-items: center; justify-content: center; text-decoration: none; }
-body:not([data-page="team.html"]) .team-panel { display: none; }
-body[data-page="team.html"] .profile-card > :not(.team-panel) { display: none !important; }
-body[data-page="team.html"] #menuEditProfileBtn,
-body[data-page="team.html"] #menuLinksBtn,
-body[data-page="team.html"] #menuCallsViewBtn,
-body[data-page="team.html"] #menuTeamsBtn,
-body[data-page="team.html"] #menuDeletedTabsBtn,
-body[data-page="team.html"] #pageMenuToggle { display: none !important; }

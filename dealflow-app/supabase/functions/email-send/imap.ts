@@ -64,6 +64,23 @@ export async function imapConnect(host: string, port: number): Promise<ImapConn>
   return c;
 }
 
+// XOAUTH2 (Microsoft 365 app-only). `xoauth` is the base64 SASL string from _shared/msOauth.ts.
+export async function imapAuthXoauth2(c: ImapConn, xoauth: string) {
+  const tag = nextTag(c);
+  await sendCmd(c, tag, "AUTHENTICATE XOAUTH2");
+  const first = await readLine(c);
+  if (first.startsWith(tag + " ")) throw new Error("IMAP login failed: " + first.trim());
+  await c.writer.write(new TextEncoder().encode(xoauth + "\r\n"));
+  while (true) {
+    const line = await readLine(c);
+    if (line.startsWith(tag + " ")) {
+      if (!new RegExp(`^${tag} OK`).test(line)) throw new Error("IMAP login failed: " + line.trim());
+      return;
+    }
+    if (line.startsWith("+")) await c.writer.write(new TextEncoder().encode("\r\n")); // error challenge: cancel, tagged NO follows
+  }
+}
+
 export async function imapLogin(c: ImapConn, user: string, pass: string) {
   const tag = nextTag(c);
   await sendCmd(c, tag, `LOGIN ${escapeImapString(user)} ${escapeImapString(pass)}`);

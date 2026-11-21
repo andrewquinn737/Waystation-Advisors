@@ -66,3 +66,17 @@
 .cc-warn{color:var(--danger);font-weight:600}
 .cc-steps{margin:8px 0;padding-left:20px;font-size:14px;line-height:1.5}
 .cc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.cc-actions .btn{min-height:44px}
+/* Review screen refresh: quiet cards, compact type (matches Admin) */
+.cr-head{padding:14px 18px 12px}.cr-head h2{font-size:16px;font-weight:700}
+.cr-body{gap:10px;padding:14px 18px calc(24px + env(safe-area-inset-bottom,0px))}
+.cr-card{border-radius:12px;padding:14px 16px}
+.cr-card.has-err{border-width:1px;border-color:var(--border);box-shadow:inset 3px 0 0 var(--danger)}
+.cr-card.has-warn{border-color:var(--border);box-shadow:inset 3px 0 0 var(--warn)}
+.cr-card-top b{font-size:14.5px}.cr-to{font-size:12.5px;margin-top:1px}
+.cr-field span{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)}
+.cr-field textarea{font-size:15px;line-height:1.45;border-radius:8px}
+.cr-card-foot{margin-top:10px}
+.cr-savebtn{background:transparent;color:var(--accent);border:1px solid var(--accent);border-radius:8px;padding:0 18px;font-size:13.5px}
+@media (hover:hover){.cr-savebtn:hover{background:var(--accent);color:#fff}}
+.cr-close{color:var(--text-muted)}
+#aiChatMount:empty{display:none}

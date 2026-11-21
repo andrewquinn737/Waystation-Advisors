@@ -3,6 +3,7 @@ import { requireSession } from "./auth.js";
 import { initCampaigns } from "./adminCampaigns.js";
 import { initAccounts } from "./adminAccounts.js";
 import { initSettings } from "./adminSettings.js";
+import "./aiChat.js"; // mounts "Edit with Claude" into #aiChatMount when a campaign review opens
 
 const $ = (id) => document.getElementById(id);
 const { profile } = await requireSession();

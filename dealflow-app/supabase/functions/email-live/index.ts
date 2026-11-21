@@ -17,8 +17,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { simpleParser } from "npm:mailparser@3";
 import { Buffer } from "node:buffer";
 import { getMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { usesMsOauth, getMsToken, xoauth2String } from "../_shared/msOauth.ts";
 import { hostIsPrivate } from "../_shared/hostGuard.ts";
-import { imapConnect, imapLogin, imapLogout, imapList, imapExamine, imapSearchAll, imapFetchHeaders, imapFetchRaw, imapStatus } from "./imap.ts";
+import { imapConnect, imapLogin, imapAuthXoauth2, imapLogout, imapList, imapExamine, imapSearchAll, imapFetchHeaders, imapFetchRaw, imapStatus } from "./imap.ts";
 
 const MAX_LIMIT = 40;
 const MAX_RAW_BYTES = 8 * 1024 * 1024;
@@ -75,7 +76,7 @@ async function handle(req: Request): Promise<Response> {
   const password = await getMailboxPassword(admin, account);
   const c = await imapConnect(account.imap_host, account.imap_port);
   try {
-    await imapLogin(c, account.username, password);
+    if (usesMsOauth(account)) await imapAuthXoauth2(c, xoauth2String(account.username, await getMsToken(account.username))); else await imapLogin(c, account.username, password);
     const all = await imapList(c);
     const folders: any[] = all.map((f) => ({ name: f.name, kind: classify(f.name, f.attrs), attrs: f.attrs }));
     if (action === "folders") {

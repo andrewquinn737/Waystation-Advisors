@@ -14,7 +14,7 @@
 </script>
 <link rel="stylesheet" href="css/style.css" />
 <link rel="stylesheet" href="css/copyReview.css" />
-<link rel="stylesheet" href="css/admin.css?v=1" id="adminCss" />
+<link rel="stylesheet" href="css/admin.css?v=2" id="adminCss" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
@@ -42,14 +42,14 @@
     <div id="adApp" class="hidden">
       <nav class="ad-tabs" id="adTabs" aria-label="Admin sections">
         <a href="#campaigns" data-tab="campaigns">Campaigns</a>
-        <a href="#accounts" data-tab="accounts">Email</a>
-        <a href="clients.html">Clients</a>
+        <a href="#accounts" data-tab="accounts">Email accounts</a>
         <a href="#settings" data-tab="settings">Settings</a>
       </nav>
 
       <section class="ad-sec" id="campaigns" data-sec="campaigns" aria-labelledby="adCampH">
         <div class="ad-sec-head"><h2 id="adCampH">Campaigns</h2><button type="button" class="btn secondary small" id="cpRefresh">Refresh</button></div>
         <div class="ad-msg hidden" id="cpMsg" role="alert"></div>
+        <div class="ad-totals hidden" id="cpTotals"></div>
         <p class="ad-muted" id="cpSummary" aria-live="polite"></p>
         <div id="cpList"></div>
         <button type="button" class="btn secondary small hidden" id="cpToggleDone"></button>

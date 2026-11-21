@@ -42,13 +42,25 @@ async function load() {
   } catch (e) { $("mbxList").innerHTML = ""; msg(e.message); }
 }
 
+// Two separate indicators: sending (SMTP login) and reading (IMAP login). Microsoft 365 blocks password logins on IMAP while
+// sending still works, so that case is "Reading blocked by Microsoft", not a failed login.
+function indicators(b) {
+  const send = b.sending_ok === true ? ["good", "Sending \u2713"] : b.sending_ok === false ? ["bad", "Sending \u2717"] : ["", "Sending not checked"];
+  const r = b.reading_state;
+  const read = r === "ok" ? ["good", "Reading \u2713"]
+    : r === "blocked_microsoft" ? ["warn", b.sending_ok === false ? "Reading blocked by Microsoft" : "Reading blocked by Microsoft (sending works)"]
+    : r === "error" ? ["bad", "Reading \u2717"] : r === "off" ? ["", "Reading off"] : ["", "Reading not checked"];
+  const tip = b.last_sync_error ? ` title="${esc(b.last_sync_error)}"` : "";
+  return `<span class="ad-ind ${send[0]}">${send[1]}</span><span class="ad-ind ${read[0]}"${tip}>${read[1]}</span>`;
+}
+
 function boxHtml(b) {
   const lim = b.effective_daily_limit ?? 0, sent = b.sent_24h ?? 0, paused = !!b.send_paused_reason;
-  const ver = b.credentials_verified === true ? `<span class="ad-badge good">login ok</span>` : b.credentials_verified === false ? `<span class="ad-badge bad">login failed</span>` : `<span class="ad-badge warn">login not checked</span>`;
+  const ver = indicators(b);
   const owners = people.map((p) => `<option value="${p.id}" ${!b.needs_assignment && p.id === b.owner_id ? "selected" : ""}>${esc(p.full_name)}</option>`).join("");
   return `<div class="ad-box${paused ? " paused" : ""}" data-id="${b.id}">
     <div class="ad-box-top"><span class="ad-addr" title="${esc(b.email_address)}">${esc(b.email_address)}</span><span class="ad-use${lim && sent + (b.scheduled ?? 0) >= lim ? " full" : ""}" title="Sent in the last 24h / daily limit (${b.scheduled ?? 0} queued)">${sent}/${lim} today</span></div>
-    <div class="ad-badges">${ver}${paused ? `<span class="ad-badge warn" title="${esc(b.send_paused_reason)}">paused: ${esc(b.send_paused_reason)}</span>` : ""}</div>
+    <div class="ad-badges">${ver}<button type="button" class="ad-link" data-act="check" title="Log in to this mailbox now (nothing is sent)">Check now</button>${paused ? `<span class="ad-badge warn" title="${esc(b.send_paused_reason)}">paused: ${esc(b.send_paused_reason)}</span>` : ""}</div>
     <div class="ad-box-ctl"><select data-act="owner" aria-label="Owner">${b.needs_assignment ? `<option value="" selected disabled>Pick an owner</option>` : ""}${owners}</select>
       <input type="number" min="0" max="200" data-act="limit" value="${b.daily_send_limit ?? ""}" placeholder="${lim || ""}" title="Daily limit (blank = default)" aria-label="Daily limit" />
       <button type="button" class="btn secondary small" data-act="pause">${paused ? "Resume" : "Pause"}</button></div>
@@ -60,6 +72,7 @@ function render() {
   const unassigned = boxes.filter((b) => b.needs_assignment).length;
   $("mbxSummary").textContent = `${boxes.length} account${boxes.length === 1 ? "" : "s"}` + (unassigned ? `, ${unassigned} need an owner` : "");
   if (!boxes.length) { $("mbxList").innerHTML = `<p class="ad-empty">No email accounts yet. Tap "Add account".</p>`; return; }
+  const wasOpen = new Set([...$("mbxList").querySelectorAll("details.ad-group[open]")].map((d) => d.dataset.k));
   const groups = new Map();
   for (const b of boxes) {
     const k = b.needs_assignment ? "__un" : b.owner_id;
@@ -69,8 +82,8 @@ function render() {
   const ordered = [...groups.entries()].sort((a, b) => (a[0] === "__un" ? -1 : b[0] === "__un" ? 1 : a[1].name.localeCompare(b[1].name)));
   $("mbxList").innerHTML = ordered.map(([k, g]) => {
     const used = g.items.reduce((s, b) => s + (b.sent_24h ?? 0), 0), cap = g.items.reduce((s, b) => s + (b.effective_daily_limit ?? 0), 0);
-    const open = k === "__un" || g.items.some((b) => b.send_paused_reason || b.credentials_verified === false);
-    return `<details class="ad-group${k === "__un" ? " warn" : ""}" ${open ? "open" : ""}><summary><span>${esc(g.name)}</span><small>${g.items.length} · ${used}/${cap} today</small></summary>${g.items.map(boxHtml).join("")}</details>`;
+    const open = wasOpen.has(String(k)) || k === "__un" || g.items.some((b) => b.send_paused_reason || b.sending_ok === false);
+    return `<details class="ad-group${k === "__un" ? " warn" : ""}" data-k="${esc(k)}" ${open ? "open" : ""}><summary><span>${esc(g.name)}</span><small>${g.items.length} · ${used}/${cap} today</small></summary>${g.items.map(boxHtml).join("")}</details>`;
   }).join("");
 }
 
@@ -85,7 +98,8 @@ function onEvent(ev) {
     const v = el.value.trim();
     if (v !== "" && (!/^\d+$/.test(v) || +v > 200)) { msg("Daily limit must be a whole number from 0 to 200."); el.value = b.daily_send_limit ?? ""; return; }
     run(() => api({ action: "update", account_id: id, daily_send_limit: v === "" ? null : +v }));
-  } else if (act === "pause" && ev.type === "click") run(() => api({ action: "update", account_id: id, send_paused_reason: b.send_paused_reason ? null : "Paused by admin" }));
+  } else if (act === "check" && ev.type === "click") checkLogin(b, el);
+  else if (act === "pause" && ev.type === "click") run(() => api({ action: "update", account_id: id, send_paused_reason: b.send_paused_reason ? null : "Paused by admin" }));
 }
 
 async function addOne() {
@@ -114,4 +128,16 @@ async function rotateKey() {
     $("mbxCopyKey").onclick = async (e) => { e.target.textContent = (await copyText(r.api_key)) ? "Copied" : "Select and copy it by hand"; };
   } catch (e) { msg(e.status === 400 ? "Key rotation isn't available on this server yet." : e.message); }
   $("mbxRotate").disabled = false;
+}
+
+// Live login check for one mailbox (nothing is sent). Updates both indicators in place.
+async function checkLogin(b, btn) {
+  btn.disabled = true; btn.textContent = "Checking...";
+  try {
+    const r = await api({ action: "check_login", account_id: b.id });
+    b.sending_ok = r.smtp.ok; b.credentials_verified = r.smtp.ok;
+    b.reading_state = r.imap.ok ? "ok" : r.reading?.blocked_by_microsoft ? "blocked_microsoft" : "error";
+    b.last_sync_error = r.imap.ok ? null : r.imap.error;
+    render();
+  } catch (e) { msg(e.message); btn.disabled = false; btn.textContent = "Check now"; }
 }

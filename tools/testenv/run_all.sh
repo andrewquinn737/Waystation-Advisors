@@ -19,5 +19,7 @@ run "Claude connector"    "python3 test_claude_connector.py"
 run "spintax expander"    "node spintax.test.mjs"
 run "campaigns + spintax" "python3 test_campaigns.py"
 run "hardening"           "python3 test_hardening.py"
+run "AI worker (unit)"    "python3 ../ai_worker/test_worker.py"
+run "AI chat (end to end)" "python3 test_ai_chat.py"
 [ "$1" = "--load" ] && run "load test" "python3 load_test.py 300 | grep 'over limit'"
 [ $fail = 0 ] && echo "ALL GREEN" || { echo "SOMETHING FAILED - do not release"; exit 1; }

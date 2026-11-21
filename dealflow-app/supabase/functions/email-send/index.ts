@@ -51,8 +51,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { smtpSend, SmtpUnknownError, SmtpAuthError } from "./smtp.ts";
 import { getMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { usesMsOauth, getMsToken, xoauth2String } from "../_shared/msOauth.ts";
 import { hostIsPrivate } from "../_shared/hostGuard.ts";
-import { imapConnect, imapLogin, imapLogout, imapFindSentFolder, imapAppend } from "./imap.ts";
+import { imapConnect, imapLogin, imapAuthXoauth2, imapLogout, imapFindSentFolder, imapAppend } from "./imap.ts";
 
 const CRON_SHARED_SECRET = Deno.env.get("CRON_SHARED_SECRET") ?? "";
 
@@ -359,7 +360,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
       (async () => {
         const c = await imapConnect(account.imap_host, account.imap_port);
         try {
-          await imapLogin(c, account.username, password);
+          if (usesMsOauth(account)) await imapAuthXoauth2(c, xoauth2String(account.username, await getMsToken(account.username))); else await imapLogin(c, account.username, password);
           sentFolder = await imapFindSentFolder(c);
           await imapAppend(c, sentFolder, new TextEncoder().encode(raw));
           savedToSent = true;

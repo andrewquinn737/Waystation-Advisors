@@ -81,6 +81,10 @@ def sched_count(lid):
     return q(f"select count(*) n from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id where t.list_id='{lid}' and s.status='pending'")[0]["n"]
 
 def cleanup():
+    # boxes left by a crashed or killed earlier run (other tag) would join the owner's pool and soak up the leads of the cap/ramp
+    # scenarios; this suite's boxes only live for minutes, so anything older than an hour is debris
+    q("""delete from scheduled_emails where account_id in (select id from email_accounts where label like 'TEST-HARD-BOX-%' and created_at < now() - interval '1 hour')""")
+    q("""delete from email_accounts where label like 'TEST-HARD-BOX-%' and created_at < now() - interval '1 hour'""")
     # only this run's own rows (tagged): other suites and other copies of this suite share the TEST project
     q(f"""delete from scheduled_emails where dial_id in (select d.id from dials d join dial_lists l on l.id=d.list_id where l.name like 'TEST-HARD {TAG} %')
             or account_id in (select id from email_accounts where label='TEST-HARD-BOX-{TAG}') or to_address like '%{TAG}%'""")

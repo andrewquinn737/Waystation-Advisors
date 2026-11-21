@@ -105,17 +105,25 @@ async function smtpAuthCheck(host: string, port: number, user: string, pass: str
   }
 }
 
+const isMicrosoftHost = (h: string) => /(^|\.)office365\.com$|(^|\.)outlook\.com$/i.test(h || "");
+// Microsoft 365 turns off password (basic auth) logins on IMAP while SMTP still works. A rejected IMAP login there is "reading
+// blocked by Microsoft", not a bad password. Timeouts / connection errors are not.
+const imapBlockedByMicrosoft = (host: string, err: string) => isMicrosoftHost(host) && !/timed out|connect|resolve|refused|reset|closed/i.test(err || "");
+
+// SMTP (sending) must work. IMAP (reading) must work too, except on Microsoft 365 where a blocked IMAP login is accepted.
 async function verifyCredentials(r: any): Promise<string | null> {
-  try {
-    const c = await withTimeout(imapConnect(r.imap_host, r.imap_port), 12000, "Connecting to the IMAP server");
-    try { await withTimeout(imapLogin(c, r.username, r.password), 12000, "IMAP login"); } finally { await imapLogout(c); }
-  } catch (e) {
-    return "IMAP: " + String(e).replace(/^Error: /, "");
-  }
   try {
     await withTimeout(smtpAuthCheck(r.smtp_host, r.smtp_port, r.username, r.password), 20000, "SMTP login");
   } catch (e) {
     return "SMTP: " + String(e).replace(/^Error: /, "");
+  }
+  try {
+    const c = await withTimeout(imapConnect(r.imap_host, r.imap_port), 12000, "Connecting to the IMAP server");
+    try { await withTimeout(imapLogin(c, r.username, r.password), 12000, "IMAP login"); } finally { await imapLogout(c); }
+  } catch (e) {
+    const m = String(e).replace(/^Error: /, "");
+    if (imapBlockedByMicrosoft(r.imap_host, m)) return null;
+    return "IMAP: " + m;
   }
   return null;
 }
@@ -426,6 +434,12 @@ async function remove(ctx: Ctx, body: any) {
   return jsonResponse({ ok: true, removed: results.filter((r) => r.status === "removed").length, results });
 }
 
+function readingState(r: any): string {
+  if (r.sync_enabled === false) return "off";
+  if (r.last_sync_error) return imapBlockedByMicrosoft(r.imap_host, r.last_sync_error) && /login|auth|credential|password/i.test(r.last_sync_error) ? "blocked_microsoft" : "error";
+  return r.last_synced_at ? "ok" : "unknown";
+}
+
 async function list(ctx: Ctx) {
   const { data: rows, error } = await ctx.admin.from("email_accounts").select(LIST_COLS).order("email_address");
   if (error) return jsonResponse({ error: error.message }, 500);
@@ -443,6 +457,8 @@ async function list(ctx: Ctx) {
     sent_24h: counts[i]?.sent ?? null,
     scheduled: counts[i]?.scheduled ?? null,
     effective_daily_limit: counts[i]?.daily_limit ?? null,
+    sending_ok: r.credentials_verified ?? null,                 // SMTP login, from the last check
+    reading_state: readingState(r),                              // 'ok' | 'blocked_microsoft' | 'error' | 'off' | 'unknown'
   }));
   return jsonResponse({ ok: true, mailboxes, people: profiles.map((p) => ({ id: p.id, full_name: p.full_name, role: p.role })) });
 }
@@ -464,7 +480,11 @@ async function checkLogin(ctx: Ctx, body: any) {
   } catch (e) { out.imap = { ok: false, error: scrub(String(e)) }; }
   try { await withTimeout(smtpAuthCheck(a.smtp_host, a.smtp_port, a.username, password), 20000, "SMTP login"); }
   catch (e) { out.smtp = { ok: false, error: scrub(String(e)) }; }
-  await ctx.admin.from("email_accounts").update({ credentials_verified: out.imap.ok && out.smtp.ok }).eq("id", id);
+  // Sending (SMTP) and reading (IMAP) are reported separately. credentials_verified now means "sending works".
+  out.sending = { ok: out.smtp.ok, error: out.smtp.error };
+  const blocked = !out.imap.ok && imapBlockedByMicrosoft(a.imap_host, out.imap.error);
+  out.reading = { ok: out.imap.ok, blocked_by_microsoft: blocked, error: out.imap.error };
+  await ctx.admin.from("email_accounts").update({ credentials_verified: out.smtp.ok }).eq("id", id);
   return jsonResponse(out);
 }
 

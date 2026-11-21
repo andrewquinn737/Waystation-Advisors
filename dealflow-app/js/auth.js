@@ -243,22 +243,18 @@ const NAV_ICONS = {
     '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l3.5-3 3 2 2.5-2 2.5 2 3-2 3.5 3"/><path d="M3 13v3l3.5 3.5"/><path d="M21 13v3l-3.5 3.5"/><path d="M9.5 12l2 2.3a1 1 0 0 0 1.5 0l.5-.6a1 1 0 0 0 0-1.4L12 10"/></svg>',
   phone:
     '<svg class="nav-phone" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
-  team:
-    '<svg class="nav-person" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   mail:
     '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
 };
 
-// Who sees which tabs (docs/CRM_DESIGN.md §1). Interns (and independent leads): Calls, Inbox, Me.
-// Team leads add Team. Admins add Team and Admin. Clients is reached from Team / Admin, not from the bar.
+// Who sees which tabs: Profile first (everyone), then Calls, Inbox, and Admin for admins. Clients is reached from Admin > Settings.
 function navItems(role) {
   const items = [
+    { href: "profile.html", label: "Profile", icon: NAV_ICONS.person },
     { href: "dials.html", label: "Calls", icon: NAV_ICONS.phone },
     { href: "messages.html", label: "Inbox", icon: NAV_ICONS.mail },
   ];
-  if (role === "team_lead" || role === "admin") items.push({ href: "team.html", label: "Team", icon: NAV_ICONS.team });
   if (role === "admin") items.push({ href: "admin.html", label: "Admin", icon: NAV_ICONS.server, also: ["campaigns.html", "mailboxes.html"] });
-  items.push({ href: "profile.html", label: "Me", icon: NAV_ICONS.person });
   return items;
 }
 
@@ -266,7 +262,7 @@ function navItems(role) {
 function ensureSimpleCss() {
   if (document.getElementById("simpleCss")) return;
   const l = document.createElement("link");
-  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=1";
+  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=2";
   document.head.appendChild(l);
 }
 
@@ -278,8 +274,8 @@ export function renderNav(profile) {
   document.body.classList.add("role-" + (role === "admin" || role === "team_lead" ? role : "intern"));
 
   const page = document.body.dataset.page || "";
-  // Clients is reached from Team (leads) or Admin (admins), so those tabs stay lit there.
-  const items = navItems(role).map((it) => ({ ...it, active: page === it.href || (it.also || []).includes(page) || (page === "clients.html" && it.href === (role === "admin" ? "admin.html" : "team.html")) }));
+  // Clients is reached from Admin > Settings, so the Admin tab stays lit there.
+  const items = navItems(role).map((it) => ({ ...it, active: page === it.href || (it.also || []).includes(page) || (page === "clients.html" && it.href === "admin.html") }));
   const link = (it) => `<a href="${it.href}" class="${it.active ? "active" : ""}">${it.label}</a>`;
   const tab = (it) => `<a href="${it.href}" class="${it.active ? "active" : ""}" title="${it.label}">${it.icon}<span class="tab-label">${it.label}</span></a>`;
 

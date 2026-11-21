@@ -94,7 +94,7 @@ def cleanup():
     q("delete from scheduled_emails where account_id in (select id from email_accounts where label='TEST-TEMP-BOX')")
     q("delete from email_accounts where label='TEST-TEMP-BOX'")
     q("delete from email_verifications where source='test' or email like '%@example.com'")
-    q("update email_accounts set send_paused_reason=null where send_paused_reason='test pause'")
+    q("update email_accounts set send_paused_reason=null where send_paused_reason in ('test pause', 'test isolation')")
     q(f"update profiles set timezone = null where id = '{uid(GAVIN)}'")
     q(f"update profiles set timezone = 'America/Denver' where id = '{uid(CALEB)}'")
     for t in TEXTS_USED:
@@ -112,10 +112,20 @@ def reset_queue(lid):
     q(f"update sequence_tasks set status='pending', scheduled_email_id=null where list_id='{lid}' and status='queued'")
     if ids: q("update scheduled_emails set status='cancelled' where id in (" + ",".join(f"'{i}'" for i in ids) + ")")
 
+def isolate_owner_mailboxes():
+    """Fixture isolation: CALEB's real (Microsoft-synced) mailboxes carry live state (last_synced_at moves every few minutes, real
+    Sent/warm-up mail counts toward the rolling-24h limit), so the dispatcher scenarios must not depend on them. Pause them for the
+    run and give CALEB five dedicated fake mailboxes (5/day each, data mandate, no sync) with known state. cleanup() undoes both."""
+    q(f"update email_accounts set send_paused_reason='test isolation' where owner_id='{uid(CALEB)}' and coalesce(send_paused_reason,'')='' and label is distinct from 'TEST-TEMP-BOX'")
+    for i in range(5):
+        q(f"""insert into email_accounts (owner_id, label, email_address, imap_host, smtp_host, username, password, mandate, daily_send_limit, source)
+              values ('{uid(CALEB)}', 'TEST-TEMP-BOX', 'seq-fixture-{i}-{SALT}@test-example.org', 'x', 'x', 'x', 'x', 'data', 5, 'test')""")
+
 def run():
     cleanup()
     for e in ("masonquinn10@gmail.com", "mason.alex.quinn@gmail.com", "mason@waystationadvisors.com"):
         seed_mv(e, "ok")
+    isolate_owner_mailboxes()
 
     # ---- 1. classification: personal email -> email5, everything else -> backup (no tasks, no schedule)
     lid = make_list(CALEB, [
@@ -345,7 +355,7 @@ def run():
     check("follow-up: held while the mailbox's inbox isn't being read", fq0 == 0, fq0)
     q(f"update email_accounts set sync_enabled=true, last_synced_at='2026-11-26 08:30-07', last_sync_error=null where id='{s['account_id']}'")
     # follow-ups first: only this mailbox may send, and a fresh first email is waiting too
-    q(f"update email_accounts set send_paused_reason='test pause' where owner_id='{uid(CALEB)}' and id <> '{s['account_id']}'")
+    q(f"update email_accounts set send_paused_reason='test pause' where owner_id='{uid(CALEB)}' and id <> '{s['account_id']}' and coalesce(send_paused_reason,'')=''")
     lid_late = make_list(CALEB, [dict(email="late1@example.com", **COPY)]); rpc(CALEB, "seq_prepare_list", p_list_id=lid_late); start(CALEB, lid_late)
     q(f"update dials set seq_day0='2026-11-26' where list_id='{lid_late}'"); q(f"select seq_build_tasks(id) from dials where list_id='{lid_late}'")
     q(f"update scheduled_emails s set status='cancelled' from sequence_tasks t where t.scheduled_email_id=s.id and t.list_id='{lid}' and s.status='pending' and t.kind='email'")

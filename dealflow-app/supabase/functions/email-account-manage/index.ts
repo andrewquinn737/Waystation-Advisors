@@ -13,8 +13,9 @@
 //  - remove + account_id (or slot_email for an unconnected one).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { imapConnect, imapLogin, imapLogout } from "./imap.ts";
+import { imapConnect, imapLogin, imapAuthXoauth2, imapLogout } from "./imap.ts";
 import { getMailboxPassword, setMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { usesMsOauth, getMsToken, xoauth2String } from "../_shared/msOauth.ts";
 import { hostIsPrivate } from "../_shared/hostGuard.ts";
 
 const MAX_EMAILS = 3;
@@ -170,7 +171,7 @@ async function handle(req: Request): Promise<Response> {
   try {
     const c = await withTimeout(imapConnect(imap_host, imap_port), 12000, "Connecting to the incoming server");
     try {
-      await withTimeout(imapLogin(c, username, password), 12000, "Incoming server login");
+      await withTimeout((async () => { if (existing && usesMsOauth(existing) && !hostChanged) await imapAuthXoauth2(c, xoauth2String(username, await getMsToken(username))); else await imapLogin(c, username, password); })(), 12000, "Incoming server login");
     } finally {
       await imapLogout(c);
     }
