@@ -12,9 +12,15 @@ Test project: `https://aglqusdpkwdidoiaavub.supabase.co`. Every call is a JSON b
 
 ## Auth (either one)
 - `Authorization: Bearer <Supabase user JWT>` for a user whose `profiles.role = 'admin'`.
-- `x-admin-api-key: <key>`: the value of `app_secrets.mailbox_admin_api_key`. Admins can reveal it on the
-  Mailboxes page (API box, "Show API key"). Never commit it. With the key, "the calling admin" (owner fallback)
-  is the first admin profile.
+- `x-admin-api-key: <key>`. Only the SHA-256 of the key is stored (`app_secrets.mailbox_admin_api_key_hash`), so it can
+  never be shown again; an admin mints a new one with `rotate_api_key` (admin session only; the old key stops working at
+  once). Never commit it. With the key, "the calling admin" (owner fallback) is the first admin profile.
+
+Every call is written to `mailbox_admin_audit` (actor, action, target, time, ip). Limit: 60 calls per 10 minutes per key
+or user (HTTP 429 after that). Mail hosts must be on the allowlist (outlook.office365.com, smtp.office365.com,
+imap.gmail.com, smtp.gmail.com, inbound.winnr-app.com, inbound.gowinnr.com, plus `app_secrets.mailbox_host_allowlist`,
+comma separated) and must not resolve to a private address. Changing a host or port on an existing mailbox needs the
+`password` in the same request. Passwords are stored in Supabase Vault.
 
 No credentials: 401. Signed-in non-admin: 403. Passwords are write-only: no action ever returns one, and error
 text is scrubbed of the submitted password.
@@ -69,8 +75,14 @@ All fields optional, at least one required. `send_paused_reason: null` resumes s
 daily_send_limit, effective_daily_limit, sent_24h, scheduled, mandate, send_route, source, needs_assignment,
 credentials_verified, send_paused_reason, last_synced_at, last_sync_error, created_at) and `people` (id, full_name, role). No passwords.
 
-### `get_api_key`
-Admin session only (not callable with the key). Returns `{api_key}`; used by the page's API box.
+### `rotate_api_key`
+Admin session only. Returns `{api_key}` once (`wsk_...`); only its hash is kept. `get_api_key` now returns `api_key: null`.
+
+### `check_login`
+`{"action":"check_login","account_id":"<id>"}`: logs in to IMAP and SMTP with the STORED password (nothing is sent) and
+returns `{imap:{ok,error?}, smtp:{ok,error?}}`; sets `credentials_verified`.
+
+`update` also accepts `ramp_start` (`YYYY-MM-DD` or null): new-mailbox ramp, daily cap = 2 + days since that date.
 
 ## Errors
 Bad input returns 400 `{"error": "..."}` (invalid JSON, unknown action, bad ids, too many rows) or per-row errors inside a 200 for

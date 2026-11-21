@@ -14,6 +14,8 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { imapConnect, imapLogin, imapLogout } from "./imap.ts";
+import { getMailboxPassword, setMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { hostIsPrivate } from "../_shared/hostGuard.ts";
 
 const MAX_EMAILS = 3;
 const CORS_HEADERS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
@@ -131,7 +133,16 @@ async function handle(req: Request): Promise<Response> {
     if (!row || row.owner_id !== userId) return jsonResponse({ error: "That email isn't connected to your account." }, 404);
     existing = row;
   }
-  const password = String(body.password || "") || (existing ? existing.password : "");
+  // Never send a stored password to a different server: changing a host or port needs the password typed again.
+  const hostChanged = !!existing && (existing.imap_host !== imap_host || existing.smtp_host !== smtp_host ||
+    Number(existing.imap_port) !== imap_port || Number(existing.smtp_port) !== smtp_port || existing.username !== username);
+  if (hostChanged && !String(body.password || "")) {
+    return jsonResponse({ error: "To change the mail server, port or username, enter the password again." }, 400);
+  }
+  if (await hostIsPrivate(imap_host) || await hostIsPrivate(smtp_host)) {
+    return jsonResponse({ error: "That mail server address is not allowed (private or local network)." }, 400);
+  }
+  const password = String(body.password || "") || (existing ? await getMailboxPassword(admin, existing) : "");
   if (!password) return jsonResponse({ error: "Enter the mailbox password." }, 400);
 
   // Which listed address this replaces (edit / connect a listed one), if any.
@@ -174,7 +185,7 @@ async function handle(req: Request): Promise<Response> {
     return jsonResponse({ error: /SMTP login failed/i.test(m) ? "Outgoing (SMTP) login failed — check the username and password." : `Couldn't reach the outgoing (SMTP) server ${smtp_host}:${smtp_port} — check the address and port (SSL/TLS, usually 465). ${m.replace(/^Error: /, "")}` }, 400);
   }
 
-  const fields = { email_address, username, password, imap_host, imap_port, smtp_host, smtp_port };
+  const fields = { email_address, username, imap_host, imap_port, smtp_host, smtp_port };
   let account: any;
   if (existing) {
     const { data, error } = await admin.from("email_accounts").update(fields).eq("id", existing.id).select("id").single();
@@ -184,6 +195,12 @@ async function handle(req: Request): Promise<Response> {
     const { data, error } = await admin.from("email_accounts").insert({ ...fields, owner_id: userId, label: prof.full_name || email_address, sync_enabled: true }).select("id").single();
     if (error) return jsonResponse({ error: error.message }, 500);
     account = data;
+  }
+  if (String(body.password || "") || !existing) {
+    try { await setMailboxPassword(admin, account.id, password); }
+    catch (e) { return jsonResponse({ error: "Could not store the password: " + String(e) }, 500); }
+    // a fresh working password also lifts a "Login failed" pause
+    await admin.from("email_accounts").update({ send_paused_reason: null }).eq("id", account.id).like("send_paused_reason", "Login failed%");
   }
   await admin.from("profiles").update(slotUpdate(next)).eq("id", userId);
   return jsonResponse({ ok: true, slots: next, account_id: account.id });

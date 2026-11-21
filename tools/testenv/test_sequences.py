@@ -170,22 +170,22 @@ def run():
     check("start: the held lead stays awaiting_copy", d == 1, d)
 
     # ---- 3. MV outcomes
-    lid_mv = make_list(CALEB, [dict(email="a.catchall@mvtest-co.org", **COPY), dict(email="b.invalid@mvtest-co.org", **COPY),
-        dict(email="c.ok@mvtest-co.org", **COPY), dict(email="d.ok@mvtest-co.org", **COPY), dict(email="e.ok@mvtest-co.org", **COPY)])
-    for e, r in (("a.catchall@mvtest-co.org", "catch_all"), ("b.invalid@mvtest-co.org", "invalid"), ("c.ok@mvtest-co.org", "ok"),
-                 ("d.ok@mvtest-co.org", "ok"), ("e.ok@mvtest-co.org", "ok")): seed_mv(e, r)
+    lid_mv = make_list(CALEB, [dict(email="a.catchall@mvtest-a.org", **COPY), dict(email="b.invalid@mvtest-b.org", **COPY),
+        dict(email="c.ok@mvtest-c.org", **COPY), dict(email="d.ok@mvtest-d.org", **COPY), dict(email="e.ok@mvtest-e.org", **COPY)])
+    for e, r in (("a.catchall@mvtest-a.org", "catch_all"), ("b.invalid@mvtest-b.org", "invalid"), ("c.ok@mvtest-c.org", "ok"),
+                 ("d.ok@mvtest-d.org", "ok"), ("e.ok@mvtest-e.org", "ok")): seed_mv(e, r)
     rpc(CALEB, "seq_prepare_list", p_list_id=lid_mv)
     code, res = start(CALEB, lid_mv, 2)
     check("mv: start 2 -> bad ones go to backup, next ready leads fill the 2", code == 200 and res["started"] == 2 and res["moved_to_backup"] == 2 and res["remaining_ready"] == 1, res)
     rows = {r["email"]: r for r in q(f"select email, sequence, seq_state, seq_stop_reason, mv_result from dials where list_id='{lid_mv}'")}
-    check("mv: catch_all lead is a backup number with the reason", rows["a.catchall@mvtest-co.org"]["sequence"] == "backup" and "catch_all" in rows["a.catchall@mvtest-co.org"]["seq_stop_reason"], rows["a.catchall@mvtest-co.org"])
-    check("mv: invalid lead is a backup number", rows["b.invalid@mvtest-co.org"]["sequence"] == "backup" and rows["b.invalid@mvtest-co.org"]["seq_state"] is None, rows["b.invalid@mvtest-co.org"])
-    check("mv: ok leads active, third ok still ready", rows["c.ok@mvtest-co.org"]["seq_state"] == "active" and rows["d.ok@mvtest-co.org"]["seq_state"] == "active"
-          and rows["e.ok@mvtest-co.org"]["seq_state"] == "awaiting_copy", rows)
+    check("mv: catch_all lead is a backup number with the reason", rows["a.catchall@mvtest-a.org"]["sequence"] == "backup" and "catch_all" in rows["a.catchall@mvtest-a.org"]["seq_stop_reason"], rows["a.catchall@mvtest-a.org"])
+    check("mv: invalid lead is a backup number", rows["b.invalid@mvtest-b.org"]["sequence"] == "backup" and rows["b.invalid@mvtest-b.org"]["seq_state"] is None, rows["b.invalid@mvtest-b.org"])
+    check("mv: ok leads active, third ok still ready", rows["c.ok@mvtest-c.org"]["seq_state"] == "active" and rows["d.ok@mvtest-d.org"]["seq_state"] == "active"
+          and rows["e.ok@mvtest-e.org"]["seq_state"] == "awaiting_copy", rows)
     n = q(f"select count(*) n from sequence_tasks t join dials d on d.id=t.dial_id where d.list_id='{lid_mv}' and d.sequence='backup'")[0]["n"]
     check("mv: backup leads have no tasks", n == 0, n)
-    lid_mv2 = make_list(CALEB, [dict(email="u.unknown@mvtest-co.org", **COPY), dict(email="v.disposable@mvtest-co.org", **COPY), dict(email="w.error@mvtest-co.org", **COPY)])
-    for e, r in (("u.unknown@mvtest-co.org", "unknown"), ("v.disposable@mvtest-co.org", "disposable"), ("w.error@mvtest-co.org", "error")): seed_mv(e, r)
+    lid_mv2 = make_list(CALEB, [dict(email="u.unknown@mvtest-u.org", **COPY), dict(email="v.disposable@mvtest-v.org", **COPY), dict(email="w.error@mvtest-w.org", **COPY)])
+    for e, r in (("u.unknown@mvtest-u.org", "unknown"), ("v.disposable@mvtest-v.org", "disposable"), ("w.error@mvtest-w.org", "error")): seed_mv(e, r)
     rpc(CALEB, "seq_prepare_list", p_list_id=lid_mv2)
     code, res = start(CALEB, lid_mv2, None)
     check("mv: unknown / disposable / error are never emailed", code == 200 and res["started"] == 0 and res["moved_to_backup"] == 3, res)
@@ -279,10 +279,13 @@ def run():
                         ("2026-11-23 17:30-07", "after 5pm")):
         n = q(f"select sequence_dispatch('{when}') n")[0]["n"]
         check(f"window: nothing at {label} Denver", n == 0, n)
-    n1 = q("select sequence_dispatch('2026-11-23 08:30:00-07') n")[0]["n"]
+    # the owner window opens 8:30, but a lead with no known state is only emailed 9:00-16:00 (recipient window, default = owner zone)
+    n0 = q("select sequence_dispatch('2026-11-23 08:30:00-07') n")[0]["n"]
+    check("window: 8:30 owner window is open but the recipient window (9:00) is not: nothing queues", n0 == 0, n0)
+    n1 = q("select sequence_dispatch('2026-11-23 09:00:00-07') n")[0]["n"]
     queued = queued_for(lid)
-    check("window: 8:30:00 sharp queues", n1 >= 1 and len(queued) == n1, (n1, queued))
-    check("window: every send_at is 4-9 min after the run", all(240 <= float(q(f"select extract(epoch from '{x['send_at']}'::timestamptz - '2026-11-23 08:30-07'::timestamptz) e")[0]["e"]) <= 540 for x in queued), queued)
+    check("window: 9:00:00 sharp queues", n1 >= 1 and len(queued) == n1, (n1, queued))
+    check("window: every send_at is 4-9 min after the run", all(240 <= float(q(f"select extract(epoch from '{x['send_at']}'::timestamptz - '2026-11-23 09:00-07'::timestamptz) e")[0]["e"]) <= 540 for x in queued), queued)
     check("window: max one per mailbox per run", len({x["account_id"] for x in queued}) == len(queued), queued)
     own = q(f"""select a.owner_id, a.mandate from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id
                 join email_accounts a on a.id=s.account_id where t.list_id='{lid}'""")
@@ -290,32 +293,32 @@ def run():
     pinned = q(f"select count(*) n from dials where list_id='{lid}' and seq_state='active' and sender_account_id is not null")[0]["n"]
     check("dispatch: lead pinned to its mailbox once queued", pinned == n1, (pinned, n1))
     check("dispatch: follow-up not queued before email 1 is sent", all(x["in_reply_to"] is None for x in queued), queued)
-    n2 = q("select sequence_dispatch('2026-11-23 08:31-07') n")[0]["n"]
+    n2 = q("select sequence_dispatch('2026-11-23 09:01-07') n")[0]["n"]
     total = len(queued_for(lid))
     check("dispatch: every first email queued exactly once", total == 4 and n1 + n2 == 4, (n1, n2, total))
     # late-day boundary: new lead tasks due today, mailbox idle
     reset_queue(lid)
     q(f"update dials set sender_account_id=null where list_id='{lid}'")
-    n = q("select sequence_dispatch('2026-11-23 16:56-07') n")[0]["n"]
-    check("window: 16:56 queues nothing (send_at would land after 5pm, waits for tomorrow)", n == 0, n)
+    n = q("select sequence_dispatch('2026-11-23 15:56-07') n")[0]["n"]
+    check("window: 15:56 queues nothing (send_at would land after the 16:00 recipient cut-off, waits for tomorrow)", n == 0, n)
     n = q("select sequence_dispatch('2026-11-23 17:00-07') n")[0]["n"]
     check("window: 17:00 queues nothing", n == 0, n)
-    n = q("select sequence_dispatch('2026-11-23 16:50-07') n")[0]["n"]
+    n = q("select sequence_dispatch('2026-11-23 15:50-07') n")[0]["n"]
     late = queued_for(lid)
-    check("window: 16:50 queues, every send_at before 17:00", n >= 1 and all(local_hm(x["send_at"], "America/Denver") < "17:00:00" for x in late), (n, late))
+    check("window: 15:50 queues, every send_at before 16:00", n >= 1 and all(local_hm(x["send_at"], "America/Denver") < "16:00:00" for x in late), (n, late))
     tw = q(f"select count(*) n from sequence_tasks where list_id='{lid}' and status='pending' and kind='email'")[0]["n"]
     check("window: the rest wait (still pending) for the next business day", tw == 4 - n, (tw, n))
     reset_queue(lid); q(f"update dials set sender_account_id=null where list_id='{lid}'")
 
     # ---- 8. owner time zones
-    for tz, ok_t, no_t in (("America/New_York", "2026-11-23 08:30-05", "2026-11-23 08:29-05"),
-                           ("America/Los_Angeles", "2026-11-23 08:30-08", "2026-11-23 08:29-08")):
+    for tz, ok_t, no_t in (("America/New_York", "2026-11-23 09:00-05", "2026-11-23 08:29-05"),
+                           ("America/Los_Angeles", "2026-11-23 09:00-08", "2026-11-23 08:29-08")):
         q(f"update profiles set timezone='{tz}' where id='{uid(CALEB)}'")
         a = q(f"select sequence_dispatch('{no_t}') n")[0]["n"]
         b = q(f"select sequence_dispatch('{ok_t}') n")[0]["n"]
         qs = queued_for(lid)
-        check(f"tz {tz}: 8:29 local nothing, 8:30 local queues", a == 0 and b >= 1, (a, b))
-        check(f"tz {tz}: send_at inside 8:34-8:39 local", qs and all("08:34:00" <= local_hm(x["send_at"], tz) <= "08:39:00" for x in qs), [local_hm(x["send_at"], tz) for x in qs])
+        check(f"tz {tz}: 8:29 local nothing, 9:00 local queues", a == 0 and b >= 1, (a, b))
+        check(f"tz {tz}: send_at inside 9:04-9:09 local", qs and all("09:04:00" <= local_hm(x["send_at"], tz) <= "09:09:00" for x in qs), [local_hm(x["send_at"], tz) for x in qs])
         reset_queue(lid); q(f"update dials set sender_account_id=null where list_id='{lid}'")
         end = "2026-11-24 01:00:00+00" if tz.endswith("Angeles") else "2026-11-23 22:00:00+00"
         n = q(f"select sequence_dispatch('{end}') n")[0]["n"]
@@ -324,7 +327,7 @@ def run():
     q(f"update profiles set timezone='America/Denver' where id='{uid(CALEB)}'")
 
     # ---- 9. email 1 sent -> re-base, follow-up, follow-ups first
-    q("select sequence_dispatch('2026-11-23 08:30-07')")
+    q("select sequence_dispatch('2026-11-23 09:00-07')")
     s = q(f"""select s.id, s.account_id, s.to_address, s.dial_id from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id
               where t.list_id='{lid}' and t.kind='email' and s.status='pending' limit 1""")[0]
     mid = q(f"""insert into email_messages (account_id, message_id, direction, from_address, to_addresses, subject, body_text, sent_at, created_by)
@@ -415,16 +418,18 @@ def run():
     exp = {p["email_address"]: max(0, min(min(20, p["lim"]), p["lim"] - recent.get(p["email_address"], 0))) for p in per}
     check("cap: each mailbox sends exactly min(20, limit, rolling-24h room)", all(p["n"] == exp[p["email_address"]] for p in per), (per, exp, recent))
     check("cap: the 25-limit mailbox stops at exactly 20", [p["n"] for p in per if p["email_address"] == "temp-box@test-example.org"] == [20], per)
-    check("window: every queued send_at is 08:30-17:00 Denver", all("08:30:00" <= local_hm(p["lo"], "America/Denver") and local_hm(p["hi"], "America/Denver") < "17:00:00" for p in per), per)
+    check("window: every queued send_at is 09:00-16:00 Denver (owner 8:30-17:00 and the recipient window)", all("09:00:00" <= local_hm(p["lo"], "America/Denver") and local_hm(p["hi"], "America/Denver") < "16:00:00" for p in per), per)
     gaps = q(f"""select min(g) lo, max(g) hi from (select extract(epoch from s.send_at - lag(s.send_at) over (partition by s.account_id order by s.send_at)) g
                  from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id where t.list_id='{lid_big}') x where g is not null""")[0]
-    check("spacing: consecutive sends of one mailbox are 4-9 minutes apart", 240 <= float(gaps["lo"]) and float(gaps["hi"]) <= 540, gaps)
+    check("spacing: consecutive sends of one mailbox are 4-9 minutes apart", 240 <= float(gaps["lo"]) and float(gaps["hi"]) <= 540,
+          (gaps, q(f"""select s.account_id, s.send_at, s.status, s.created_at from scheduled_emails s join sequence_tasks t on t.scheduled_email_id=s.id
+                       where t.list_id='{lid_big}' and (s.send_at < '2026-11-30' or s.send_at > '2026-12-01') limit 5""")))
     total = sum(p["n"] for p in per)
     check("cap: one day sends the sum of the mailbox caps, the rest wait", total == sum(exp.values()), (total, exp))
     qs = rpc(GAVIN, "email_queue_status")[1]
     check("queue status: capacity 45 and a next send time", qs.get("capacity_today") == 45 and qs.get("next_send_at"), qs)
     n = q("select sequence_dispatch('2026-11-30 17:30-07') n")[0]["n"]
-    n2 = q("select sequence_dispatch('2026-12-01 08:30-07') n")[0]["n"]
+    n2 = q("select sequence_dispatch('2026-12-01 09:00-07') n")[0]["n"]
     check("cap: next business day the mailboxes send again", n == 0 and n2 >= 1, (n, n2))
     q(f"delete from scheduled_emails where account_id='{tmp}'")
 

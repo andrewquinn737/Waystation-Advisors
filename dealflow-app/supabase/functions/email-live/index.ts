@@ -16,6 +16,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { simpleParser } from "npm:mailparser@3";
 import { Buffer } from "node:buffer";
+import { getMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { hostIsPrivate } from "../_shared/hostGuard.ts";
 import { imapConnect, imapLogin, imapLogout, imapList, imapExamine, imapSearchAll, imapFetchHeaders, imapFetchRaw, imapStatus } from "./imap.ts";
 
 const MAX_LIMIT = 40;
@@ -69,9 +71,11 @@ async function handle(req: Request): Promise<Response> {
   }
   if (!allowed) return jsonResponse({ error: "You don't have access to that mailbox." }, 403);
 
+  if (await hostIsPrivate(account.imap_host)) return jsonResponse({ error: "This mailbox points at a private network address; it is blocked." }, 400);
+  const password = await getMailboxPassword(admin, account);
   const c = await imapConnect(account.imap_host, account.imap_port);
   try {
-    await imapLogin(c, account.username, account.password);
+    await imapLogin(c, account.username, password);
     const all = await imapList(c);
     const folders: any[] = all.map((f) => ({ name: f.name, kind: classify(f.name, f.attrs), attrs: f.attrs }));
     if (action === "folders") {

@@ -40,6 +40,8 @@ def q(sql): return sb.test_sql(sql)
 def mb(i, **kw): return {"email": f"test-mbx-{i}@example.com", "password": PW, "imap_host": "imap.example.com", "smtp_host": "smtp.example.com", **kw}
 
 try:
+    q("insert into app_secrets(key,value) values ('mailbox_host_allowlist','imap.example.com,smtp.example.com') on conflict (key) do update set value=excluded.value")
+    q("delete from mailbox_admin_audit")      # rate limit is 60 calls / 10 min per actor
     q("delete from email_accounts where email_address ilike 'test-mbx-%'")
     # auth
     check("no auth -> 401", call({"action": "list"}, who=None)[0] == 401)
@@ -71,7 +73,7 @@ try:
     # update path + case-insensitive upsert + keep password when blank
     c, r = call({"action": "bulk_upsert", "mailboxes": [{"email": "TEST-MBX-1@Example.com", "daily_send_limit": 7, "mandate": "data"}]})
     check("upsert updates existing (case-insens.)", c == 200 and r["results"][0]["status"] == "updated", r)
-    row = q("select daily_send_limit, mandate, password, owner_id from email_accounts where email_address='test-mbx-1@example.com'")[0]
+    row = q("select daily_send_limit, mandate, (select decrypted_secret from vault.decrypted_secrets v where v.id = password_secret_id) as password, owner_id from email_accounts where email_address='test-mbx-1@example.com'")[0]
     check("limit/mandate set, password+owner kept", row["daily_send_limit"] == 7 and row["mandate"] == "data" and row["password"] == PW and row["owner_id"] == SEC["accounts"]["test.caleb.hong@example.com"]["id"], row)
 
     # invalid + duplicates + unicode

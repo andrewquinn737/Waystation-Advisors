@@ -1,6 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { simpleParser } from "npm:mailparser@3";
 import { Buffer } from "node:buffer";
+import { getMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { hostIsPrivate } from "../_shared/hostGuard.ts";
 import { imapConnect, imapLogin, imapSelect, imapSearchUidsSince, imapFetchRaw, imapLogout } from "./imap.ts";
 
 const CRON_SHARED_SECRET = Deno.env.get("CRON_SHARED_SECRET") ?? "";
@@ -62,9 +64,11 @@ function addrList(list: unknown): { address: string; name?: string }[] {
 }
 
 async function syncOneAccount(admin: ReturnType<typeof createClient>, account: Record<string, any>) {
+  if (await hostIsPrivate(account.imap_host)) throw new Error("Mail server resolves to a private address; sync is blocked.");
+  const password = await getMailboxPassword(admin as any, account as any);
   const c = await imapConnect(account.imap_host, account.imap_port);
   try {
-    await imapLogin(c, account.username, account.password);
+    await imapLogin(c, account.username, password);
     const { exists, uidValidity } = await imapSelect(c, "INBOX");
 
     let sinceUid = account.last_uid as number;

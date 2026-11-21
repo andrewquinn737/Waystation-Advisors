@@ -31,6 +31,9 @@ Example prompts:
 | `check_draft` | Dry run in the context of the whole list (catches sentences repeated from other leads). Writes nothing |
 | `save_rewrite` | Same check first; any hard error rejects the save. If clean it saves, records history (source `claude_connector`) and re-runs the server gate, so the lead can join an approved list |
 | `get_history` | Last 10 revisions of a draft |
+| `list_campaigns` | Campaigns (one per email list) you can manage, by status draft/ready/live/paused/done |
+| `get_campaign` | Guidelines for the mandate, buyer brief, 12 sample leads, copy counts and saved pools |
+| `save_campaign_spintax` | Saves `{a\|b\|c}` pools + `{{first_name}}` `{{company}}` `{{city}}` tags, expands them per lead, runs the copy gate, returns pass/held counts and reasons |
 
 Rules enforced server-side: no em/en dashes, Email 1 body at most 85 words, no placeholders, no sentence reused across leads,
 and the first email cannot change once it was sent (only the follow-up). Limit: 120 tool calls per token per 10 minutes.
@@ -48,3 +51,23 @@ and the first email cannot change once it was sent (only the follow-up). Limit: 
 The URL-as-secret model is v1: it leaks if the URL is shared or logged, and claude.ai shows it in the connector settings.
 Plan: add OAuth 2.1 (the MCP authorization flow, with the CRM login as the identity provider and short-lived tokens),
 then drop URL tokens. Until then keep the connector to the test project and a handful of interns.
+
+## Campaigns and spintax (Admin > Campaigns)
+Prompt `design_campaign` (arg `list_id`): Claude reads `get_campaign`, asks who is sending, proposes subject/email 1/follow-up pools,
+calls `save_campaign_spintax`, fixes held leads from the returned reasons, then shows three rendered examples. Claude never launches;
+the admin presses Launch (Admin > Campaigns). The page's "Design in Claude" button opens claude.ai with that request prefilled.
+
+Server-side (code, not Claude): `supabase/functions/_shared/spintax.js` parses templates (rejects unbalanced braces, unknown tags, dashes,
+empty options, single-option groups; nothing is written on a template error), picks options per lead deterministically WITHOUT replacement
+(least-used option first, candidates that would repeat a sentence another lead already has are skipped), fills merge tags from the lead
+(a lead missing a used tag is skipped and reported), writes subject/email_1/email_2 and `dials.copy_variant` (A/B ids), stores the pools and a
+version on `campaigns.spintax`, then runs the copy gate (`checkList`). Leads whose first email already went out are never rewritten.
+
+Live campaigns: a connector save (single draft or spintax) that changes an ACTIVE lead sends that lead back to `awaiting_copy` and un-queues
+its pending send; the campaign shows `ready` until an admin presses Launch again. Pause = `dial_lists.copy_status` back to `pending_review`
+(the dispatcher only sends for approved lists) plus un-queueing pending sends; Resume restores it.
+
+Hardening: JSON-RPC batches are capped at 10, the rate limiter fails closed, tokens expire (90 days by default, `create_claude_connector_token(label, days)`,
+1 to 365) and the CRM shows last used / expires.
+
+Tests: `tools/testenv/test_campaigns.py`, `tools/testenv/spintax.test.mjs`.

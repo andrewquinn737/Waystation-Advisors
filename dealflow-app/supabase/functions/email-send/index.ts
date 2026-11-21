@@ -23,6 +23,19 @@
 // cheap to always include since it's just a mailto: back to the sending
 // mailbox itself.
 //
+// Hardening (2026-11-24):
+//  - SMTP has a 60 s overall timeout. A failure AFTER the message body went out is "unknown" (queue row -> status
+//    'unknown', never retried automatically); before that it is a plain failure.
+//  - Queue sends are idempotent: email_messages.scheduled_id is unique, and a row that already has a stored message
+//    is never sent again (it is just marked sent).
+//  - Queue sends to a suppressed address are cancelled; a paused mailbox does not send.
+//  - SMTP login failure pauses the mailbox ("Login failed — update the password") and does not burn the lead's attempt.
+//  - CR/LF (header injection) is rejected in recipients, In-Reply-To and attachment names; hosts that resolve to private
+//    addresses are never contacted; the mailbox password comes from Vault (get_mailbox_password).
+//  - List-Unsubscribe stays a mailto: link. RFC 8058 one-click (List-Unsubscribe-Post) needs an https endpoint that
+//    suppresses the address; none exists yet, so the Post header is deliberately NOT sent (sending it without a
+//    working endpoint would be worse than omitting it).
+//
 // Two ways in:
 //  1. A signed-in user's JWT + request body (below).
 //  2. Mass email's queue: pg_cron -> dispatch_scheduled_emails() posts
@@ -36,7 +49,9 @@
 //     thread_id?, attachments?: { filename, contentType, base64 }[] }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { smtpSend } from "./smtp.ts";
+import { smtpSend, SmtpUnknownError, SmtpAuthError } from "./smtp.ts";
+import { getMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { hostIsPrivate } from "../_shared/hostGuard.ts";
 import { imapConnect, imapLogin, imapLogout, imapFindSentFolder, imapAppend } from "./imap.ts";
 
 const CRON_SHARED_SECRET = Deno.env.get("CRON_SHARED_SECRET") ?? "";
@@ -156,6 +171,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
   }
 
   let callerUserId: string;
+  let scheduledTo: string | null = null;
   if (CRON_SHARED_SECRET && req.headers.get("x-cron-secret") === CRON_SHARED_SECRET && body.scheduled_id) {
     // Queue path: everything comes from the row, claimed as 'sending' by
     // dispatch_scheduled_emails() — anything else is refused, so a row can
@@ -164,6 +180,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     if (!row) return jsonResponse({ error: "Scheduled email not found." }, 404);
     if (row.status !== "sending") return jsonResponse({ error: `Scheduled email is ${row.status}, not sending.` }, 409);
     ctx.scheduledId = row.id;
+    scheduledTo = row.to_address;
     callerUserId = row.created_by;
     body = {
       account_id: row.account_id,
@@ -183,6 +200,22 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
   }
 
   let { account_id, to, cc, subject, text, html, in_reply_to, thread_id, attachments } = body;
+
+  // Header injection guard: nothing that ends up in a header may carry CR/LF/NUL; recipients must be single plain addresses.
+  const ctl = (v: unknown) => typeof v === "string" && /[\r\n\0]/.test(v);
+  const ADDR_RE = /^[^\s,;<>()"\\]+@[^\s,;<>()"\\]+$/;
+  for (const a of [...(to || []), ...(cc || [])]) {
+    if (typeof a !== "string" || ctl(a) || !ADDR_RE.test(a.trim())) return jsonResponse({ error: "Invalid recipient address." }, 400);
+  }
+  if (ctl(in_reply_to) || (in_reply_to !== undefined && in_reply_to !== null && typeof in_reply_to !== "string")) {
+    return jsonResponse({ error: "Invalid In-Reply-To value." }, 400);
+  }
+  for (const att of attachments || []) {
+    if (!att || typeof att.filename !== "string" || ctl(att.filename) || /["\\]/.test(att.filename) ||
+        (att.contentType !== undefined && (ctl(att.contentType) || /["\\;]/.test(att.contentType)))) {
+      return jsonResponse({ error: "Invalid attachment name or type." }, 400);
+    }
+  }
 
   // TEST SAFETY NET. Set only on the test project (never on live):
   // TEST_REDIRECT_TO = comma-separated allowlist. Any recipient not on it is
@@ -215,6 +248,20 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
 
   const { data: account, error: acctErr } = await admin.from("email_accounts").select("*").eq("id", account_id).single();
   if (acctErr || !account) return jsonResponse({ error: "That email account was not found." }, 404);
+
+  if (ctx.scheduledId) {
+    // Idempotency: this queue row already produced a stored message -> it was sent; never send it again.
+    const { data: already } = await admin.from("email_messages").select("id, thread_id").eq("scheduled_id", ctx.scheduledId).maybeSingle();
+    if (already) return jsonResponse({ ok: true, sent: true, recorded: true, already_sent: true, message_id: already.id, thread_id: already.thread_id });
+    if (account.send_paused_reason) return jsonResponse({ error: `Mailbox paused: ${account.send_paused_reason}`, code: "paused" }, 409);
+    const { data: supp } = await admin.rpc("is_suppressed", { p_email: String(scheduledTo || "") });
+    if (supp === true) return jsonResponse({ error: "Recipient is on the suppression list.", code: "suppressed" }, 409);
+  }
+  if (await hostIsPrivate(account.smtp_host) || await hostIsPrivate(account.imap_host)) {
+    return jsonResponse({ error: "This mailbox points at a private network address; sending is blocked." }, 400);
+  }
+  const password = await getMailboxPassword(admin, account);
+  if (!password) return jsonResponse({ error: "This mailbox has no password stored." }, 400);
 
   const { data: callerProfile } = await admin.from("profiles").select("role, team_id").eq("id", callerUserId).single();
   const isOwner = account.owner_id === callerUserId;
@@ -279,10 +326,19 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
       host: account.smtp_host,
       port: account.smtp_port,
       username: account.username,
-      password: account.password,
+      password,
       raw,
     });
   } catch (e) {
+    if (e instanceof SmtpUnknownError) {
+      return jsonResponse({ error: "Send result unknown — check Sent folder", code: "unknown", detail: String(e).slice(0, 200) }, 502);
+    }
+    if (e instanceof SmtpAuthError || /SMTP auth failed/i.test(String(e))) {
+      // wrong/changed password: pause the mailbox so nothing else burns attempts against it
+      await admin.from("email_accounts").update({ send_paused_reason: "Login failed — update the password" })
+        .eq("id", account_id).or("send_paused_reason.is.null,send_paused_reason.eq.");
+      return jsonResponse({ error: "Login failed — update the password", code: "auth_failed" }, 502);
+    }
     return jsonResponse({ error: "Sending failed: " + String(e) }, 502);
   }
   if (!sendResult.ok) {
@@ -303,7 +359,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
       (async () => {
         const c = await imapConnect(account.imap_host, account.imap_port);
         try {
-          await imapLogin(c, account.username, account.password);
+          await imapLogin(c, account.username, password);
           sentFolder = await imapFindSentFolder(c);
           await imapAppend(c, sentFolder, new TextEncoder().encode(raw));
           savedToSent = true;
@@ -361,6 +417,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     sent_at: new Date().toISOString(),
     created_by: callerUserId,
   };
+  if (ctx.scheduledId) insertPayload.scheduled_id = ctx.scheduledId;   // idempotency key (unique index)
   if (resolvedThreadId) insertPayload.thread_id = resolvedThreadId;
 
   const { data: inserted, error: insertErr } = await admin.from("email_messages").insert(insertPayload).select("id, thread_id").single();
@@ -419,13 +476,19 @@ Deno.serve(async (req: Request) => {
     await admin
       .from("scheduled_emails")
       .update(
-        sent
+        j.code === "unknown"
+          ? { status: "unknown", error: "Send result unknown — check Sent folder" }
+          : j.code === "suppressed"
+          ? { status: "cancelled", error: "Recipient is on the suppression list." }
+          : sent
           ? { status: "sent", sent_at: new Date().toISOString(), error: (j.warning as string) || null,
               // links the queued row to the stored message (sequence threading); needs the 20261120 migration
               ...(typeof j.message_id === "string" ? { sent_message_id: j.message_id } : {}) }
           : { status: "failed", error: String(j.error || "Send failed").slice(0, 500) }
       )
-      .eq("id", ctx.scheduledId);
+      .eq("id", ctx.scheduledId)
+      // a late success may still turn an 'unknown' row into 'sent'; nothing else may overwrite a row that already moved on
+      .in("status", sent ? ["sending", "unknown"] : ["sending"]);
   }
   return res;
 });

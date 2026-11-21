@@ -16,5 +16,8 @@ run "SQL/JS sentence parity" "python3 test_sentence_parity.py"
 run "sequence engine"     "python3 test_sequences.py"
 run "mailbox admin API"   "python3 test_mailbox_admin.py"
 run "Claude connector"    "python3 test_claude_connector.py"
+run "spintax expander"    "node spintax.test.mjs"
+run "campaigns + spintax" "python3 test_campaigns.py"
+run "hardening"           "python3 test_hardening.py"
 [ "$1" = "--load" ] && run "load test" "python3 load_test.py 300 | grep 'over limit'"
 [ $fail = 0 ] && echo "ALL GREEN" || { echo "SOMETHING FAILED - do not release"; exit 1; }

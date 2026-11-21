@@ -10,7 +10,7 @@ const CACHE_DAYS = 30;
 const CONCURRENCY = 5;
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
 
-export type Verdict = { email: string; result: string; source: "cache" | "millionverifier" | "test_shortcut" | "error"; transient?: boolean };
+export type Verdict = { email: string; result: string; source: "cache" | "millionverifier" | "test_shortcut" | "error" | "suppression"; transient?: boolean };
 
 const isLiveProject = () => (Deno.env.get("SUPABASE_URL") || "").includes(LIVE_REF);
 const isTestShortcut = (email: string) => !isLiveProject() && email.toLowerCase().endsWith("@example.com");
@@ -31,10 +31,15 @@ async function callMv(email: string): Promise<{ result: string; transient: boole
 export async function verifyEmails(admin: SupabaseClient, emails: string[]): Promise<Verdict[]> {
   const list = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   const out = new Map<string, Verdict>();
+  // suppressed addresses/domains are never verified (no credit) and never 'ok'
+  for (const e of list) {
+    const { data: sup } = await admin.rpc("is_suppressed", { p_email: e });
+    if (sup === true) out.set(e, { email: e, result: "suppressed", source: "suppression" });
+  }
   const cutoff = new Date(Date.now() - CACHE_DAYS * 864e5).toISOString();
   for (let i = 0; i < list.length; i += 200) {
     const { data } = await admin.from("email_verifications").select("email, result").in("email", list.slice(i, i + 200)).gte("checked_at", cutoff);
-    for (const r of data || []) out.set(r.email, { email: r.email, result: r.result, source: "cache" });
+    for (const r of data || []) if (!out.has(r.email)) out.set(r.email, { email: r.email, result: r.result, source: "cache" });
   }
   const todo = list.filter((e) => !out.has(e));
   for (const e of todo) if (isTestShortcut(e)) out.set(e, { email: e, result: "ok", source: "test_shortcut" });

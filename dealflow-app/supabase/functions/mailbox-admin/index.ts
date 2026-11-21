@@ -4,12 +4,17 @@
 //
 // Auth (either):
 //   - Authorization: Bearer <Supabase user JWT> whose profiles.role = 'admin'
-//   - x-admin-api-key: <app_secrets.mailbox_admin_api_key>
-// Passwords are write-only: never returned, never logged, scrubbed from error text.
+//   - x-admin-api-key: <key>; only its SHA-256 is stored (app_secrets.mailbox_admin_api_key_hash). A new key is minted
+//     with action rotate_api_key (admin JWT only) and shown once.
+// Passwords are write-only: never returned, never logged, scrubbed from error text; stored in Supabase Vault.
+// Hardening: mail hosts must be on an allowlist and never resolve to a private address; changing a host/port needs the
+// password in the same request; every call is written to mailbox_admin_audit; 60 calls / 10 min per key or user.
 // See docs/MAILBOX_ADMIN_API.md for the request/response shapes.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { imapConnect, imapLogin, imapLogout } from "./imap.ts";
+import { getMailboxPassword, setMailboxPassword } from "../_shared/mailboxSecret.ts";
+import { hostIsPrivate, isIpLiteral } from "../_shared/hostGuard.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -23,6 +28,12 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timed out`)), ms))]);
 }
 
+const RATE_MAX = 60;
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+// Static host allowlist; extend with app_secrets 'mailbox_host_allowlist' (comma-separated host names).
+const BUILTIN_HOSTS = ["outlook.office365.com", "smtp.office365.com", "imap.gmail.com", "smtp.gmail.com", "inbound.winnr-app.com", "inbound.gowinnr.com"];
+const sha256Hex = async (t: string) =>
+  [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const MAX_ROWS = 500;
 const MAX_VERIFY_ROWS = 25;
 const EMAIL_RE = /^[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]+$/;
@@ -32,7 +43,7 @@ const PRESETS: Record<string, { imap_host: string; imap_port: number; smtp_host:
   microsoft: { imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587 },
   google: { imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 465 },
 };
-const LIST_COLS = "id, owner_id, label, email_address, username, imap_host, imap_port, smtp_host, smtp_port, sync_enabled, daily_send_limit, mandate, send_route, source, needs_assignment, credentials_verified, send_paused_reason, last_synced_at, last_sync_error, created_at";
+const LIST_COLS = "id, owner_id, label, email_address, username, imap_host, imap_port, smtp_host, smtp_port, sync_enabled, daily_send_limit, mandate, send_route, source, needs_assignment, credentials_verified, send_paused_reason, ramp_start, last_synced_at, last_sync_error, created_at";
 
 async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -131,7 +142,22 @@ const normName = (t: string) => (t || "").toLowerCase().replace(/[^a-z]+/g, " ")
 const isInt = (v: unknown) => typeof v === "number" ? Number.isInteger(v) : typeof v === "string" && /^\d+$/.test(v.trim());
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim());
 
-interface Ctx { admin: any; actorId: string | null }
+interface Ctx { admin: any; actorId: string | null; allow?: Set<string>; ip?: string }
+
+async function loadAllowlist(admin: any): Promise<Set<string>> {
+  const set = new Set(BUILTIN_HOSTS);
+  const { data } = await admin.from("app_secrets").select("value").eq("key", "mailbox_host_allowlist").maybeSingle();
+  for (const h of String(data?.value || "").split(",")) if (h.trim()) set.add(h.trim().toLowerCase());
+  return set;
+}
+// null = fine, otherwise the reason. Allowlisted, not an IP literal, and nothing it resolves to is private.
+async function checkHost(ctx: Ctx, k: string, host: string): Promise<string | null> {
+  const h = host.trim().toLowerCase();
+  if (isIpLiteral(h)) return `${k} must be a host name, not an IP address.`;
+  if (!ctx.allow!.has(h)) return `${k} "${h}" is not on the allowed mail server list. Ask an admin to add it (app_secrets mailbox_host_allowlist).`;
+  if (await hostIsPrivate(h)) return `${k} "${h}" resolves to a private or local address and is blocked.`;
+  return null;
+}
 
 // Owner resolution against all profiles (loaded once per request).
 async function loadProfiles(admin: any) {
@@ -156,7 +182,7 @@ async function bulkUpsert(ctx: Ctx, body: any) {
   }
 
   const profiles = await loadProfiles(admin);
-  const { data: existingRows } = await admin.from("email_accounts").select("id, email_address, owner_id, needs_assignment, source");
+  const { data: existingRows } = await admin.from("email_accounts").select("id, email_address, owner_id, needs_assignment, source, imap_host, imap_port, smtp_host, smtp_port, password");
   const existing = new Map<string, any>((existingRows || []).map((r: any) => [String(r.email_address).toLowerCase(), r]));
   const actor = ctx.actorId ? profiles.find((p) => p.id === ctx.actorId) : profiles.find((p) => p.role === "admin");
 
@@ -213,6 +239,21 @@ async function bulkUpsert(ctx: Ctx, body: any) {
     if (imap_port !== undefined && imap_port !== "") v.imap_port = Number(imap_port);
     if (smtp_port !== undefined && smtp_port !== "") v.smtp_port = Number(smtp_port);
     if (!prev) { v.imap_port ??= 993; v.smtp_port ??= preset?.smtp_port ?? 465; }
+    // hosts: allowlist + no private addresses (checked whenever a host is new or changing)
+    for (const [k, h, was] of [["imap_host", v.imap_host, prev?.imap_host], ["smtp_host", v.smtp_host, prev?.smtp_host]] as const) {
+      if (h && String(h).toLowerCase() !== String(was || "").toLowerCase()) {
+        const bad = await checkHost(ctx, k, h);
+        if (bad) return fail(bad);
+      }
+    }
+    // a stored password must never ride along to a different server: host or port change needs the password again
+    if (prev) {
+      const changed = (v.imap_host && v.imap_host.toLowerCase() !== String(prev.imap_host).toLowerCase()) ||
+        (v.smtp_host && v.smtp_host.toLowerCase() !== String(prev.smtp_host).toLowerCase()) ||
+        (v.imap_port !== undefined && v.imap_port !== Number(prev.imap_port)) ||
+        (v.smtp_port !== undefined && v.smtp_port !== Number(prev.smtp_port));
+      if (changed && !password) return fail("Changing the IMAP/SMTP host or port needs the password in the same request.");
+    }
 
     if (r.daily_send_limit !== undefined && r.daily_send_limit !== null && r.daily_send_limit !== "") {
       if (!isInt(r.daily_send_limit) || Number(r.daily_send_limit) < 0 || Number(r.daily_send_limit) > 200) return fail("daily_send_limit must be an integer from 0 to 200.");
@@ -269,7 +310,7 @@ async function bulkUpsert(ctx: Ctx, body: any) {
 
     let verified: boolean | null = null;
     if (v.verify) {
-      const pass = v.password || (await admin.from("email_accounts").select("password").eq("id", v.prev?.id).maybeSingle()).data?.password;
+      const pass = v.password || (v.prev ? await getMailboxPassword(admin, { id: v.prev.id, password: v.prev.password }) : "");
       const full = { imap_host: v.imap_host, imap_port: v.imap_port, smtp_host: v.smtp_host, smtp_port: v.smtp_port, username: v.username, password: pass };
       if (v.prev && (!full.imap_host || !full.smtp_host || !full.imap_port || !full.smtp_port)) {
         const { data: cur } = await admin.from("email_accounts").select("imap_host, imap_port, smtp_host, smtp_port").eq("id", v.prev.id).maybeSingle();
@@ -281,7 +322,6 @@ async function bulkUpsert(ctx: Ctx, body: any) {
     }
 
     const fields: any = { username: v.username, source: "api", needs_assignment: v.needs, owner_id: v.owner.id };
-    if (v.password) fields.password = v.password;
     for (const k of ["imap_host", "imap_port", "smtp_host", "smtp_port", "daily_send_limit", "mandate", "sync_enabled"]) if (v[k] !== undefined) fields[k] = v[k];
     if (v.display_name) fields.label = v.display_name;
     if (verified !== null) fields.credentials_verified = verified;
@@ -291,11 +331,13 @@ async function bulkUpsert(ctx: Ctx, body: any) {
       if (v.prev) {
         const { error } = await admin.from("email_accounts").update(fields).eq("id", v.prev.id);
         if (error) throw new Error(error.message);
+        if (v.password) await setMailboxPassword(admin, v.prev.id, v.password);
         results[i] = { ...base, status: "updated", verified };
       } else {
         const ins = { label: v.display_name || v.email, sync_enabled: false, ...fields, email_address: v.email };
-        const { error } = await admin.from("email_accounts").insert(ins);
+        const { data: created, error } = await admin.from("email_accounts").insert(ins).select("id").single();
         if (error) throw new Error(error.message);
+        await setMailboxPassword(admin, created.id, v.password);
         results[i] = { ...base, status: "created", verified };
       }
     } catch (e) {
@@ -354,6 +396,12 @@ async function update(ctx: Ctx, body: any) {
     if (typeof body.sync_enabled !== "boolean") return jsonResponse({ error: "sync_enabled must be true or false." }, 400);
     f.sync_enabled = body.sync_enabled;
   }
+  if ("ramp_start" in body) {   // new-mailbox ramp: 2 sends on this day, +1 per day (null = no ramp)
+    if (body.ramp_start === null || body.ramp_start === "") f.ramp_start = null;
+    else if (typeof body.ramp_start !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.ramp_start) || Number.isNaN(Date.parse(body.ramp_start))) {
+      return jsonResponse({ error: "ramp_start must be a date (YYYY-MM-DD) or null." }, 400);
+    } else f.ramp_start = body.ramp_start;
+  }
   if (Object.keys(f).length === 0) return jsonResponse({ error: "Nothing to update." }, 400);
   const { data, error } = await ctx.admin.from("email_accounts").update(f).eq("id", id).select("id").maybeSingle();
   if (error) return jsonResponse({ error: error.message }, 400);
@@ -399,15 +447,67 @@ async function list(ctx: Ctx) {
   return jsonResponse({ ok: true, mailboxes, people: profiles.map((p) => ({ id: p.id, full_name: p.full_name, role: p.role })) });
 }
 
-async function authenticate(req: Request, admin: any): Promise<{ ok: true; ctx: Ctx } | { ok: false; res: Response }> {
+// Live-credential check with the STORED password: IMAP login + SMTP login, nothing is sent.
+async function checkLogin(ctx: Ctx, body: any) {
+  const id = str(body.account_id);
+  if (!UUID_RE.test(id)) return jsonResponse({ error: "account_id must be a mailbox id." }, 400);
+  const { data: a } = await ctx.admin.from("email_accounts").select("id, email_address, username, imap_host, imap_port, smtp_host, smtp_port, password").eq("id", id).maybeSingle();
+  if (!a) return jsonResponse({ error: "No such mailbox." }, 404);
+  for (const h of [a.imap_host, a.smtp_host]) if (await hostIsPrivate(h)) return jsonResponse({ error: "Mailbox host is private or local; blocked." }, 400);
+  const password = await getMailboxPassword(ctx.admin, a);
+  if (!password) return jsonResponse({ error: "No password stored for this mailbox." }, 400);
+  const scrub = (m: string) => m.split(password).join("***").replace(/^Error: /, "");
+  const out: any = { ok: true, account_id: id, email: a.email_address, imap: { ok: true }, smtp: { ok: true } };
+  try {
+    const c = await withTimeout(imapConnect(a.imap_host, a.imap_port), 12000, "Connecting to the IMAP server");
+    try { await withTimeout(imapLogin(c, a.username, password), 12000, "IMAP login"); } finally { await imapLogout(c); }
+  } catch (e) { out.imap = { ok: false, error: scrub(String(e)) }; }
+  try { await withTimeout(smtpAuthCheck(a.smtp_host, a.smtp_port, a.username, password), 20000, "SMTP login"); }
+  catch (e) { out.smtp = { ok: false, error: scrub(String(e)) }; }
+  await ctx.admin.from("email_accounts").update({ credentials_verified: out.imap.ok && out.smtp.ok }).eq("id", id);
+  return jsonResponse(out);
+}
+
+async function rotateKey(ctx: Ctx) {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const key = "wsk_" + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const { error } = await ctx.admin.from("app_secrets").upsert({ key: "mailbox_admin_api_key_hash", value: await sha256Hex(key) });
+  if (error) return jsonResponse({ error: "Could not store the new key." }, 500);
+  await ctx.admin.from("app_secrets").delete().eq("key", "mailbox_admin_api_key");   // any legacy plaintext copy
+  return jsonResponse({ ok: true, api_key: key, note: "Shown once. Only its hash is stored; the old key stops working now." });
+}
+
+const clientIp = (req: Request) => (req.headers.get("x-forwarded-for") || req.headers.get("cf-connecting-ip") || "").split(",")[0].trim() || null;
+
+async function audit(admin: any, row: { actor: string; actor_key: string; action: string; target?: string | null; ip?: string | null; detail?: unknown }) {
+  try { await admin.from("mailbox_admin_audit").insert({ ...row, target: row.target ?? null, ip: row.ip ?? null, detail: row.detail ?? null }); } catch { /* auditing must not break the call */ }
+}
+async function overLimit(admin: any, actorKey: string): Promise<boolean> {
+  const { count } = await admin.from("mailbox_admin_audit").select("id", { count: "exact", head: true })
+    .eq("actor_key", actorKey).gte("at", new Date(Date.now() - RATE_WINDOW_MS).toISOString());
+  return (count || 0) >= RATE_MAX;
+}
+
+type Auth = { ok: true; ctx: Ctx; actor: string; actorKey: string } | { ok: false; res: Response };
+async function authenticate(req: Request, admin: any): Promise<Auth> {
+  const ip = clientIp(req);
   const key = (req.headers.get("x-admin-api-key") || "").trim();
   if (key) {
-    const { data } = await admin.from("app_secrets").select("value").eq("key", "mailbox_admin_api_key").maybeSingle();
-    const real = String(data?.value || "");
-    let diff = real.length === key.length ? 0 : 1;
-    for (let i = 0; i < Math.max(real.length, key.length); i++) diff |= (real.charCodeAt(i) || 0) ^ (key.charCodeAt(i) || 0);
-    if (!real || diff !== 0) return { ok: false, res: jsonResponse({ error: "Invalid API key." }, 401) };
-    return { ok: true, ctx: { admin, actorId: null } };
+    const [hashRow, legacyRow] = await Promise.all([
+      admin.from("app_secrets").select("value").eq("key", "mailbox_admin_api_key_hash").maybeSingle(),
+      admin.from("app_secrets").select("value").eq("key", "mailbox_admin_api_key").maybeSingle(),   // rollout only
+    ]);
+    const given = await sha256Hex(key);
+    const real = String(hashRow.data?.value || (legacyRow.data?.value ? await sha256Hex(String(legacyRow.data.value)) : ""));
+    let diff = real.length === given.length ? 0 : 1;
+    for (let i = 0; i < Math.max(real.length, given.length); i++) diff |= (real.charCodeAt(i) || 0) ^ (given.charCodeAt(i) || 0);
+    if (!real || diff !== 0) {
+      const bucket = "ip:" + (ip || "unknown");
+      if (await overLimit(admin, bucket)) return { ok: false, res: jsonResponse({ error: "Too many requests. Try again later." }, 429) };
+      await audit(admin, { actor: "unauthenticated", actor_key: bucket, action: "auth_failed", ip });
+      return { ok: false, res: jsonResponse({ error: "Invalid API key." }, 401) };
+    }
+    return { ok: true, ctx: { admin, actorId: null, ip: ip || undefined }, actor: "api-key", actorKey: "key:" + given.slice(0, 12) };
   }
   const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!jwt) return { ok: false, res: jsonResponse({ error: "Missing authorization (Bearer admin session or x-admin-api-key)." }, 401) };
@@ -415,28 +515,41 @@ async function authenticate(req: Request, admin: any): Promise<{ ok: true; ctx: 
   if (error || !caller?.user) return { ok: false, res: jsonResponse({ error: "Your session isn't valid. Please sign in again." }, 401) };
   const { data: prof } = await admin.from("profiles").select("id, role").eq("id", caller.user.id).maybeSingle();
   if (prof?.role !== "admin") return { ok: false, res: jsonResponse({ error: "Only admins can manage mailboxes." }, 403) };
-  return { ok: true, ctx: { admin, actorId: prof.id } };
+  return { ok: true, ctx: { admin, actorId: prof.id, ip: ip || undefined }, actor: prof.id, actorKey: "user:" + prof.id };
+}
+
+function auditTarget(body: any): string | null {
+  if (Array.isArray(body.mailboxes)) return `${body.mailboxes.length} mailbox row(s)`;
+  if (Array.isArray(body.account_ids)) return body.account_ids.slice(0, 20).join(",");
+  if (typeof body.account_id === "string") return body.account_id;
+  return null;
 }
 
 async function handle(req: Request): Promise<Response> {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const a = await authenticate(req, admin);
   if (!a.ok) return a.res;
+  if (await overLimit(admin, a.actorKey)) return jsonResponse({ error: `Rate limit: at most ${RATE_MAX} calls per 10 minutes. Try again later.` }, 429);
   let body: any;
   try { body = await req.json(); } catch { return jsonResponse({ error: "Invalid JSON body." }, 400); }
   if (!body || typeof body !== "object" || Array.isArray(body)) return jsonResponse({ error: "Body must be a JSON object with an action." }, 400);
+  await audit(admin, { actor: a.actor, actor_key: a.actorKey, action: String(body.action || "").slice(0, 40), target: auditTarget(body), ip: a.ctx.ip,
+                       detail: body.dry_run === true ? { dry_run: true } : null });
+  a.ctx.allow = await loadAllowlist(admin);
   switch (body.action) {
     case "bulk_upsert": return await bulkUpsert(a.ctx, body);
     case "assign": return await assign(a.ctx, body);
     case "update": return await update(a.ctx, body);
     case "remove": return await remove(a.ctx, body);
     case "list": return await list(a.ctx);
-    case "get_api_key": { // admin session only (the key itself can't be used to read itself back out)
-      if (!a.ctx.actorId) return jsonResponse({ error: "Sign in as an admin to view the key." }, 403);
-      const { data } = await admin.from("app_secrets").select("value").eq("key", "mailbox_admin_api_key").maybeSingle();
-      return jsonResponse({ ok: true, api_key: data?.value ?? null });
-    }
-    default: return jsonResponse({ error: "Unknown action. Use bulk_upsert, assign, update, remove or list." }, 400);
+    case "check_login": return await checkLogin(a.ctx, body);
+    case "rotate_api_key": // admin session only: the key cannot mint its own replacement
+      if (!a.ctx.actorId) return jsonResponse({ error: "Sign in as an admin to rotate the key." }, 403);
+      return await rotateKey(a.ctx);
+    case "get_api_key": // the key is stored hashed and cannot be shown again
+      if (!a.ctx.actorId) return jsonResponse({ error: "Sign in as an admin." }, 403);
+      return jsonResponse({ ok: true, api_key: null, stored_hashed: true, message: "The API key is stored hashed and cannot be shown. Use rotate_api_key to mint a new one." });
+    default: return jsonResponse({ error: "Unknown action. Use bulk_upsert, assign, update, remove, list, check_login or rotate_api_key." }, 400);
   }
 }
 

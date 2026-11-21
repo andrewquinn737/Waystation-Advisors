@@ -20,13 +20,41 @@ async function readLine(reader: ReadableStreamDefaultReader<Uint8Array>, buf: { 
   }
 }
 
-export async function smtpSend(opts: {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  raw: string;
-}): Promise<{ ok: boolean; log: string[]; rejected: string[]; accepted: string[] }> {
+// Thrown when the failure happened AFTER the message body went out: the server may or may not have accepted it.
+// Callers must treat that as "unknown" and never retry automatically (a retry could deliver it twice).
+export class SmtpUnknownError extends Error {
+  unknown = true;
+}
+export class SmtpAuthError extends Error {
+  authFailed = true;
+}
+
+const SMTP_TIMEOUT_MS = 60_000;
+
+type SmtpResult = { ok: boolean; log: string[]; rejected: string[]; accepted: string[] };
+type SmtpOpts = { host: string; port: number; username: string; password: string; raw: string; timeoutMs?: number };
+
+// Overall timeout (60 s) around the whole conversation. On timeout the socket is closed; if the body had already been
+// written the outcome is unknown (SmtpUnknownError), otherwise it is a plain failure.
+export async function smtpSend(opts: SmtpOpts): Promise<SmtpResult> {
+  const state: { phase: "pre" | "data"; conn: { close(): void } | null } = { phase: "pre", conn: null };
+  let timer: number | undefined;
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => {
+      try { state.conn?.close(); } catch { /* ignore */ }
+      rej(state.phase === "data"
+        ? new SmtpUnknownError("SMTP timed out after the message was sent")
+        : new Error("SMTP timed out"));
+    }, opts.timeoutMs ?? SMTP_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([smtpSendInner(opts, state), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function smtpSendInner(opts: SmtpOpts, state: { phase: "pre" | "data"; conn: { close(): void } | null }): Promise<SmtpResult> {
   const log: string[] = [];
   const rejected: string[] = [];
   const accepted: string[] = [];
@@ -36,6 +64,7 @@ export async function smtpSend(opts: {
   let conn: Deno.Conn | Deno.TlsConn = startTls
     ? await Deno.connect({ hostname: opts.host, port: opts.port })
     : await Deno.connectTls({ hostname: opts.host, port: opts.port });
+  state.conn = conn;
   try {
     let reader = conn.readable.getReader();
     let writer = conn.writable.getWriter();
@@ -68,6 +97,7 @@ export async function smtpSend(opts: {
       writer.releaseLock();
       buf.data = new Uint8Array(0);
       conn = await Deno.startTls(conn as Deno.Conn, { hostname: opts.host });
+      state.conn = conn;
       reader = conn.readable.getReader();
       writer = conn.writable.getWriter();
       await send("EHLO waystation-advisors.app");
@@ -81,7 +111,7 @@ export async function smtpSend(opts: {
     await readMulti();
     await send(btoa(opts.password));
     const authResult = await readMulti();
-    if (!/^235/.test(authResult)) throw new Error("SMTP auth failed: " + authResult.trim());
+    if (!/^235/.test(authResult)) throw new SmtpAuthError("SMTP auth failed: " + authResult.trim());
 
     const headerEnd = opts.raw.indexOf("\r\n\r\n");
     const headers = opts.raw.slice(0, headerEnd === -1 ? opts.raw.length : headerEnd);
@@ -111,17 +141,21 @@ export async function smtpSend(opts: {
       return { ok: false, log, rejected, accepted };
     }
     await send("DATA");
-    await readMulti();
+    const dataReply = await readMulti();
+    if (!/^354/.test(dataReply)) throw new Error("Server refused DATA: " + dataReply.trim());
+    state.phase = "data";   // from here on a failure means "unknown", not "not sent"
 
     const stuffed = opts.raw.replace(/\r\n\./g, "\r\n..");
     await writer.write(encoder.encode(stuffed + "\r\n.\r\n"));
     const sendResult = await readMulti();
     log.push("send result: " + sendResult.trim());
 
-    await send("QUIT");
-    await readMulti().catch(() => {});
+    try { await send("QUIT"); await readMulti(); } catch { /* the server already answered the message; QUIT is courtesy */ }
 
     return { ok: /^250/.test(sendResult), log, rejected, accepted };
+  } catch (e) {
+    if (state.phase === "data" && !(e instanceof SmtpUnknownError)) throw new SmtpUnknownError(String(e));
+    throw e;
   } finally {
     try {
       conn.close();

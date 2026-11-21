@@ -4,6 +4,8 @@
 // 3. call SQL start_emails() as the user with exactly those ids: ok -> active; catch_all/unknown/invalid/
 //    disposable/error -> backup number. A transient API failure (network, out of credits) leaves the lead
 //    ready and unverified; it is neither started nor moved to backup, and is reported as `unverified`.
+// Suppressed addresses and leads whose address/company already has an active sequence (start_candidates.blocked) skip
+// verification and are reported by SQL as `suppressed` / `duplicate`.
 // If some of the first N fail verification, the next ready leads are verified until N are ok or none remain.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { verifyEmails } from "../verify-email/index.ts";
@@ -42,11 +44,13 @@ Deno.serve(async (req) => {
       if (need !== null && need <= 0) break;
       const { data: cands, error } = await admin.rpc("start_candidates", { p_list_id: body.list_id, p_limit: need ?? 5000, p_skip: [...examined, ...unverifiedIds] });
       if (error) throw new Error(error.message);
-      const rows = (cands || []) as { id: string; email: string; mv_result: string | null; mv_checked_at: string | null }[];
+      const rows = (cands || []) as { id: string; email: string; mv_result: string | null; mv_checked_at: string | null; blocked: string | null }[];
       if (!rows.length) break;
       const fresh = (r: typeof rows[0]) => r.mv_result && r.mv_checked_at && Date.parse(r.mv_checked_at) > Date.now() - 30 * 864e5;
-      const verdicts = new Map((await verifyEmails(admin, rows.filter((r) => !fresh(r)).map((r) => r.email))).map((v) => [v.email, v]));
+      // suppressed / already-covered leads cost no MillionVerifier credit: they go straight to SQL, which moves them to backup
+      const verdicts = new Map((await verifyEmails(admin, rows.filter((r) => !r.blocked && !fresh(r)).map((r) => r.email))).map((v) => [v.email, v]));
       for (const r of rows) {
+        if (r.blocked) { examined.push(r.id); continue; }
         let result = r.mv_result;
         if (!fresh(r)) {
           const v = verdicts.get(r.email.trim().toLowerCase());
