@@ -1,0 +1,70 @@
+/* Simplified CRM (docs/CRM_DESIGN.md section 1). Loaded by js/auth.js on every page. Uses the style.css tokens, so light and
+   dark both work. auth.js puts role-intern / role-team_lead / role-admin on <body> (independent leads count as intern). */
+
+/* ---- Nav: labelled tabs on phones ---- */
+.bottom-tabbar a { flex-direction: column; gap: 2px; padding: 7px 2px; min-height: 48px; }
+.bottom-tabbar .tab-label { font-size: 11px; font-weight: 600; line-height: 1.1; }
+
+/* ---- Call card: big call buttons + five outcome buttons ---- */
+.dial-call-row { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 10px; }
+.dial-call-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 52px; font-size: 16px; }
+.dial-call-btn span { font-size: 13px; font-weight: 400; opacity: .9; }
+.dial-outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.dial-outcomes .rf-label { grid-column: 1 / -1; margin: 0; }
+.dial-outcome { min-height: 48px; padding: 8px 6px; font-size: 14px; font-weight: 600; background: var(--surface); color: var(--text); border: 1px solid var(--border); line-height: 1.15; }
+.dial-outcome:first-of-type { grid-column: 1 / -1; background: var(--accent); color: #fff; border-color: var(--accent); }
+.dial-outcome.current { box-shadow: inset 0 0 0 2px var(--accent); }
+.dial-outcome-intro { grid-column: 1 / -1; font-weight: 500; font-size: 13px; min-height: 44px; }
+.dial-more { padding: 6px 0; }
+.dial-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted-strong); }
+
+/* ---- Interns: less chrome ---- */
+body.role-intern #seqPanel,
+body.role-intern .dial-contacted-today-display,
+body.role-intern .seq-stop-btn { display: none !important; }
+/* Calls: no triangle or gear menus (leads and admins keep them) */
+body.role-intern[data-page="dials.html"] #pageMenuToggle,
+body.role-intern[data-page="dials.html"] #pageSettingsBtn,
+/* Inbox: no gear (sync, folders, select) and no mailbox picker */
+body.role-intern[data-page="messages.html"] #pageSettingsBtn,
+body.role-intern[data-page="messages.html"] #menuMailboxesBtn { display: none !important; }
+
+/* ---- One place for each setting ---- */
+/* Sellers/Buyers and Accounts visible live on Team (leads/admins) only */
+body:not([data-page="team.html"]) #dealSideToggleBtn,
+body:not([data-page="team.html"]) #menuAccountsVisibleBtn { display: none !important; }
+/* Clients' gear only held those two (and Notifications, now on Me) */
+body[data-page="clients.html"] #pageSettingsBtn { display: none !important; }
+
+/* ---- Me ---- */
+.me-simple { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 14px 0 6px; }
+.me-today { margin: 0; font-size: 15px; color: var(--text-muted-strong); }
+.me-today b { font-size: 28px; color: var(--text); margin-right: 4px; }
+.me-notif { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; }
+.me-simple .help-text { margin: 0; }
+body[data-page="profile.html"] #reportsBtn,
+body[data-page="profile.html"] #menuTeamsBtn,
+body[data-page="profile.html"] #menuDeletedTabsBtn { display: none !important; } /* moved to Team */
+body.role-intern[data-page="profile.html"] #calendlyLinkSection,
+body.role-intern[data-page="profile.html"] #calendlyPreferenceSection,
+body.role-intern[data-page="profile.html"] #outreachCallsSection,
+body.role-intern[data-page="profile.html"] #introCallsSection,
+body.role-intern[data-page="profile.html"] #upcomingEventsSection,
+body.role-intern[data-page="profile.html"] #callbacksTodaySection,
+body.role-intern[data-page="profile.html"] #claudeConnectHost,
+body.role-intern[data-page="profile.html"] #surveyBtn,
+body.role-intern[data-page="profile.html"] #pageSettingsBtn,
+body.role-intern[data-page="profile.html"] #menuLinksBtn,
+body.role-intern[data-page="profile.html"] #menuCallsViewBtn { display: none !important; }
+
+/* ---- Team (reuses profile.js; only the big buttons show) ---- */
+.team-panel { display: flex; flex-direction: column; gap: 10px; }
+.team-big { min-height: 52px; font-size: 16px; text-align: center; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+body:not([data-page="team.html"]) .team-panel { display: none; }
+body[data-page="team.html"] .profile-card > :not(.team-panel) { display: none !important; }
+body[data-page="team.html"] #menuEditProfileBtn,
+body[data-page="team.html"] #menuLinksBtn,
+body[data-page="team.html"] #menuCallsViewBtn,
+body[data-page="team.html"] #menuTeamsBtn,
+body[data-page="team.html"] #menuDeletedTabsBtn,
+body[data-page="team.html"] #pageMenuToggle { display: none !important; }

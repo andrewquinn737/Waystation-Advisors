@@ -436,18 +436,21 @@ function openConfirmModal(modalEl, yesId, noId, onConfirm, onClose) {
   noBtn.addEventListener("click", onNo);
 }
 
+// Only filled fields are shown (no "Not provided" rows).
 function rf(label, value) {
   const v = value === null || value === undefined || value === "" ? "" : String(value);
-  return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
+  if (!v) return "";
+  return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value">${escapeHtml(v)}</div></div>`;
 }
 
 function rfWebsite(label, value) {
   const v = value ? String(value) : "";
-  const href = v && !/^https?:\/\//i.test(v) ? `https://${v}` : v;
+  if (!v) return "";
+  const href = !/^https?:\/\//i.test(v) ? `https://${v}` : v;
   return `
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
-      <div class="rf-value ${v ? "" : "empty"}">${v ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v)}</a>` : "Not provided"}</div>
+      <div class="rf-value"><a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v)}</a></div>
     </div>`;
 }
 
@@ -2796,12 +2799,12 @@ function updateProspectCount(count) {
 function renderDialsTable() {
   home?.refreshEmails();
   if (home && sheetMode()) {
-    home.renderSheet(!currentListId ? "No lists yet for this category — tap + next to the tabs to create one."
-      : dials.length === 0 ? `No dials in this list yet — use the arrow next to "Dials" and tap "Add new".` : "You're all caught up.");
+    home.renderSheet(!currentListId ? (simpleUi ? "No lists yet. Your team lead will add one." : "No lists yet for this category — tap + next to the tabs to create one.")
+      : dials.length === 0 ? (simpleUi ? "No companies in this list yet." : `No dials in this list yet — use the arrow next to "Dials" and tap "Add new".`) : "You're all caught up.");
     return;
   }
   if (!currentListId) {
-    els.dialsTableWrap.innerHTML = `<div class="empty-state">No lists yet for this category — tap + next to the tabs to create one.</div>`;
+    els.dialsTableWrap.innerHTML = `<div class="empty-state">${simpleUi ? "No lists yet. Your team lead will add one." : "No lists yet for this category — tap + next to the tabs to create one."}</div>`;
     updateProspectCount(0);
     return;
   }
@@ -2954,16 +2957,72 @@ function resolveEmailSubject(dial) {
 // narrower scope than this dial-level change.
 function buildDialViewHTML(dial) {
   return `
-    ${rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial))}
-    ${buildPhoneNumbersHTML(dial, null, resolvePersonalizedTextingBody(profile, dial), dial.id)}
+    ${dialCallButtonsHTML(dial)}
+    ${outcomeButtonsHTML(dial)}
+    ${dial.email ? rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial)) : ""}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
-    ${buildCallNotesLiveHTML(dial)}
-    ${buildCallbackHTML(dial)}
-    ${buildDialTranscriptHTML()}
+    <details class="dial-more">
+      <summary>More</summary>
+      ${buildCallNotesLiveHTML(dial)}
+      ${buildCallbackHTML(dial)}
+      ${buildDialTranscriptHTML()}
+    </details>
   `;
+}
+
+// ---------------------------------------------------------------------------
+// Calling + the five outcomes (docs/CRM_DESIGN.md §1). Big call buttons (one per number, labelled), then five outcome
+// buttons that replace the old 7-option status pill for everyone; after one is saved the card moves on to the next row of
+// the call sheet. Admins/team leads also keep the old status pill (to re-categorise or reset a company).
+// ---------------------------------------------------------------------------
+const simpleUi = !isAdmin && !isTeamLead; // interns (and independent leads): the slimmest card
+const OUTCOMES = [
+  { status: "callback_interested", label: "Talked – interested", callback: true },
+  { status: "busy_callback", label: "Call back", callback: true },
+  { status: "no_response", label: "No answer" },
+  { status: "not_interested", label: "Not interested" },
+  { status: "unable_to_contact", label: "Wrong / dead number" },
+];
+function dialCallButtonsHTML(dial) {
+  const btn = (num, method, label) =>
+    `<button type="button" class="btn dial-call-btn contact-action-call" data-dial-id="${escapeHtml(dial.id)}" data-tel="${escapeHtml(num)}" data-method="${method}"><b>${label}</b><span>${escapeHtml(num)}</span></button>`;
+  const rows = [];
+  if (dial.mobile_phone) rows.push(btn(dial.mobile_phone, "mobile", dial.mobile_phone_unsure ? "Call (may not be a mobile)" : "Call mobile"));
+  if (dial.company_phone) rows.push(btn(dial.company_phone, "company", "Call office"));
+  return rows.length ? `<div class="dial-call-row">${rows.join("")}</div>` : "";
+}
+function outcomeButtonsHTML(dial) {
+  return `
+    <div class="dial-outcomes" id="dialOutcomes">
+      <div class="rf-label">How did it go?</div>
+      ${OUTCOMES.map((o) => `<button type="button" class="btn dial-outcome ${dial.contact_status === o.status ? "current" : ""}" data-outcome="${o.status}">${o.label}</button>`).join("")}
+      <button type="button" class="btn secondary dial-outcome dial-outcome-intro ${dial.contact_status === "intro_call_scheduled" ? "current" : ""}" data-outcome="intro_call_scheduled">Intro call booked</button>
+    </div>`;
+}
+// Moves on to the next row of the call sheet (the order the card was opened from), or closes the card at the end.
+async function advanceAfterOutcome() {
+  if (currentDialIndex < currentDialSet.length - 1) await goToDial(1);
+  else await closeDialModal();
+}
+function wireOutcomeButtons() {
+  const wrap = document.getElementById("dialOutcomes");
+  if (!wrap) return;
+  wrap.querySelectorAll("[data-outcome]").forEach((b) => b.addEventListener("click", async () => {
+    const value = b.dataset.outcome, dial = currentDial;
+    wrap.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    const target = autodialTarget(value); // the Autodial setting (if on) still picks its own next company
+    if (target) primeAudio();
+    const saved = await updateDialStatus(value);
+    if (!saved) return renderDialModal(); // error shown by updateDialStatus; re-enable the buttons
+    if (value === "intro_call_scheduled") return handleScheduleIntroCallFromDial(dial); // the existing intro-call flow
+    if (target) return runAutodial(target);
+    const def = OUTCOMES.find((o) => o.status === value);
+    if (def?.callback) openCallbackModal(dial, { after: advanceAfterOutcome });
+    else await advanceAfterOutcome();
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -2999,7 +3058,7 @@ async function saveCallback(dial, iso) {
   if (idx !== -1) Object.assign(dials[idx], patch);
   window.dispatchEvent(new Event("callbacks-changed")); // refreshes the top-of-app banners and Profile's list
 }
-function openCallbackModal(dial) {
+function openCallbackModal(dial, { after } = {}) {
   const base = dial.callback_at ? new Date(dial.callback_at) : new Date(Date.now() + 60 * 60 * 1000);
   const pad = (n) => String(n).padStart(2, "0");
   els.callbackDateInput.value = `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`;
@@ -3009,8 +3068,9 @@ function openCallbackModal(dial) {
   const close = () => {
     els.callbackTimeModal.classList.add("hidden");
     els.callbackTimeSaveBtn.removeEventListener("click", onSave);
-    els.callbackTimeCancelBtn.removeEventListener("click", close);
+    els.callbackTimeCancelBtn.removeEventListener("click", onCancel);
   };
+  const onCancel = () => { close(); if (after) after(); };
   const onSave = async () => {
     const date = els.callbackDateInput.value, time = els.callbackTimeInput.value;
     if (!date || !time) {
@@ -3024,7 +3084,7 @@ function openCallbackModal(dial) {
     try {
       await saveCallback(dial, when.toISOString());
       close();
-      renderDialModal();
+      if (after) await after(); else renderDialModal();
     } catch (err) {
       els.callbackTimeError.textContent = err?.message || String(err);
       els.callbackTimeError.classList.remove("hidden");
@@ -3033,7 +3093,7 @@ function openCallbackModal(dial) {
     }
   };
   els.callbackTimeSaveBtn.addEventListener("click", onSave);
-  els.callbackTimeCancelBtn.addEventListener("click", close);
+  els.callbackTimeCancelBtn.addEventListener("click", onCancel);
 }
 document.addEventListener("click", async (e) => {
   const setBtn = e.target.closest?.("#callbackSetBtn");
@@ -3144,7 +3204,7 @@ function renderDialModal() {
       <div class="dial-modal-header-right">
         <div class="dial-modal-header-actions">
           ${
-            isViewingExisting
+            isViewingExisting && !simpleUi
               ? `
           <div class="dial-status-dropdown">
             <button type="button" class="dial-status-btn" id="dialStatusBtn"
@@ -3209,12 +3269,12 @@ function renderDialModal() {
     });
     const statusBtn = document.getElementById("dialStatusBtn");
     const statusMenu = document.getElementById("dialStatusMenu");
-    statusBtn.addEventListener("click", (e) => {
+    if (statusBtn) statusBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       statusMenu.classList.toggle("hidden");
     });
-    document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
-    statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
+    if (statusMenu) document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
+    if (statusMenu) statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const value = btn.dataset.value;
         const target = autodialTarget(value); // decided before the save so the right "next" dial is used
@@ -3267,6 +3327,7 @@ function renderDialModal() {
   } else {
     wireCallNotesAutosave();
     loadDialTranscript();
+    wireOutcomeButtons();
   }
 }
 

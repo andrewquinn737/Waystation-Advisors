@@ -22,7 +22,7 @@
   <script type="module">
     import { supabase } from "./js/supabaseClient.js";
     const { data: { session } } = await supabase.auth.getSession();
-    window.location.href = session ? "profile.html" : "login.html";
+    window.location.href = session ? "dials.html" : "login.html";
   </script>
 </body>
 </html>

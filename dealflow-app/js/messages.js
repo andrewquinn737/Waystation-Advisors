@@ -25,6 +25,8 @@ import { requireSession, showError } from "./auth.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireNotificationsToggle } from "./notifications.js";
+import { openQuickSend } from "./quickSend.js";
+import { getTeamLeadMailbox } from "./contactIcons.js";
 import { MAILBOX_KEY, loadMailboxes, buildGroups, selectedMailboxIds, loadUnreadCounts, loadSequenceBadges, loadQuotas, wireMailboxPicker, ownerFirstName, isMsMailbox, MS_PENDING_NOTE } from "./mailboxScope.js";
 
 const session = await requireSession();
@@ -33,6 +35,10 @@ const { profile } = session;
 
 const isAdmin = profile?.role === "admin";
 const isTeamLead = profile?.role === "team_lead";
+const isIntern = !isAdmin && !isTeamLead;
+// ?from=<address> ("Read reply" on the call sheet): the thread opens with Reply and Done side by side; Done finishes the reply task.
+let replyThreadId = null;
+const replyFrom = (new URLSearchParams(window.location.search).get("from") || "").trim();
 // "Inbox mode" = the full mail client (folders, reply, compose, picker). Admins/team leads always; anyone else
 // (interns) once they own at least one mailbox — set after loadAccounts(). An intern who owns none keeps the old
 // read-only feed of mail matched to their clients. NOTE: Mailboxes picker selection lives in mailboxScope.js
@@ -137,7 +143,7 @@ function mailboxLabel(a) {
 }
 
 function updateTitle() {
-  els.messagesTitle.textContent = folderView === "received" || folderView === "sent" ? "Messages" : `Messages · ${FOLDER_LABELS[folderView]}`;
+  els.messagesTitle.textContent = folderView === "received" || folderView === "sent" ? "Inbox" : `Inbox · ${FOLDER_LABELS[folderView]}`;
   const ids = canManageMail ? selectedMailboxIds(accounts) : [];
   els.mailboxesBtnLabel.textContent = ids.length === accounts.length ? `Mailboxes (${accounts.length})` : ids.length === 1 ? acctById(ids[0])?.email_address || "Mailboxes" : `${ids.length} of ${accounts.length} mailboxes`;
   document.querySelectorAll(".mail-tab").forEach((t) => t.classList.toggle("active", t.dataset.folder === folderView));
@@ -146,8 +152,11 @@ function updateTitle() {
 // One quiet line (never an error) when some of the selected mailboxes are Microsoft 365 ones we can't read yet.
 function updateMailNote() {
   const pending = (accountIdsForQuery() || []).filter((id) => { const a = acctById(id); return a && isMsMailbox(a); }).length;
-  els.mailNote.textContent = pending > 1 ? `${pending} mailboxes can't be read yet (Microsoft sign-in pending)` : pending ? `${MS_PENDING_NOTE}` : "";
-  els.mailNote.classList.toggle("hidden", !pending);
+  const total = (accountIdsForQuery() || []).length;
+  // Interns only hear about it when nothing at all can be read, in one line.
+  const show = isIntern ? pending > 0 && pending === total : pending > 0;
+  els.mailNote.textContent = isIntern ? "Your inbox can't be read yet. Ask your team lead." : pending > 1 ? `${pending} mailboxes can't be read yet (Microsoft sign-in pending)` : pending ? `${MS_PENDING_NOTE}` : "";
+  els.mailNote.classList.toggle("hidden", !show);
 }
 
 wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu, extraCloseEl: els.mailboxesPopup });
@@ -158,7 +167,7 @@ function setupInboxUi() {
   if (!canManageMail) return;
   els.mailToolbar.classList.remove("hidden");
   els.composeFabBtn.classList.remove("hidden");
-  els.menuMailboxesBtn.classList.toggle("hidden", accounts.length < 2); // one mailbox = nothing to pick
+  els.menuMailboxesBtn.classList.toggle("hidden", accounts.length < 2 || isIntern); // one mailbox = nothing to pick
   document.querySelectorAll(".mail-tab").forEach((t) => t.addEventListener("click", () => t.dataset.folder !== folderView && setFolderView(t.dataset.folder)));
   wireMailboxPicker({
     menuBtn: els.menuMailboxesBtn,
@@ -779,6 +788,26 @@ async function openParticipantRecord(address) {
   }
 }
 
+// "Done" on a reply opened from the call sheet: complete that company's pending reply task, then back to Calls.
+async function finishReplyTask(btn) {
+  btn.disabled = true;
+  try {
+    const { data: ds } = await supabase.from("dials").select("id").ilike("email", replyFrom);
+    const ids = (ds || []).map((d) => d.id);
+    if (ids.length) {
+      const { data: ts } = await supabase.from("sequence_tasks").select("id").eq("kind", "reply").in("dial_id", ids).not("status", "in", "(done,skipped)").limit(5);
+      for (const t of ts || []) {
+        const { error } = await supabase.rpc("complete_sequence_task", { p_task_id: t.id, p_outcome: "done", p_note: null, p_skip: false });
+        if (error) throw error;
+      }
+    }
+    window.location.href = "dials.html";
+  } catch (e) {
+    btn.disabled = false;
+    showError(els.errorBox, e);
+  }
+}
+
 async function openThread(threadId) {
   detailThreadId = threadId;
   els.errorBox.classList.add("hidden");
@@ -828,6 +857,8 @@ async function openThread(threadId) {
   const last = msgs[msgs.length - 1];
   const readOnly = isReadOnlyAccount(last.account_id);
   const canReply = canManageMail && canWriteAccount(last.account_id);
+  // An intern without a mailbox of their own replies through their team lead's mailbox (the same quick-send as the Email icon).
+  const internQuickReply = !canReply && isIntern && !!getTeamLeadMailbox() && last.direction === "inbound";
   const acct = acctById(last.account_id);
   const showChip = canManageMail && acct && (accountIdsForQuery() || []).length > 1;
   const seqAddr = counterpart(last).toLowerCase();
@@ -845,7 +876,8 @@ async function openThread(threadId) {
       ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [], liveById[m.id])).join("")}
       <div class="thread-detail-actions">
         <button type="button" class="btn secondary" id="threadBackBtn">Back</button>
-        ${canReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>` : ""}
+        ${canReply || internQuickReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>` : ""}
+        ${replyFrom && threadId === replyThreadId ? `<button type="button" class="btn" id="threadDoneBtn">Done</button>` : ""}
       </div>
     </div>
   `;
@@ -854,8 +886,15 @@ async function openThread(threadId) {
     exitDetail();
     loadThreadList();
   });
+  const doneBtn = document.getElementById("threadDoneBtn");
+  if (doneBtn) doneBtn.addEventListener("click", () => finishReplyTask(doneBtn));
   const replyBtn = document.getElementById("threadReplyBtn");
-  if (replyBtn) {
+  if (replyBtn && internQuickReply) {
+    replyBtn.addEventListener("click", () => {
+      const subj = last.subject || "";
+      openQuickSend({ accountId: getTeamLeadMailbox().accountId, to: last.from_address, subject: /^re:/i.test(subj) ? subj : `Re: ${subj}`, body: "" });
+    });
+  } else if (replyBtn) {
     replyBtn.addEventListener("click", () => {
       const other = last.direction === "outbound" ? (last.to_addresses || [])[0]?.address : last.from_address;
       openCompose({
@@ -1242,7 +1281,11 @@ if (canManageMail && accounts.length) {
     window.history.replaceState({}, "", "messages.html");
     const { data: hit } = await supabase.from("email_messages").select("thread_id")
       .eq("direction", "inbound").ilike("from_address", from.trim()).order("sent_at", { ascending: false }).limit(1);
-    if (hit && hit[0]?.thread_id) await openThread(hit[0].thread_id);
+    if (hit && hit[0]?.thread_id) { replyThreadId = hit[0].thread_id; await openThread(replyThreadId); }
+    else {
+      els.wrap.innerHTML = `<div class="empty-state">That reply isn't in the inbox yet.<div class="thread-detail-actions"><button type="button" class="btn" id="threadDoneBtn">Done</button></div></div>`;
+      document.getElementById("threadDoneBtn").addEventListener("click", (e) => finishReplyTask(e.currentTarget));
+    }
   }
 }
 if (canManageMail) {

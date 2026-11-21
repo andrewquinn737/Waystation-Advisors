@@ -727,7 +727,7 @@ function renderTable() {
   els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
 
   if (rows.length === 0) {
-    els.tableWrap.innerHTML = `<div class="empty-state">No clients yet — tap + to add one.</div>`;
+    els.tableWrap.innerHTML = `<div class="empty-state">No clients yet.</div>`;
     return;
   }
 
@@ -2004,7 +2004,7 @@ function buildReferralsHTML(referrals) {
       </button>`;
         })
         .join("")
-    : `<div class="empty-state">No buyers attached to this broker yet — tap + to add one.</div>`;
+    : `<div class="empty-state">No buyers attached to this broker yet.</div>`;
   return `
     <div class="referral-list">${boxes}</div>
     <button type="button" class="referral-add-btn" id="referralAddBtn" title="Add buyer">+</button>

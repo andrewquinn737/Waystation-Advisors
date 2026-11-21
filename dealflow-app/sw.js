@@ -2,12 +2,12 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v113";
+const CACHE = "waystation-shell-v114";
 const SHELL = [
-  "/", "/index.html", "/login.html", "/profile.html", "/clients.html", "/today.html", "/css/dialsHome.css", "/js/dialsHome.js",
-  "/dials.html", "/messages.html", "/finance.html", "/css/style.css",
+  "/", "/index.html", "/login.html", "/profile.html", "/team.html", "/clients.html", "/css/dialsHome.css", "/css/simple.css", "/js/dialsHome.js",
+  "/dials.html", "/messages.html", "/css/style.css",
   "/js/auth.js", "/js/profile.js", "/js/clients.js", "/js/dials.js",
-  "/js/messages.js", "/js/finance.js", "/js/config.js", "/js/supabaseClient.js", "/js/push.js",
+  "/js/messages.js", "/js/config.js", "/js/supabaseClient.js", "/js/push.js",
   "/js/offlineCache.js", "/js/eventTime.js",
   "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png",
 ];
@@ -88,7 +88,7 @@ self.addEventListener("push", (event) => {
       badge: "/icons/icon-192.png",
       // send-push sets payload.url (new-email pings open Messages);
       // anything without one keeps opening Profile as before.
-      data: { url: payload.url || "/profile.html" },
+      data: { url: payload.url || "/dials.html" },
     })
   );
 });
@@ -97,7 +97,7 @@ self.addEventListener("push", (event) => {
 // otherwise opens a new one straight to Profile.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || "/profile.html";
+  const targetUrl = event.notification.data?.url || "/dials.html";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

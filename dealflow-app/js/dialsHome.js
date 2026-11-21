@@ -108,7 +108,8 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   }
 
   // ---- render --------------------------------------------------------------------------------------------------
-  const isOpen = (g) => (openState.has(g.n) ? openState.get(g.n) : !g.closed);
+  // Only groups 1-3 (past due, due today, not called yet) start open; the rest are one tap away.
+  const isOpen = (g) => (openState.has(g.n) ? openState.get(g.n) : g.n <= 3);
   function rowHtml(g, it) {
     const { d, t } = it, who = [d.full_name, [d.city, d.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
     const bits = [g.label];

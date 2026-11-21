@@ -84,6 +84,10 @@ export function setOwnRole(role) {
   ownRole = role || null;
 }
 
+export function getTeamLeadMailbox() {
+  return teamLeadMailbox;
+}
+
 export function setTeamLeadMailbox(mailbox) {
   teamLeadMailbox = mailbox && mailbox.accountId ? mailbox : null;
 }

@@ -20,6 +20,9 @@ import { mountClaudeConnect } from "./claudeConnect.js";
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
 const { profile } = session;
+// team.html loads this same script: Reports and Teams & interns moved there from Profile (docs/CRM_DESIGN.md §1).
+const isTeamPage = document.body.dataset.page === "team.html";
+if (isTeamPage && profile.role !== "team_lead" && profile.role !== "admin") { window.location.replace("dials.html"); throw new Error("not a lead"); }
 
 // Synchronous admin check (unlike the Teams popup's own `isAdmin`, further
 // below, which is only known after loadTeams()'s async fetch) — same
@@ -2655,9 +2658,35 @@ if (isAdminSync || isTeamLeadSync) {
   checkSurveyButtonState();
 }
 
-showCallsView("outreach");
-loadUpcomingEvents();
-loadCallbacksToday();
+if (isTeamPage) {
+  // Team page: big buttons that open the popups wired above.
+  const $t = (id) => document.getElementById(id);
+  $t("teamReportsBtn").addEventListener("click", () => els.reportsBtn.click());
+  $t("teamTeamsBtn").addEventListener("click", (e) => els.menuTeamsBtn.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  if (isAdminSync) {
+    $t("teamDeletedBtn").classList.remove("hidden");
+    $t("teamDeletedBtn").addEventListener("click", () => document.getElementById("menuDeletedTabsBtn").click());
+  }
+} else {
+  showCallsView("outreach");
+  loadUpcomingEvents();
+  loadCallbacksToday();
+  loadMeSimple();
+}
+
+// Me: calls logged today (one row per call outcome/dial in call_status_changes) and the device time zone.
+async function loadMeSimple() {
+  const tzEl = document.getElementById("meTimezone");
+  if (tzEl) tzEl.textContent = `Time zone: ${profile.timezone || "this device's"} (set automatically)`;
+  const el = document.getElementById("meTodayCalls");
+  if (!el) return;
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase.from("call_status_changes").select("dial_id").eq("user_id", profile.id).gte("changed_at", start.toISOString()).limit(1000);
+  if (error) { el.textContent = "–"; return; }
+  const n = new Set((data || []).map((r) => r.dial_id)).size; // companies called today
+  el.textContent = String(n);
+  document.getElementById("meTodayLabel").textContent = n === 1 ? "call today" : "calls today";
+}
 
 // Admins only (interns no longer review or launch emails; the connector backend stays in place).
-if (profile.role === "admin") mountClaudeConnect(document.getElementById("claudeConnectHost"), { profile });
+if (profile.role === "admin" && !isTeamPage) mountClaudeConnect(document.getElementById("claudeConnectHost"), { profile });

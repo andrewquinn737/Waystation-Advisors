@@ -240,55 +240,59 @@ const NAV_ICONS = {
     '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l3.5-3 3 2 2.5-2 2.5 2 3-2 3.5 3"/><path d="M3 13v3l3.5 3.5"/><path d="M21 13v3l-3.5 3.5"/><path d="M9.5 12l2 2.3a1 1 0 0 0 1.5 0l.5-.6a1 1 0 0 0 0-1.4L12 10"/></svg>',
   phone:
     '<svg class="nav-phone" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  team:
+    '<svg class="nav-person" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   mail:
     '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
 };
 
+// Who sees which tabs (docs/CRM_DESIGN.md §1). Interns (and independent leads): Calls, Inbox, Me.
+// Team leads add Team. Admins add Team and Admin. Clients is reached from Team / Admin, not from the bar.
+function navItems(role) {
+  const items = [
+    { href: "dials.html", label: "Calls", icon: NAV_ICONS.phone },
+    { href: "messages.html", label: "Inbox", icon: NAV_ICONS.mail },
+  ];
+  if (role === "team_lead" || role === "admin") items.push({ href: "team.html", label: "Team", icon: NAV_ICONS.team });
+  if (role === "admin") items.push({ href: "admin.html", label: "Admin", icon: NAV_ICONS.server, also: ["campaigns.html", "mailboxes.html"] });
+  items.push({ href: "profile.html", label: "Me", icon: NAV_ICONS.person });
+  return items;
+}
+
+// Small shared stylesheet for the simplified CRM (nav labels, intern-only hiding). Loaded from here so every page gets it.
+function ensureSimpleCss() {
+  if (document.getElementById("simpleCss")) return;
+  const l = document.createElement("link");
+  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=1";
+  document.head.appendChild(l);
+}
+
 export function renderNav(profile) {
   const mount = document.getElementById("topnav");
   if (!mount) return;
+  ensureSimpleCss();
+  const role = profile.role;
+  document.body.classList.add("role-" + (role === "admin" || role === "team_lead" ? role : "intern"));
 
   const page = document.body.dataset.page || "";
-  const link = (href, label) =>
-    `<a href="${href}" class="${page === href ? "active" : ""}">${label}</a>`;
-  const iconLink = (href, icon, label) =>
-    `<a href="${href}" class="${page === href ? "active" : ""}" title="${label}">${icon}</a>`;
+  // Clients is reached from Team (leads) or Admin (admins), so those tabs stay lit there.
+  const items = navItems(role).map((it) => ({ ...it, active: page === it.href || (it.also || []).includes(page) || (page === "clients.html" && it.href === (role === "admin" ? "admin.html" : "team.html")) }));
+  const link = (it) => `<a href="${it.href}" class="${it.active ? "active" : ""}">${it.label}</a>`;
+  const tab = (it) => `<a href="${it.href}" class="${it.active ? "active" : ""}" title="${it.label}">${it.icon}<span class="tab-label">${it.label}</span></a>`;
 
-  // Finance was a team-lead-only page — team leads are on hold for now (see
-  // is_team_lead() in supabase/schema.sql), so its nav links are removed
-  // rather than gated. finance.html itself is left in place, unlinked, for
-  // whenever that comes back.
-  //
-  // Two nav presentations share the same markup pattern: a full top bar
-  // (desktop) and a fixed bottom tab bar (mobile — see the max-width:720px
-  // media query in css/style.css, which hides one and shows the other).
-  // The bottom bar has no Sign out button — that lives on the Profile page
-  // instead (mobile-only design) — and uses icons instead of text labels.
+  // Two nav presentations share the same items: a full top bar (desktop) and a fixed bottom tab bar (phones, see
+  // html.is-mobile-device in css/style.css). The bottom bar has no Log out (it lives on Me).
   mount.innerHTML = `
     <div class="topnav-bar">
       <div class="brand">Waystation Advisors</div>
-      <div class="links">
-        ${link("profile.html", "Profile")}
-        ${link("clients.html", "Clients")}
-        ${link("dials.html", "Dials")}
-        ${link("messages.html", "Messages")}
-        ${profile.role === "admin" ? link("campaigns.html", "Campaigns") : ""}
-        ${profile.role === "admin" ? link("mailboxes.html", "Mailboxes") : ""}
-      </div>
+      <div class="links">${items.map(link).join("")}</div>
       <div class="who">
         <span>${profile.full_name}</span>
-        <span class="role-badge">${profile.role === "admin" ? "Admin" : profile.role === "team_lead" ? "Team lead" : profile.role === "independent_lead" ? "Independent lead" : "Intern"}</span>
+        <span class="role-badge">${role === "admin" ? "Admin" : role === "team_lead" ? "Team lead" : role === "independent_lead" ? "Independent lead" : "Intern"}</span>
         <button class="btn danger small" id="signOutBtn">Log out</button>
       </div>
     </div>
-    <div class="bottom-tabbar">
-      ${iconLink("profile.html", NAV_ICONS.person, "Profile")}
-      ${iconLink("clients.html", NAV_ICONS.handshake, "Clients")}
-      ${iconLink("dials.html", NAV_ICONS.phone, "Dials")}
-      ${iconLink("messages.html", NAV_ICONS.mail, "Messages")}
-      ${profile.role === "admin" ? iconLink("campaigns.html", NAV_ICONS.send, "Campaigns") : ""}
-      ${profile.role === "admin" ? iconLink("mailboxes.html", NAV_ICONS.server, "Mailboxes") : ""}
-    </div>
+    <div class="bottom-tabbar">${items.map(tab).join("")}</div>
   `;
 
   document.getElementById("signOutBtn").addEventListener("click", signOut);
