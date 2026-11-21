@@ -97,3 +97,17 @@ statuses, "Send the N ready", Rewrite-with-Claude panel, Connect Claude card.
 Next: review both agents' work, run all suites (test_sequences.py needs copy-gate before approve now;
 load_test.py too), commit; one-command test runner + release checklist.
 Flagged to Mason: `.mcp.json` live `supabase` entry lost `--read-only` (not by me; not reverted).
+
+## 2026-11-22 send rules v2 (migration `20261122_send_rules.sql`, applied to TEST)
+- Window 8:30-17:00 weekdays in the LIST OWNER's zone (`profiles.timezone`, invalid/null -> America/Denver); business-day math in that zone.
+- Cap: min(20, `daily_send_limit`) per MAILBOX per local day (first emails + follow-ups, follow-ups first). Spacing 4-9 min between
+  consecutive sends of one mailbox (`send_at`), one queued send per mailbox per run, nothing queued after 17:00 (a run in the last
+  4-9 minutes of the day queues nothing). Cron should run every minute (test cron stays paused).
+- No auto call sequence: no personal email -> `dials.sequence='backup'` (no tasks). `call3` rows converted. Email steps after the first
+  are created only once email 1 really sends.
+- `start_emails(p_list_id, p_count, p_dial_ids)`; UI calls edge fn `start-emails` (verifies with MillionVerifier via `verify-email`,
+  30-day cache `email_verifications`, TEST shortcut: @example.com = ok when not on the live project). SQL refuses unverified leads.
+- Copy gate now also checks cross-batch uniqueness (`sent_sentence_index` from outbound mail, 180 days; `lead_copy_hashes` of other
+  active/ready leads). SQL normalizer parity with copyLint.js: `tools/testenv/test_sentence_parity.py`.
+- `email_queue_status(p_owner)`, view `my_followups`.
+- Live deploy: migration, then functions copy-gate, claude-connector, verify-email, start-emails; set `MILLIONVERIFIER_API_KEY` secret.

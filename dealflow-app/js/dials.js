@@ -29,7 +29,8 @@ import { skeletonListHtml } from "./placeholders.js";
 import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 import { keepRecordingForDial, discardRecordingsForDial, signedRecordingUrl } from "./callRecordings.js";
-import { renderCopyBanner, seqBadgeHTML, seqPanelHTML, wireSeqPanel, mountMandatePicker, defaultMandateForBuyer, prepareList, describePrepare, runSequenceSetupFlow } from "./copyReview.js";
+import { initDialsHome } from "./dialsHome.js";
+import { seqBadgeHTML, seqPanelHTML, wireSeqPanel, mountMandatePicker, defaultMandateForBuyer, prepareList, describePrepare, runSequenceSetupFlow } from "./copyReview.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -179,6 +180,8 @@ const els = {
   menuAddNewBtn: document.getElementById("menuAddNewBtn"),
   menuImportBtn: document.getElementById("menuImportBtn"),
   menuSelectBtn: document.getElementById("menuSelectBtn"),
+  menuShowAllBtn: document.getElementById("menuShowAllBtn"),
+  menuShowAllLabel: document.getElementById("menuShowAllLabel"),
   menuSearchBtn: document.getElementById("menuSearchBtn"),
   dialsSearchBar: document.getElementById("dialsSearchBar"),
   dialsSearchInput: document.getElementById("dialsSearchInput"),
@@ -217,7 +220,6 @@ const els = {
   confirmDeleteTabModal: document.getElementById("confirmDeleteTabModal"),
   addTabBtn: document.getElementById("addTabBtn"),
   dialsTableWrap: document.getElementById("dialsTableWrap"),
-  copyBanner: document.getElementById("copyBanner"),
   dialTabSeqBtn: document.getElementById("dialTabSeqBtn"),
   dialModalBackdrop: document.getElementById("dialModalBackdrop"),
   dialModalHeader: document.getElementById("dialModalHeader"),
@@ -2700,12 +2702,25 @@ function searchTabName(d) {
   return allLists.find((l) => l.id === d.list_id)?.name || "";
 }
 
-function refreshCopyBanner() {
-  renderCopyBanner(els.copyBanner, allLists.find((l) => l.id === currentListId), { onChanged: async () => { await loadLists(); } });
+// Dials home (Follow up now / Emails / Backup numbers) — see js/dialsHome.js.
+let home = null;
+// Backup numbers: the dials of a sequenced list that still need a call. Lists with no sequence at all (older lists) show
+// every dial; leads/admins can switch to every dial from the page menu, and Search always looks at everything.
+const OPEN_STATUSES = new Set(["uncontacted", "no_response", "busy_callback", "unable_to_contact"]);
+let showAll = false;
+const isSequenced = () => dials.some((d) => d.sequence);
+const backupMode = () => !showAll && !dialSearchQuery.trim() && isSequenced();
+const isBackup = (d) => (d.sequence === "backup" || d.sequence === "call3") && OPEN_STATUSES.has(d.contact_status || "uncontacted");
+// Open a company's card from a list that is not the one on screen (Follow up now rows): prev/next stay within that set.
+function openCardFrom(set, index) {
+  if (index < 0 || !set[index]) return;
+  currentDialSet = set; currentDialIndex = index; currentDial = set[index]; dialMode = "view";
+  els.dialModalBackdrop.classList.remove("hidden");
+  lockPageScroll();
+  renderDialModal();
 }
 
 async function loadDials() {
-  refreshCopyBanner();
   if (dialSearchQuery.trim() && (await loadSearchPool())) {
     renderDialsTable();
     return;
@@ -2755,8 +2770,10 @@ function searchPhoneDigits(q) {
 function visibleDials() {
   const q = dialSearchQuery.trim().toLowerCase();
   const qd = searchPhoneDigits(q);
+  const bm = backupMode();
   return dials.filter(
     (d) =>
+      (!bm || isBackup(d)) &&
       !hiddenStatuses.has(d.contact_status || "uncontacted") &&
       (!q ||
         (d.full_name || "").toLowerCase().includes(q) ||
@@ -2772,6 +2789,7 @@ function visibleDials() {
 // always reflects however many dials are actually visible right now in the
 // selected tab, after the Categories filter (hiddenStatuses) is applied.
 function updateProspectCount(count) {
+  home?.setBackup({ count, title: backupMode() || !isSequenced() ? (isSequenced() ? "Backup numbers" : "Companies") : "All companies" });
   if (!els.dialsProspectCount) return;
   // In Select mode the header counts what's ticked instead of what's shown.
   if (selectMode) {
@@ -2779,10 +2797,11 @@ function updateProspectCount(count) {
     els.dialsProspectCount.textContent = `${n} prospect${n === 1 ? "" : "s"} selected`;
     return;
   }
-  els.dialsProspectCount.textContent = `${count} prospect${count === 1 ? "" : "s"} displayed`;
+  els.dialsProspectCount.textContent = "";
 }
 
 function renderDialsTable() {
+  home?.refreshEmails();
   if (!currentListId) {
     els.dialsTableWrap.innerHTML = `<div class="empty-state">No lists yet for this category — tap + next to the tabs to create one.</div>`;
     updateProspectCount(0);
@@ -2804,6 +2823,7 @@ function renderDialsTable() {
   if (visible.length === 0) {
     els.dialsTableWrap.innerHTML = dialSearchQuery.trim()
       ? `<div class="empty-state">No dials in any tab match "${escapeHtml(dialSearchQuery.trim())}".</div>`
+      : backupMode() ? `<div class="empty-state">No backup numbers to call right now.</div>`
       : `<div class="empty-state">Every dial in this list is hidden by the status filter above.</div>`;
     return;
   }
@@ -2832,7 +2852,7 @@ function renderDialsTable() {
             (d, i) => `
           <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             ${selectMode ? `<td>${selectCircleHTML(d)}</td>` : ""}
-            <td data-label="Name">${escapeHtml(dialDisplayName(d))}${seqBadgeHTML(d)}</td>
+            <td data-label="Name">${escapeHtml(dialDisplayName(d))}${showAll ? seqBadgeHTML(d) : ""}</td>
             <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</td>
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
             <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || "—")}</td>
@@ -2853,7 +2873,7 @@ function renderDialsTable() {
           (d, i) => `
         <div class="mobile-card clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
           <div class="mc-main">
-            <div class="mc-name">${escapeHtml(dialDisplayName(d))}${seqBadgeHTML(d)}</div>
+            <div class="mc-name">${escapeHtml(dialDisplayName(d))}${showAll ? seqBadgeHTML(d) : ""}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</div>
           </div>
           ${
@@ -3326,6 +3346,14 @@ async function updateDialStatus(newStatus) {
   // renderDialModal's showScheduleIntroBtn and the success path in
   // openIntroCallTimeConfirmModal, which is what sets this flag true.
   const wasAlreadyIntroScheduled = currentDial.contact_status === "intro_call_scheduled";
+  // A pending call task for this company is finished by the outcome. Done BEFORE the status update: a final status stops the
+  // sequence, which would cancel the task before its outcome was recorded.
+  const pendingTask = newStatus !== "uncontacted" ? home?.callTaskFor(currentDial.id) : null;
+  if (pendingTask) {
+    const outcome = { no_response: "no_answer", unable_to_contact: "no_answer", busy_callback: "busy_callback", callback_interested: "talked_callback", not_interested: "not_interested", intro_call_scheduled: "intro_booked" }[newStatus] || newStatus;
+    const { error: taskErr } = await supabase.rpc("complete_sequence_task", { p_task_id: pendingTask.id, p_outcome: outcome, p_note: null, p_skip: false });
+    if (taskErr) console.error("complete_sequence_task failed", taskErr); else home.taskDone(pendingTask.id);
+  }
   const data = { contact_status: newStatus };
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
@@ -3423,6 +3451,7 @@ async function closeDialModal() {
   await flushCallNotes();
   els.dialModalBackdrop.classList.add("hidden");
   unlockPageScroll();
+  home?.refreshFollowups();
 }
 
 // Opens the "New dial" popup — used by the "Add new" item in the page-header
@@ -4193,6 +4222,28 @@ if (isAdmin || isTeamLead) {
     onChange: renderTabs,
     escapeHtml,
   });
+}
+
+home = initDialsHome({
+  profile,
+  getList: () => allLists.find((l) => l.id === currentListId) || null,
+  getDials: () => dials,
+  openCard: openCardFrom,
+  onSent: async () => { await loadLists(); },
+  isPhone: isMobileViewport,
+});
+// Page menu: leads/admins can see every company in the list instead of only Backup numbers; interns get the short menu.
+if (isAdmin || isTeamLead) {
+  els.menuShowAllBtn.classList.remove("hidden");
+  els.menuShowAllBtn.addEventListener("click", () => {
+    showAll = !showAll;
+    els.menuShowAllLabel.textContent = showAll ? "Show backup numbers" : "Show all companies";
+    closePageHeaderMenu();
+    renderDialsTable();
+  });
+} else {
+  els.menuSelectBtn.classList.add("hidden");
+  els.menuCategoriesBtn.classList.add("hidden");
 }
 
 await loadLists();

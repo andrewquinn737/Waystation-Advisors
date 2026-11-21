@@ -6,6 +6,7 @@
 // Also importable by other functions: checkList(admin, listId).
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { lintBatch } from "../_shared/copyLint.js";
+import { leadTexts, uniquenessErrors } from "../_shared/sentenceIndex.js";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -15,18 +16,30 @@ const CORS = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
 export async function checkList(admin: SupabaseClient, listId: string) {
-  const { data: rows, error } = await admin.rpc("copy_gate_rows", { p_list_id: listId });
+  const { data: rows, error } = await admin.rpc("copy_gate_rows2", { p_list_id: listId });
   if (error) throw new Error(error.message);
-  const leads = (rows || []) as Record<string, string>[];
+  const leads = (rows || []) as Record<string, any>[];
   const res = lintBatch(leads.map((r) => ({ id: r.id, full_name: r.full_name, company_name: r.company_name,
     email_subject: r.email_subject, email_1: r.email_1, email_2: r.email_2 })));
+  // cross-batch uniqueness: team sends of the last 180 days + other active/ready leads' copy
+  const texts = new Map(leads.map((r) => [r.id, leadTexts(r)]));
+  const sentences = [...new Set([...texts.values()].flatMap((t) => t.s))];
+  const bodies = [...new Set([...texts.values()].map((t) => t.b).filter(Boolean))];
+  let hits: Record<string, any>[] = [];
+  if (sentences.length || bodies.length) {
+    const { data, error: e1 } = await admin.rpc("copy_uniqueness_hits", { p_list_id: listId, p_sentences: sentences, p_bodies: bodies });
+    if (e1) throw new Error(e1.message);
+    hits = data || [];
+  }
   const results = leads.map((r) => {
     const x = res.get(r.id) || { errors: [], warnings: [] };
-    return { id: r.id, ok: x.errors.length === 0, errors: x.errors, warnings: x.warnings, hash: r.hash };
+    const errors = [...x.errors, ...uniquenessErrors(texts.get(r.id)!, hits)];
+    const t = texts.get(r.id)!;
+    return { id: r.id, ok: errors.length === 0, errors, warnings: x.warnings, hash: r.hash, s1: t.s, fu: t.b };
   });
   const { data: rec, error: e2 } = await admin.rpc("copy_gate_record", { p_list_id: listId, p_results: results });
   if (e2) throw new Error(e2.message);
-  return { summary: rec, results: results.map(({ hash: _h, ...r }) => r) };
+  return { summary: rec, results: results.map(({ hash: _h, s1: _s, fu: _f, ...r }) => r) };
 }
 
 if (import.meta.main) Deno.serve(async (req) => {

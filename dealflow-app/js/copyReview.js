@@ -5,7 +5,7 @@ import { supabase } from "./supabaseClient.js";
 import { escapeHtml } from "./clientForm.js";
 import { runCopyGate } from "./copyGate.js";
 import { openCopyReview } from "./copyReviewScreen.js";
-import { $, msg, plural, prettyDay, prettyDate, seqDayNumber, confirmBox, infoBox } from "./copyCommon.js";
+import { $, msg, plural, prettyDay, seqDayNumber, confirmBox, infoBox } from "./copyCommon.js";
 
 export { openCopyReview, prettyDay, seqDayNumber };
 
@@ -98,8 +98,8 @@ export async function prepareList(listId) {
 export function describePrepare(r) {
   const e = r.email_sequence || 0, c = r.call_sequence || 0, m = r.missing_copy || 0;
   const parts = [
-    `${plural(e, "company", "companies")} with a personal email → email sequence (waiting for copy approval)`,
-    `${c} without → calling starts today (3-call sequence)`,
+    `${plural(e, "company", "companies")} with a personal email → email sequence (ready to send from Dials)`,
+    `${c} without → backup numbers (call whenever)`,
   ];
   if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`);
   if (r.gate) parts.push(`server check: ${r.gate.summary?.passed ?? 0} ready, ${r.gate.summary?.held ?? 0} need fixing`);
@@ -116,38 +116,4 @@ export async function runSequenceSetupFlow(list, onChanged) {
     await infoBox("Sequence setup failed", msg(e));
   }
   onChanged && (await onChanged());
-}
-
-// ---------------------------------------------------------------------------
-// Banner (above the dials table)
-// ---------------------------------------------------------------------------
-export async function renderCopyBanner(container, list, { onChanged } = {}) {
-  if (!container) return;
-  const token = (container._tok = (container._tok || 0) + 1);
-  container.innerHTML = "";
-  if (!list || list.deleted_at) return;
-  const approved = list.copy_status === "approved";
-  if (list.copy_status === "pending_review" || approved) {
-    if (!approved) container.innerHTML = `<div class="cr-banner"><span class="cr-banner-text">Checking copy...</span></div>`;
-    const { count, error } = await supabase.from("dials").select("id", { count: "exact", head: true })
-      .eq("list_id", list.id).eq("sequence", "email5").eq("seq_state", "awaiting_copy");
-    if (token !== container._tok) return;
-    if (approved && !error && !count) { await approvedStatusLine(container, list, token); return; }
-    const label = error ? "Review emails before they send"
-      : approved ? `${plural(count, "held draft needs", "held drafts need")} fixing`
-      : `Review ${plural(count || 0, "email", "emails")} before they send`;
-    container.innerHTML = `<div class="cr-banner"><span class="cr-banner-text">${escapeHtml(label)}</span><button type="button" class="btn cr-banner-btn">Review</button></div>`;
-    container.querySelector("button").onclick = () => openCopyReview(list, { onChanged });
-  }
-}
-
-async function approvedStatusLine(container, list, token) {
-  let who = "";
-  if (list.copy_approved_by) {
-    const { data } = await supabase.from("profiles").select("full_name").eq("id", list.copy_approved_by).maybeSingle();
-    who = data?.full_name || "";
-  }
-  if (token !== container._tok) return;
-  const when = list.copy_approved_at ? ` on ${prettyDate(list.copy_approved_at)}` : "";
-  container.innerHTML = `<div class="cr-status">Copy approved${who ? ` by ${escapeHtml(who)}` : ""}${when} · sequence running</div>`;
 }

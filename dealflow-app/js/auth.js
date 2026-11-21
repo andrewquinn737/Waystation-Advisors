@@ -230,8 +230,6 @@ export async function signOut() {
 }
 
 const NAV_ICONS = {
-  today:
-    '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
   server:
     '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>',
   person:
@@ -268,7 +266,6 @@ export function renderNav(profile) {
     <div class="topnav-bar">
       <div class="brand">Waystation Advisors</div>
       <div class="links">
-        ${link("today.html", "Today")}
         ${link("profile.html", "Profile")}
         ${link("clients.html", "Clients")}
         ${link("dials.html", "Dials")}
@@ -282,7 +279,6 @@ export function renderNav(profile) {
       </div>
     </div>
     <div class="bottom-tabbar">
-      ${iconLink("today.html", NAV_ICONS.today, "Today")}
       ${iconLink("profile.html", NAV_ICONS.person, "Profile")}
       ${iconLink("clients.html", NAV_ICONS.handshake, "Clients")}
       ${iconLink("dials.html", NAV_ICONS.phone, "Dials")}

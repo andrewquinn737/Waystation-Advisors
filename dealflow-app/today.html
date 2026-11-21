@@ -2,70 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<link rel="preconnect" href="https://jabjrhkhnbabfihodqie.supabase.co" crossorigin />
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-<title>Today — Waystation Advisors</title>
-<script>
-  // Device-type detection, run synchronously before css/style.css is parsed
-  // so there's no flash of the wrong layout. Sets html.is-mobile-device or
-  // html.is-desktop-device based on the actual device, not the current
-  // window/viewport size — see the big comment in css/style.css above the
-  // "RESPONSIVE / MOBILE LAYOUT" section for why this replaced max-width
-  // media queries (rotating a phone no longer switches it to desktop layout).
-  (function () {
-    var ua = navigator.userAgent || navigator.vendor || "";
-    var isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile/i.test(ua);
-    // iPadOS 13+ Safari reports its UA as "Macintosh" by default, so also
-    // treat a touch-capable "Mac" as mobile.
-    var isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
-    document.documentElement.classList.add(isMobileUA || isIpadOS ? "is-mobile-device" : "is-desktop-device");
-  })();
-</script>
-<link rel="stylesheet" href="css/style.css" />
-<link rel="stylesheet" href="css/today.css" />
-<link rel="icon" href="favicon.ico" sizes="any" />
-<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
-<link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
-<link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
-<link rel="apple-touch-icon" href="icons/icon-192.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
-<script src="js/pwa.js" defer></script>
-<script src="js/noZoom.js" defer></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dials — Waystation Advisors</title>
+<meta http-equiv="refresh" content="0;url=dials.html" />
+<script>location.replace("dials.html");</script>
 </head>
-<body data-page="today.html">
-  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content"><p class="today-muted" style="padding:24px">Loading...</p></div></div>
-  <script type="module">
-    import { skeletonTopnavHtml } from "./js/placeholders.js";
-    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
-  </script>
-  <nav class="topnav" id="topnav"></nav>
-
-  <main class="today-main">
-    <div class="page-header">
-      <div class="page-header-left"><h1>Today</h1></div>
-      <button type="button" class="btn secondary small" id="todayRefresh">Refresh</button>
-    </div>
-    <p class="today-summary" id="todaySummary" aria-live="polite"></p>
-    <div class="today-picker hidden" id="todayPickerWrap">
-      <label for="todayPicker">Showing</label>
-      <select id="todayPicker"></select>
-    </div>
-    <div class="today-msg hidden" id="todayMsg" role="alert"></div>
-    <div id="todayApprovals"></div>
-    <div id="todayBody"></div>
-    <details class="today-upcoming hidden" id="todayUpcoming">
-      <summary id="todayUpcomingSummary">Coming up</summary>
-      <div id="todayUpcomingBody"></div>
-    </details>
-  </main>
-
-  <script type="module">
-    import "./js/today.js";
-  </script>
-</body>
+<body><p><a href="dials.html">Continue to Dials</a></p></body>
 </html>

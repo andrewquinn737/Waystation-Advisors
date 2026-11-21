@@ -24,6 +24,7 @@
 </script>
 <link rel="stylesheet" href="css/style.css" />
 <link rel="stylesheet" href="css/copyReview.css" />
+<link rel="stylesheet" href="css/dialsHome.css" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
@@ -81,6 +82,9 @@
       <button type="button" class="page-header-menu-item hidden" id="menuImportBtn">
         <span class="menu-item-label">Import</span>
         <span class="menu-item-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></span>
+      </button>
+      <button type="button" class="page-header-menu-item hidden" id="menuShowAllBtn">
+        <span class="menu-item-label" id="menuShowAllLabel">Show all companies</span>
       </button>
       <button type="button" class="page-header-menu-item" id="menuSelectBtn">
         <span class="menu-item-label">Select</span>
@@ -217,8 +221,21 @@
       <div class="dial-tab-transfer-list" id="dialTabClientList"></div>
     </div>
 
-    <div id="copyBanner"></div>
-    <div id="dialsTableWrap"></div>
+    <!-- Intern home (js/dialsHome.js): Follow up now, Emails, Backup numbers. The third section holds the dials list. -->
+    <div class="dh" id="dialsHome">
+      <section class="dh-sec" id="dhFollow">
+        <button type="button" class="dh-head" aria-expanded="false"><span class="dh-title">Follow up now</span><span class="dh-count" id="dhFollowCount"></span><span class="dh-chev" aria-hidden="true"></span></button>
+        <div class="dh-body" id="dhFollowBody"></div>
+      </section>
+      <section class="dh-sec" id="dhEmails">
+        <button type="button" class="dh-head" aria-expanded="false"><span class="dh-title">Emails</span><span class="dh-count" id="dhEmailsCount"></span><span class="dh-chev" aria-hidden="true"></span></button>
+        <div class="dh-body" id="dhEmailsBody"></div>
+      </section>
+      <section class="dh-sec" id="dhBackup">
+        <button type="button" class="dh-head" aria-expanded="false"><span class="dh-title" id="dhBackupTitle">Backup numbers</span><span class="dh-count" id="dhBackupCount"></span><span class="dh-chev" aria-hidden="true"></span></button>
+        <div class="dh-body"><div id="dialsTableWrap"></div></div>
+      </section>
+    </div>
   </main>
 
   <!-- Delete-this-tab confirmation -->

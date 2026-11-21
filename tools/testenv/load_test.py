@@ -2,7 +2,7 @@
 cancels every queued test send at the end, and re-enables it. Lists are named 'TEST-LOAD ...'."""
 import sb, time, json, sys
 from collections import Counter
-from test_sequences import rpc, q, uid, SEC
+from test_sequences import rpc, q, uid, SEC, start
 
 PER = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 INTERNS = [e for e, a in SEC["accounts"].items() if a["role"] == "intern" and e.startswith("test.")]
@@ -24,22 +24,22 @@ try:
         # 70% personal email w/ copy, 10% generic, 10% blank, 5% malformed, 5% personal but missing follow-up
         q(f"""insert into dials (list_id, created_by, company_name, full_name, email, company_phone, email_subject, email_1, email_2)
               select '{lid}', '{uid(e)}', 'Load Co ' || g, 'Owner ' || g,
-                case when g % 20 < 14 then 'owner' || g || '.{i}@load-test.example.com'
+                case when g % 20 < 14 then 'owner' || g || '.{i}@example.com'
                      when g % 20 < 16 then 'info@loadco' || g || '.example.com'
                      when g % 20 < 18 then null
                      when g % 20 = 18 then 'broken-' || g
-                     else 'pat' || g || '.{i}@load-test.example.com' end,
+                     else 'pat' || g || '.{i}@example.com' end,
                 '(801) 555-' || lpad((g % 10000)::text, 4, '0'),
-                'Subject ' || g, 'Hi Owner, body ' || g || '.', case when g % 20 = 19 then null else 'Follow ' || g end
+                'Subject ' || g, 'Hi Owner, body ' || g || '.', case when g % 20 = 19 then null else 'Follow ' || g || ' ref {i}' end
               from generate_series(1, {PER}) g""")
     t_ins = time.time() - t0
     prep, appr = [], []
     for e, lid in lists.items():
         t = time.time(); c, r = rpc(e, "seq_prepare_list", p_list_id=lid); prep.append(time.time() - t)
         assert c == 200, (c, r)
-        t = time.time(); c, r2 = rpc(e, "approve_list_copy", p_list_id=lid); appr.append(time.time() - t)
+        t = time.time(); c, r2 = start(e, lid, None); appr.append(time.time() - t)   # copy gate + address check + start
         assert c == 200, (c, r2)
-    print(f"inserted {PER*len(lists)} leads in {t_ins:.1f}s; prepare max {max(prep):.2f}s avg {sum(prep)/len(prep):.2f}s; approve max {max(appr):.2f}s avg {sum(appr)/len(appr):.2f}s")
+    print(f"inserted {PER*len(lists)} leads in {t_ins:.1f}s; prepare max {max(prep):.2f}s avg {sum(prep)/len(prep):.2f}s; start max {max(appr):.2f}s avg {sum(appr)/len(appr):.2f}s")
     print("last list result:", r, r2)
     tasks = q("select count(*) n, count(*) filter (where kind in ('email','followup_email')) e from sequence_tasks t join dial_lists l on l.id=t.list_id where l.name like 'TEST-LOAD %'")[0]
     print("tasks:", tasks)
@@ -48,18 +48,27 @@ try:
     t = time.time()
     q("select seq_build_tasks(d.id) from dials d join dial_lists l on l.id=d.list_id where l.name like 'TEST-LOAD %' and d.sequence='email5' and d.seq_state='active'")
     print(f"rebuilt email-sequence tasks in {time.time()-t:.1f}s")
-    # simulate a workday, every 5 minutes 08:00-17:00 Denver
-    runs, total, slow = 0, 0, 0.0
-    for minute in range(0, 9 * 60, 5):
-        ts = f"2026-11-23 {8 + minute // 60:02d}:{minute % 60:02d}-07"
-        t = time.time(); n = q(f"select sequence_dispatch('{ts}') n")[0]["n"]; dtm = time.time() - t
-        runs += 1; total += n; slow = max(slow, dtm)
-    per_box = q("""select a.email_address, a.daily_send_limit lim, count(*) n from scheduled_emails s join email_accounts a on a.id=s.account_id
+    # simulate a workday: dispatcher every minute 08:30-17:05 Denver, in one statement
+    t = time.time()
+    q("select count(*) from (select sequence_dispatch(g) from generate_series('2026-11-23 08:30-07'::timestamptz, '2026-11-23 17:05-07', interval '1 minute') g) x")
+    print(f"simulated day: 516 dispatcher runs in {time.time()-t:.1f}s")
+    per_box = q("""select a.email_address, a.owner_id, coalesce(a.daily_send_limit, 25) lim, count(*) n from scheduled_emails s join email_accounts a on a.id=s.account_id
                    join dials d on d.id=s.dial_id join dial_lists l on l.id=d.list_id where l.name like 'TEST-LOAD %' and s.status='pending'
-                   group by 1,2""")
-    over = [b for b in per_box if b["n"] > b["lim"]]
-    print(f"simulated day: {runs} dispatcher runs, {total} queued, slowest run {slow:.2f}s; mailboxes used {len(per_box)}, over limit: {over}")
-    cap = sum(b["lim"] for b in q("""select distinct a.id, a.daily_send_limit lim from email_accounts a join dials d on d.sender_account_id=a.id
+                   group by 1,2,3""")
+    over = [b for b in per_box if b["n"] > min(20, b["lim"])]
+    total = sum(b["n"] for b in per_box)
+    per_person = Counter()
+    for b in per_box: per_person[b["owner_id"]] += b["n"]
+    print(f"queued {total} sends; mailboxes used {len(per_box)}; per person max {max(per_person.values())}; over limit: {over}")
+    gaps = q("""select min(g) lo, max(g) hi from (select extract(epoch from s.send_at - lag(s.send_at) over (partition by s.account_id order by s.send_at)) g
+                from scheduled_emails s join dials d on d.id=s.dial_id join dial_lists l on l.id=d.list_id where l.name like 'TEST-LOAD %' and s.status='pending') x where g is not null""")[0]
+    print(f"spacing between consecutive sends of a mailbox: {float(gaps['lo']):.0f}-{float(gaps['hi']):.0f}s (rule 240-540)", "OK" if 240 <= float(gaps['lo']) and float(gaps['hi']) <= 540 else "FAIL spacing")
+    out_of_window = q("""select count(*) n from scheduled_emails s join dials d on d.id=s.dial_id join dial_lists l on l.id=d.list_id
+                         where l.name like 'TEST-LOAD %' and s.status='pending'
+                           and ((s.send_at at time zone 'America/Denver')::time < '08:30' or (s.send_at at time zone 'America/Denver')::time >= '17:00')""")[0]["n"]
+    print("sends outside 08:30-17:00:", out_of_window)
+    assert not over and not out_of_window and 240 <= float(gaps['lo']) and float(gaps['hi']) <= 540, "LOAD RULE VIOLATION"
+    cap = sum(min(20, b["lim"]) for b in q("""select distinct a.id, coalesce(a.daily_send_limit,25) lim from email_accounts a join dials d on d.sender_account_id=a.id
                                      join dial_lists l on l.id=d.list_id where l.name like 'TEST-LOAD %'"""))
     print(f"daily capacity of the senders in use: {cap}; first emails waiting: "
           + str(q("select count(*) n from sequence_tasks t join dial_lists l on l.id=t.list_id where l.name like 'TEST-LOAD %' and t.kind='email' and t.status='pending'")[0]["n"]))

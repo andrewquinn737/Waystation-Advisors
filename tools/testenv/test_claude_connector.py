@@ -242,7 +242,7 @@ def _run():
         q(f"select connector_save_copy('{uid(GAVIN)}','{A}',null,null,'x',null)"); check("SQL guard refuses other intern", False)
     except RuntimeError as e: check("SQL guard refuses other intern", "not found" in str(e).lower())
 
-    # ---- approved list: a fixed lead auto-joins
+    # ---- approved list: a fixed lead becomes READY but is not started until the next start_emails call (send rules v2)
     q(f"update dial_lists set copy_status='approved' where id='{lid}'")
     q(f"update dials set seq_state='awaiting_copy' where id='{C}'")
     # C was fixed already; make it held again then fix through the connector on an approved list
@@ -250,7 +250,8 @@ def _run():
     tool(t_cal, "check_draft", dial_id=C)  # no write
     gate2 = tool(t_cal, "save_rewrite", dial_id=C, email_1=body("Lee", "A buyer is interested in electrical firms like yours. Open to a short chat?"))[1]
     st = q(f"select seq_state from dials where id='{C}'")[0]["seq_state"]
-    check("approved list: fixed lead auto-joins the sequence", gate2["saved"] and gate2["list_copy_status"] == "approved" and st == "active", (gate2, st))
+    chk = q(f"select copy_ok from dials where id='{C}'")[0]["copy_ok"]
+    check("approved list: fixed lead turns ready (copy_ok) but is not auto-started", gate2["saved"] and gate2["copy_ok"] and chk and st == "awaiting_copy", (gate2, st))
 
     # ---- rate limit (separate token)
     t_rl = mint(AUSTIN)

@@ -1,0 +1,38 @@
+/* Dials home (js/dialsHome.js): three collapsible sections. Mobile first; uses style.css tokens. */
+.dh { display: flex; flex-direction: column; gap: 10px; }
+.dh-sec { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.dh-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; background: none; font: inherit; font-size: 16px; font-weight: 700; color: var(--text); text-align: left; cursor: pointer; }
+.dh-title { flex: 1; min-width: 0; }
+.dh-count { font-size: 13px; font-weight: 700; min-width: 22px; text-align: center; padding: 2px 8px; border-radius: 12px; background: var(--gold-soft); }
+.dh-count:empty { display: none; }
+.dh-chev { width: 8px; height: 8px; border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted); transform: rotate(45deg); transition: transform .15s; margin: 0 4px 3px 2px; }
+.dh-sec.open .dh-chev { transform: rotate(225deg); }
+.dh-body { display: none; padding: 0 10px 10px; }
+.dh-sec.open .dh-body { display: block; }
+.dh-empty, .dh-line { font-size: 14px; color: var(--text-muted-strong); padding: 6px 4px; }
+.dh-line b { color: var(--text); }
+.dh-row { min-height: 56px; cursor: pointer; }
+.dh-row .mc-main { flex: 1; }
+.dh-side { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.dh-day { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 10px; background: var(--gold-soft); white-space: nowrap; }
+.dh-day.late { background: var(--danger); color: #fff; }
+.dh-act { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.dh-big { width: 100%; min-height: 52px; font-size: 16px; font-weight: 700; margin-top: 6px; }
+.dh-link { background: none; border: 0; padding: 0 4px; min-height: 44px; font: inherit; font-size: 14px; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.dh-sheet-bd { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; justify-content: center; }
+.dh-sheet { width: 100%; max-width: 480px; box-sizing: border-box; background: var(--bg); color: var(--text); border-radius: 14px 14px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 10px; }
+.dh-sheet h2 { margin: 0 0 6px; font-size: 18px; }
+.dh-lbl { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.dh-num { width: 100%; box-sizing: border-box; min-height: 48px; font: inherit; font-size: 20px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+.dh-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.dh-chip { min-height: 44px; padding: 0 18px; font: inherit; font-weight: 600; border: 1px solid var(--border); border-radius: 22px; background: var(--surface); color: var(--text); cursor: pointer; }
+.dh-note { font-size: 13px; color: var(--text-muted-strong); margin: 10px 0 0; }
+.dh-result { font-size: 15px; line-height: 1.45; margin: 0; }
+.dh-sheet-err { color: var(--danger); font-size: 13px; }.dh-sheet-err:empty { display: none; }
+.dh-sheet-btns { display: flex; gap: 8px; }
+.dh-sheet-btns .btn { flex: 1; min-height: 48px; font-size: 16px; }
+#dialsTableWrap { margin: 0 -10px; }
+.dh #dialsTableWrap .mobile-card, .dh .dh-body .mobile-card { margin-left: 0; margin-right: 0; }
+.dh-body { overflow-x: hidden; }
+.dh #dialsTableWrap .list-table { width: 100%; }
+@media (max-width: 720px) { .dh-body { padding: 0 8px 8px; } #dialsTableWrap { margin: 0; } }
