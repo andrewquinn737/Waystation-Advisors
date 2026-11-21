@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Admin — Waystation Advisors</title>
+<script>
+  (function () {
+    var ua = navigator.userAgent || navigator.vendor || "";
+    var isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile/i.test(ua);
+    var isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    document.documentElement.classList.add(isMobileUA || isIpadOS ? "is-mobile-device" : "is-desktop-device");
+  })();
+</script>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/copyReview.css" />
+<link rel="stylesheet" href="css/admin.css?v=1" id="adminCss" />
+<link rel="icon" href="favicon.ico" sizes="any" />
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
+<link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
+<script src="js/pwa.js" defer></script>
+<script src="js/noZoom.js" defer></script>
+</head>
+<body data-page="admin.html">
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content"><p class="ad-muted" style="padding:24px">Loading...</p></div></div>
+  <script type="module">
+    import { skeletonTopnavHtml } from "./js/placeholders.js";
+    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
+  </script>
+  <nav class="topnav" id="topnav"></nav>
+
+  <main class="ad-main">
+    <div class="page-header"><div class="page-header-left"><h1>Admin</h1></div></div>
+    <p class="ad-denied hidden" id="adDenied">Admins only.</p>
+    <div id="adApp" class="hidden">
+      <nav class="ad-tabs" id="adTabs" aria-label="Admin sections">
+        <a href="#campaigns" data-tab="campaigns">Campaigns</a>
+        <a href="#accounts" data-tab="accounts">Email</a>
+        <a href="clients.html">Clients</a>
+        <a href="#settings" data-tab="settings">Settings</a>
+      </nav>
+
+      <section class="ad-sec" id="campaigns" data-sec="campaigns" aria-labelledby="adCampH">
+        <div class="ad-sec-head"><h2 id="adCampH">Campaigns</h2><button type="button" class="btn secondary small" id="cpRefresh">Refresh</button></div>
+        <div class="ad-msg hidden" id="cpMsg" role="alert"></div>
+        <p class="ad-muted" id="cpSummary" aria-live="polite"></p>
+        <div id="cpList"></div>
+        <button type="button" class="btn secondary small hidden" id="cpToggleDone"></button>
+      </section>
+
+      <section class="ad-sec" id="accounts" data-sec="accounts" aria-labelledby="adAccH">
+        <div class="ad-sec-head"><h2 id="adAccH">Email accounts</h2>
+          <div class="ad-head-btns"><button type="button" class="btn secondary small" id="mbxRefresh">Refresh</button><button type="button" class="btn small" id="mbxAddToggle">Add account</button></div></div>
+        <div class="ad-msg hidden" id="mbxMsg" role="alert"></div>
+        <form class="ad-panel hidden" id="mbxAddPanel" autocomplete="off">
+          <h3>Add an email account</h3>
+          <p class="ad-muted">Email and password. Microsoft 365 and Google are detected from the address. We check the login before saving.</p>
+          <input id="addEmail" type="email" placeholder="Email address" required autocomplete="off" />
+          <input id="addPass" type="password" placeholder="Password or app password" required autocomplete="new-password" />
+          <select id="addOwner" aria-label="Owner"><option value="">Owner: match by name</option></select>
+          <div class="ad-row"><button type="submit" class="btn" id="addGo">Add and check login</button><button type="button" class="btn secondary" id="addCancel">Cancel</button></div>
+          <div class="ad-msg hidden" id="addMsg" role="alert"></div>
+        </form>
+        <p class="ad-muted" id="mbxSummary" aria-live="polite"></p>
+        <div id="mbxList"></div>
+        <details class="ad-panel" id="mbxApi"><summary>API connection</summary>
+          <p class="ad-muted">Add, assign and update many accounts at once from a script or an AI tool. Endpoint:</p>
+          <pre id="mbxEndpoint"></pre>
+          <p class="ad-muted">Send the key in an <code>x-admin-api-key</code> header. Docs: <a href="https://github.com/andrewquinn737/Waystation-Advisors/blob/HEAD/docs/MAILBOX_ADMIN_API.md" target="_blank" rel="noopener">MAILBOX_ADMIN_API.md</a>. The key is stored hashed and shown once, when you make a new one.</p>
+          <div class="ad-row"><button type="button" class="btn secondary small" id="mbxRotate">Make a new key</button></div>
+          <div id="mbxKeyOut"></div>
+        </details>
+      </section>
+
+      <section class="ad-sec" id="settings" data-sec="settings" aria-labelledby="adSetH">
+        <div class="ad-sec-head"><h2 id="adSetH">Settings</h2></div>
+        <div id="adSettings"></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import "./js/admin.js";
+  </script>
+</body>
+</html>

@@ -105,9 +105,9 @@ def _run():
     code, r = call(t_cal, "ping"); check("ping", code == 200 and r["result"] == {}, r)
     code, r = call(t_cal, "tools/list")
     names = sorted(t["name"] for t in r["result"]["tools"])
-    check("tools/list: the six tools with schemas", names == sorted(["list_my_lists", "list_drafts", "get_guidelines", "check_draft", "save_rewrite", "get_history"])
+    check("tools/list: the nine tools with schemas", names == sorted(["list_my_lists", "list_drafts", "get_guidelines", "check_draft", "save_rewrite", "get_history", "list_campaigns", "get_campaign", "save_campaign_spintax"])
           and all(t["inputSchema"]["type"] == "object" for t in r["result"]["tools"]), names)
-    code, r = call(t_cal, "prompts/list"); check("prompts/list", sorted(p["name"] for p in r["result"]["prompts"]) == ["improve_draft", "rewrite_flagged"], r)
+    code, r = call(t_cal, "prompts/list"); check("prompts/list", sorted(p["name"] for p in r["result"]["prompts"]) == ["design_campaign", "improve_draft", "rewrite_flagged"], r)
     code, r = call(t_cal, "prompts/get", {"name": "rewrite_flagged", "arguments": {"list_id": lid}})
     txt = r["result"]["messages"][0]["content"]["text"]
     check("prompts/get rewrite_flagged mentions guidelines + list", "get_guidelines" in txt and lid in txt and "sign-off" in txt, txt[:200])
@@ -264,4 +264,5 @@ def _run():
     q(f"update claude_connector_calls set called_at = now() - interval '11 minutes' where token_id='{tid}'")
     check("rate limit window slides", tool(t_rl, "list_my_lists")[2] is False)
 
-run()
+if __name__ == "__main__":
+    run()

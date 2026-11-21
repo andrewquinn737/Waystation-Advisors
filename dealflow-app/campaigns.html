@@ -1,56 +1,6 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Campaigns — Waystation Advisors</title>
-<script>
-  (function () {
-    var ua = navigator.userAgent || navigator.vendor || "";
-    var isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile/i.test(ua);
-    var isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
-    document.documentElement.classList.add(isMobileUA || isIpadOS ? "is-mobile-device" : "is-desktop-device");
-  })();
-</script>
-<link rel="stylesheet" href="css/style.css" />
-<link rel="stylesheet" href="css/copyReview.css" />
-<link rel="stylesheet" href="css/campaigns.css" />
-<link rel="icon" href="favicon.ico" sizes="any" />
-<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
-<link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
-<link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
-<link rel="apple-touch-icon" href="icons/icon-192.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
-<script src="js/pwa.js" defer></script>
-<script src="js/noZoom.js" defer></script>
-</head>
-<body data-page="campaigns.html">
-  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content"><p class="cp-muted" style="padding:24px">Loading...</p></div></div>
-  <script type="module">
-    import { skeletonTopnavHtml } from "./js/placeholders.js";
-    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
-  </script>
-  <nav class="topnav" id="topnav"></nav>
-
-  <main class="cp-main">
-    <div class="page-header">
-      <div class="page-header-left"><h1>Campaigns</h1></div>
-      <button type="button" class="btn secondary small" id="cpRefresh">Refresh</button>
-    </div>
-    <p class="cp-denied hidden" id="cpDenied">Admins only.</p>
-    <div id="cpApp" class="hidden">
-      <p class="cp-muted" id="cpSummary" aria-live="polite"></p>
-      <div class="cp-msg hidden" id="cpMsg" role="alert"></div>
-      <div id="cpList"></div>
-    </div>
-  </main>
-
-  <script type="module">
-    import "./js/campaigns.js";
-  </script>
-</body>
-</html>
+<html lang="en"><head><meta charset="UTF-8" /><title>Campaigns</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="refresh" content="0; url=admin.html#campaigns" />
+<script>location.replace("admin.html#campaigns");</script></head>
+<body><p>Moved to <a href="admin.html#campaigns">Admin</a>.</p></body></html>

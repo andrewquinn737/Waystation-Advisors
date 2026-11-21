@@ -219,6 +219,9 @@ export async function requireSession() {
   // between loading screens" on a slow connection.
   hidePageLoadingOverlay();
 
+  // First time an admin opens the app: the Claude setup wizard (js/adminOnboarding.js; skipped for the session with "Not now").
+  if (resolvedProfile.role === "admin") import("./adminOnboarding.js").then((m) => m.maybeShowOnboarding(resolvedProfile)).catch((e) => console.error("onboarding", e));
+
   return { user: session.user, profile: resolvedProfile };
 }
 
