@@ -111,3 +111,13 @@ Flagged to Mason: `.mcp.json` live `supabase` entry lost `--read-only` (not by m
   active/ready leads). SQL normalizer parity with copyLint.js: `tools/testenv/test_sentence_parity.py`.
 - `email_queue_status(p_owner)`, view `my_followups`.
 - Live deploy: migration, then functions copy-gate, claude-connector, verify-email, start-emails; set `MILLIONVERIFIER_API_KEY` secret.
+
+## 2026-11-20 evening: audits + decisions (see docs/CRM_DESIGN.md)
+Mason's decisions: (1) Claude: Stage 1 = each admin connects their own Claude app via the connector during
+onboarding; campaign design + review chat happen in Claude; CRM shows campaign + Launch. In-page chat on the owner's
+token later, only after Anthropic confirms terms. (2) Warm-up stays in Instantly (mailboxes stay connected there,
+warm-up only); CRM does the sending. (3) Simplify nav: intern Calls/Inbox/Me; lead +Team; admin +Admin (Campaigns,
+Email accounts, Clients, settings); 5 outcome buttons; slim company card; remove orphan pages + duplicate toggles.
+Build split: A = security + deliverability backend (migration 20261124_hardening.sql), B = campaigns + Admin page +
+admin onboarding/Claude pairing + connector campaign tools, C = intern simplification + nav. Live-only fixes
+(hardcoded secrets in DB, anon access to wp_* tables) are listed in CRM_DESIGN.md §5 for the live rollout.
