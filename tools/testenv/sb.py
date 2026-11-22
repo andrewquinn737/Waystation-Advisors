@@ -13,7 +13,7 @@ def _req(tok, path, body=None, method=None, raw=False, _try=0):
         data=None if body is None else json.dumps(body).encode(), method=method,
         headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json", "User-Agent": "waystation-testenv"})
     try:
-        with urllib.request.urlopen(r, timeout=120) as f:
+        with urllib.request.urlopen(r, timeout=300) as f:
             d = f.read()
             return d if raw else json.loads(d or b"null")
     except urllib.error.HTTPError as e:
