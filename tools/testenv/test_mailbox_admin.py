@@ -119,7 +119,7 @@ try:
     c, r = call({"action": "list"}, who="key")
     mine = [m for m in r["mailboxes"] if m["email_address"].startswith("test-mbx-")]
     check("list shows test rows w/ counts+owner", c == 200 and len(mine) >= 4 and all("sent_24h" in m and "owner_name" in m for m in mine) and mine[0]["effective_daily_limit"] is not None, mine[:1])
-    check("list has no password field", '"password"' not in json.dumps(r))
+    check("list has no password field", not any(k in m for m in r["mailboxes"] for k in ("password", "password_secret_id")))
     check("no response ever contained the password", not any(PW in s for s in seen))
 
     # remove with pending scheduled email

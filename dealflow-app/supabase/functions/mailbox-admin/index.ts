@@ -12,7 +12,8 @@
 // See docs/MAILBOX_ADMIN_API.md for the request/response shapes.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { imapConnect, imapLogin, imapLogout } from "./imap.ts";
+import { imapConnect, imapLogin, imapLogout, imapAuthXoauth2 } from "./imap.ts";
+import { usesMsOauth, getMsToken, xoauth2String } from "../_shared/msOauth.ts";
 import { getMailboxPassword, setMailboxPassword } from "../_shared/mailboxSecret.ts";
 import { hostIsPrivate, isIpLiteral } from "../_shared/hostGuard.ts";
 
@@ -43,7 +44,7 @@ const PRESETS: Record<string, { imap_host: string; imap_port: number; smtp_host:
   microsoft: { imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587 },
   google: { imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 465 },
 };
-const LIST_COLS = "id, owner_id, label, email_address, username, imap_host, imap_port, smtp_host, smtp_port, sync_enabled, daily_send_limit, mandate, send_route, source, needs_assignment, credentials_verified, send_paused_reason, ramp_start, last_synced_at, last_sync_error, created_at";
+const LIST_COLS = "auth_method, sending_ok, reading_ok, checked_at, check_error, id, owner_id, label, email_address, username, imap_host, imap_port, smtp_host, smtp_port, sync_enabled, daily_send_limit, mandate, send_route, source, needs_assignment, credentials_verified, send_paused_reason, ramp_start, last_synced_at, last_sync_error, created_at";
 
 async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -59,7 +60,7 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T, i: number) => Promis
 }
 
 // ---- mail-server login checks (nothing is sent) ----
-async function smtpAuthCheck(host: string, port: number, user: string, pass: string) {
+async function smtpAuthCheck(host: string, port: number, user: string, pass: string, xoauth?: string) {
   const implicit = port === 465;
   let conn: Deno.Conn = implicit ? await Deno.connectTls({ hostname: host, port }) : await Deno.connect({ hostname: host, port });
   try {
@@ -92,13 +93,20 @@ async function smtpAuthCheck(host: string, port: number, user: string, pass: str
       await send("EHLO waystation-advisors.app");
       await readMulti();
     }
-    await send("AUTH LOGIN");
-    await readMulti();
-    await send(btoa(user));
-    await readMulti();
-    await send(btoa(pass));
-    const r = await readMulti();
-    if (!/^235/.test(r)) throw new Error("SMTP login failed: " + r.trim());
+    if (xoauth) {
+      await send("AUTH XOAUTH2 " + xoauth);
+      let r = await readMulti();
+      if (/^334/.test(r)) { await send(""); r = await readMulti(); }
+      if (!/^235/.test(r)) throw new Error("SMTP login failed: " + r.trim());
+    } else {
+      await send("AUTH LOGIN");
+      await readMulti();
+      await send(btoa(user));
+      await readMulti();
+      await send(btoa(pass));
+      const r = await readMulti();
+      if (!/^235/.test(r)) throw new Error("SMTP login failed: " + r.trim());
+    }
     await send("QUIT");
   } finally {
     try { conn.close(); } catch { /* ignore */ }
@@ -434,9 +442,12 @@ async function remove(ctx: Ctx, body: any) {
   return jsonResponse({ ok: true, removed: results.filter((r) => r.status === "removed").length, results });
 }
 
+// Reading status comes from the last real login check (reading_ok) and the sync worker (last_sync_error / last_synced_at).
 function readingState(r: any): string {
+  const err = r.last_sync_error || (r.reading_ok === false ? r.check_error : null);
+  if (err) return imapBlockedByMicrosoft(r.imap_host, err) && r.auth_method !== "ms_oauth" && /login|auth|credential|password/i.test(err) ? "blocked_microsoft" : "error";
+  if (r.reading_ok === true) return "ok";
   if (r.sync_enabled === false) return "off";
-  if (r.last_sync_error) return imapBlockedByMicrosoft(r.imap_host, r.last_sync_error) && /login|auth|credential|password/i.test(r.last_sync_error) ? "blocked_microsoft" : "error";
   return r.last_synced_at ? "ok" : "unknown";
 }
 
@@ -457,34 +468,63 @@ async function list(ctx: Ctx) {
     sent_24h: counts[i]?.sent ?? null,
     scheduled: counts[i]?.scheduled ?? null,
     effective_daily_limit: counts[i]?.daily_limit ?? null,
-    sending_ok: r.credentials_verified ?? null,                 // SMTP login, from the last check
+    sending_ok: r.sending_ok ?? r.credentials_verified ?? null,   // SMTP login, from the last real check
     reading_state: readingState(r),                              // 'ok' | 'blocked_microsoft' | 'error' | 'off' | 'unknown'
   }));
   return jsonResponse({ ok: true, mailboxes, people: profiles.map((p) => ({ id: p.id, full_name: p.full_name, role: p.role })) });
 }
 
-// Live-credential check with the STORED password: IMAP login + SMTP login, nothing is sent.
-async function checkLogin(ctx: Ctx, body: any) {
-  const id = str(body.account_id);
-  if (!UUID_RE.test(id)) return jsonResponse({ error: "account_id must be a mailbox id." }, 400);
-  const { data: a } = await ctx.admin.from("email_accounts").select("id, email_address, username, imap_host, imap_port, smtp_host, smtp_port, password").eq("id", id).maybeSingle();
-  if (!a) return jsonResponse({ error: "No such mailbox." }, 404);
-  for (const h of [a.imap_host, a.smtp_host]) if (await hostIsPrivate(h)) return jsonResponse({ error: "Mailbox host is private or local; blocked." }, 400);
+// Live check with the SAME methods sending/syncing use (nothing is sent): SMTP password login (XOAUTH2 as a fallback for
+// Microsoft 365), IMAP XOAUTH2 for ms_oauth mailboxes, IMAP password LOGIN otherwise. Results are stored on the row.
+async function checkOne(ctx: Ctx, id: string) {
+  const { data: a } = await ctx.admin.from("email_accounts").select("id, email_address, username, auth_method, imap_host, imap_port, smtp_host, smtp_port, password, sync_enabled").eq("id", id).maybeSingle();
+  if (!a) return { ok: false, account_id: id, error: "No such mailbox." };
+  for (const h of [a.imap_host, a.smtp_host]) if (await hostIsPrivate(h)) return { ok: false, account_id: id, error: "Mailbox host is private or local; blocked." };
   const password = await getMailboxPassword(ctx.admin, a);
-  if (!password) return jsonResponse({ error: "No password stored for this mailbox." }, 400);
-  const scrub = (m: string) => m.split(password).join("***").replace(/^Error: /, "");
-  const out: any = { ok: true, account_id: id, email: a.email_address, imap: { ok: true }, smtp: { ok: true } };
+  const ms = usesMsOauth(a);
+  const scrub = (m: string) => (password ? m.split(password).join("***") : m).replace(/^Error: /, "");
+  const out: any = { ok: true, account_id: id, email: a.email_address, method: ms ? "ms_oauth" : "password", imap: { ok: true }, smtp: { ok: true } };
   try {
     const c = await withTimeout(imapConnect(a.imap_host, a.imap_port), 12000, "Connecting to the IMAP server");
-    try { await withTimeout(imapLogin(c, a.username, password), 12000, "IMAP login"); } finally { await imapLogout(c); }
+    try {
+      if (ms) await withTimeout(imapAuthXoauth2(c, xoauth2String(a.username, await getMsToken(a.username))), 15000, "IMAP OAuth login");
+      else if (!password) throw new Error("No password stored for this mailbox.");
+      else await withTimeout(imapLogin(c, a.username, password), 12000, "IMAP login");
+    } finally { await imapLogout(c); }
   } catch (e) { out.imap = { ok: false, error: scrub(String(e)) }; }
-  try { await withTimeout(smtpAuthCheck(a.smtp_host, a.smtp_port, a.username, password), 20000, "SMTP login"); }
-  catch (e) { out.smtp = { ok: false, error: scrub(String(e)) }; }
-  // Sending (SMTP) and reading (IMAP) are reported separately. credentials_verified now means "sending works".
+  try {
+    if (!password) throw new Error("No password stored for this mailbox.");
+    await withTimeout(smtpAuthCheck(a.smtp_host, a.smtp_port, a.username, password), 20000, "SMTP login");
+  } catch (e) {
+    out.smtp = { ok: false, error: scrub(String(e)) };
+    if (ms) {   // password SMTP refused: try XOAUTH2 SMTP
+      try { await withTimeout(smtpAuthCheck(a.smtp_host, a.smtp_port, a.username, "", xoauth2String(a.username, await getMsToken(a.username))), 20000, "SMTP OAuth login"); out.smtp = { ok: true, via: "xoauth2" }; }
+      catch (e2) { out.smtp.error += " | OAuth: " + scrub(String(e2)); }
+    }
+  }
   out.sending = { ok: out.smtp.ok, error: out.smtp.error };
-  const blocked = !out.imap.ok && imapBlockedByMicrosoft(a.imap_host, out.imap.error);
+  const blocked = !out.imap.ok && !ms && imapBlockedByMicrosoft(a.imap_host, out.imap.error);
   out.reading = { ok: out.imap.ok, blocked_by_microsoft: blocked, error: out.imap.error };
-  await ctx.admin.from("email_accounts").update({ credentials_verified: out.smtp.ok }).eq("id", id);
+  out.checked_at = new Date().toISOString();
+  const errs = [out.smtp.ok ? "" : "Sending: " + out.smtp.error, out.imap.ok ? "" : "Reading: " + out.imap.error].filter(Boolean).join(" | ");
+  const upd: any = { sending_ok: out.smtp.ok, reading_ok: out.imap.ok, credentials_verified: out.smtp.ok, checked_at: out.checked_at, check_error: errs ? errs.slice(0, 500) : null };
+  if (out.imap.ok) upd.last_sync_error = null;   // a good login clears a stale read error; the sync worker re-sets it if syncing still fails
+  await ctx.admin.from("email_accounts").update(upd).eq("id", id);
+  return out;
+}
+
+async function checkLogin(ctx: Ctx, body: any) {
+  if (body.all === true || Array.isArray(body.account_ids)) {
+    let list: string[];
+    if (body.all === true) { const { data } = await ctx.admin.from("email_accounts").select("id").order("email_address"); list = (data || []).map((r: any) => r.id); }
+    else { const l = ids(body.account_ids); if (!l) return jsonResponse({ error: "account_ids must be a non-empty array of mailbox ids." }, 400); list = l; }
+    const results = await pool(list, 6, (id: string) => checkOne(ctx, id));
+    return jsonResponse({ ok: true, checked: results.length, sending_ok: results.filter((r: any) => r.smtp?.ok).length, reading_ok: results.filter((r: any) => r.imap?.ok).length, results });
+  }
+  const id = str(body.account_id);
+  if (!UUID_RE.test(id)) return jsonResponse({ error: "account_id must be a mailbox id." }, 400);
+  const out = await checkOne(ctx, id);
+  if (out.error && !out.imap) return jsonResponse({ error: out.error }, out.error === "No such mailbox." ? 404 : 400);
   return jsonResponse(out);
 }
 

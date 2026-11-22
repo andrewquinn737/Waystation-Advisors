@@ -23,6 +23,7 @@ function msg(text, ok = false) { const el = $("mbxMsg"); el.textContent = text |
 export function initAccounts() {
   $("mbxEndpoint").textContent = ENDPOINT;
   $("mbxRefresh").onclick = load;
+  $("mbxCheckAll").onclick = checkAll;
   $("mbxAddToggle").onclick = () => { $("mbxAddPanel").classList.toggle("hidden"); $("addEmail").focus(); };
   $("addCancel").onclick = () => $("mbxAddPanel").classList.add("hidden");
   $("mbxAddPanel").addEventListener("submit", (e) => { e.preventDefault(); addOne(); });
@@ -42,16 +43,24 @@ async function load() {
   } catch (e) { $("mbxList").innerHTML = ""; msg(e.message); }
 }
 
-// Two separate indicators: sending (SMTP login) and reading (IMAP login). Microsoft 365 blocks password logins on IMAP while
-// sending still works, so that case is "Reading blocked by Microsoft", not a failed login.
+// Two separate indicators from the last REAL login check: sending (SMTP login) and reading (IMAP login; XOAUTH2 for Microsoft
+// 365 mailboxes). Reading also shows the sync status (last sync time / last sync error).
+function ago(t) {
+  if (!t) return "";
+  const m = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
+  return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago";
+}
 function indicators(b) {
   const send = b.sending_ok === true ? ["good", "Sending \u2713"] : b.sending_ok === false ? ["bad", "Sending \u2717"] : ["", "Sending not checked"];
   const r = b.reading_state;
   const read = r === "ok" ? ["good", "Reading \u2713"]
-    : r === "blocked_microsoft" ? ["warn", b.sending_ok === false ? "Reading blocked by Microsoft" : "Reading blocked by Microsoft (sending works)"]
+    : r === "blocked_microsoft" ? ["warn", "Reading blocked by Microsoft"]
     : r === "error" ? ["bad", "Reading \u2717"] : r === "off" ? ["", "Reading off"] : ["", "Reading not checked"];
-  const tip = b.last_sync_error ? ` title="${esc(b.last_sync_error)}"` : "";
-  return `<span class="ad-ind ${send[0]}">${send[1]}</span><span class="ad-ind ${read[0]}"${tip}>${read[1]}</span>`;
+  const checked = b.checked_at ? `Last checked ${ago(b.checked_at)}.` : "Not checked yet.";
+  const sendTip = esc((b.check_error || "").split(" | ").find((x) => x.startsWith("Sending")) || checked);
+  const readTip = esc(b.last_sync_error || (b.check_error || "").split(" | ").find((x) => x.startsWith("Reading")) || checked);
+  const sync = !b.sync_enabled ? "Not syncing" : b.last_sync_error ? "Sync error" : b.last_synced_at ? "Synced " + ago(b.last_synced_at) : "Not synced yet";
+  return `<span class="ad-ind ${send[0]}" title="${sendTip}">${send[1]}</span><span class="ad-ind ${read[0]}" title="${readTip}">${read[1]}</span><span class="ad-ind ${b.sync_enabled && !b.last_sync_error ? "" : "warn"}" title="${esc(b.last_sync_error || "")}">${sync}</span>`;
 }
 
 function boxHtml(b) {
@@ -130,14 +139,18 @@ async function rotateKey() {
   $("mbxRotate").disabled = false;
 }
 
-// Live login check for one mailbox (nothing is sent). Updates both indicators in place.
+// Live login check for one mailbox (nothing is sent). The server stores the result; reload so the list shows the stored truth.
 async function checkLogin(b, btn) {
   btn.disabled = true; btn.textContent = "Checking...";
+  try { await api({ action: "check_login", account_id: b.id }); await load(); }
+  catch (e) { msg(e.message); btn.disabled = false; btn.textContent = "Check now"; }
+}
+
+async function checkAll() {
+  const btn = $("mbxCheckAll"); btn.disabled = true; btn.textContent = "Checking...";
   try {
-    const r = await api({ action: "check_login", account_id: b.id });
-    b.sending_ok = r.smtp.ok; b.credentials_verified = r.smtp.ok;
-    b.reading_state = r.imap.ok ? "ok" : r.reading?.blocked_by_microsoft ? "blocked_microsoft" : "error";
-    b.last_sync_error = r.imap.ok ? null : r.imap.error;
-    render();
-  } catch (e) { msg(e.message); btn.disabled = false; btn.textContent = "Check now"; }
+    const r = await api({ action: "check_login", all: true });
+    await load(); msg(`Checked ${r.checked}: sending works on ${r.sending_ok}, reading works on ${r.reading_ok}.`, r.sending_ok === r.checked && r.reading_ok === r.checked);
+  } catch (e) { msg(e.message); }
+  btn.disabled = false; btn.textContent = "Check all";
 }
