@@ -32,7 +32,7 @@ def run():
                 p.click("#pageMenuToggle"); p.wait_for_timeout(200)
                 m = items(p, "#pageHeaderMenu .page-header-menu-item")
                 check(f"{role}: Calls menu has Add new, Import, Select, Search, Categories", {"menuAddNewBtn", "menuImportBtn", "menuSelectBtn", "menuSearchBtn", "menuCategoriesBtn"} <= set(m), m)
-            p.goto(BASE + "profile.html"); p.wait_for_timeout(2000); p.click("#pageSettingsBtn")
+            p.goto(BASE + "profile.html"); p.wait_for_timeout(2000); p.click("#pageSettingsBtn"); p.wait_for_timeout(500)
             check(f"{role}: Profile gear has Notifications + Advanced", {"menuNotificationsBtn", "menuAdvancedBtn"} <= set(items(p, "#settingsMenu .page-header-menu-item")))
             ctx.close()
             ctx = b.new_context(viewport={"width": 375, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, role)

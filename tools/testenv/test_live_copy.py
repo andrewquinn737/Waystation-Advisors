@@ -36,6 +36,8 @@ def pages(b):
         for pg in pgs:
             errs.clear(); p.goto(BASE + pg + ".html"); p.wait_for_timeout(3500)
             check(f"{role} ({name}): {pg}.html loads with no errors", not clean_errs(errs), clean_errs(errs)[:3])
+        try: p.wait_for_selector(".topnav-bar .links a", timeout=8000)
+        except Exception: pass
         nav = p.eval_on_selector_all(".topnav-bar .links a", "a=>a.map(x=>x.textContent)")
         check(f"{role}: nav is {nav}", {"Profile", "Clients", "Calls", "Inbox"} <= set(nav) and (("Admin" in nav) == (role == "admin")), nav)
         ctx.close()
@@ -84,13 +86,16 @@ def profile_numbers(b):
     ev = q("select c.name nm, e.event_date, e.event_type from client_events e join clients c on c.id=e.client_id where e.event_date > now() and e.event_type ilike '%intro%' order by e.event_date limit 5") \
         if q("select 1 from information_schema.columns where table_name='clients' and column_name='name'") else []
     names = q("select name from clients where false") if False else []
-    ups = re.findall(r"Intro call · ([A-Z][a-z]{2} \d{1,2}, 20\d\d)", txt)
+    for _ in range(8):                                    # the list fills in after the page shell (and shows "time to be set" for untimed ones)
+        if "Intro call ·" in txt: break
+        p.wait_for_timeout(1500); txt = p.inner_text("body")
+    ups = re.findall(r"Intro call · ", txt)
     dbn = q("select count(*) n from client_events where event_type='intro_call' and event_date >= date_trunc('day', now() at time zone 'America/Denver') and client_id in (select id from clients where created_by is not null or true)")[0]["n"]
     check(f"admin: Upcoming events shows {len(ups)} intro calls (DB future intro events: {dbn})", len(ups) <= dbn and (len(ups) > 0 or dbn == 0), (ups, dbn))
     ctx.close()
     for name in ("Andrew Quinn",):
         ctx, p, errs = session(b, name); p.goto(BASE + "profile.html"); p.wait_for_timeout(4000); txt = p.inner_text("body")
-        due = q(f"select count(*) n from callback_tasks where assigned_to='{uid(name)}' and status='open' and due_at::date = current_date")[0]["n"]
+        due = q(f"select count(*) n from callback_tasks where assigned_to='{uid(name)}' and status='open' and due_at::date <= current_date")[0]["n"]   # overdue callbacks are listed with today's
         check(f"{name}: callbacks-today list consistent with callback_tasks ({due} due today)", (("No callbacks scheduled for today" in txt) == (due == 0)), (due, txt[-300:]))
         ctx.close()
 
@@ -100,7 +105,11 @@ def call_logging(b):
     name = "Brian Skoubye"; u = uid(name)
     ctx, p, errs = session(b, name)
     p.goto(BASE + "profile.html"); p.wait_for_timeout(3500)
-    before = int(re.search(r"(\d+) compan(?:y|ies) contacted this week", p.inner_text("body")).group(1))
+    for _ in range(10):                                   # the counts fill in after the page shell (slower under load)
+        m0 = re.search(r"(\d+) compan(?:y|ies) contacted this week", p.inner_text("body"))
+        if m0: break
+        p.wait_for_timeout(1500)
+    before = int(m0.group(1))
     p.goto(BASE + "dials.html"); p.wait_for_timeout(3500)
     p.click("#dialsTableWrap [data-dial-id], #dialsTableWrap .dh-row"); p.wait_for_timeout(1200)
     did = p.evaluate("(document.querySelector('#dialModalBackdrop .contact-action-call')||{dataset:{}}).dataset.dialId")
@@ -141,7 +150,8 @@ def survey(b):
     q(f"delete from survey_responses where user_id='{u}' and period_start='{mon}'")
     ctx, p, errs = session(b, name); p.goto(BASE + "profile.html"); p.wait_for_timeout(4000)
     check("survey button is visible for the intern", p.is_visible("#surveyBtn"))
-    p.click("#surveyBtn"); p.wait_for_timeout(2500)
+    p.click("#surveyBtn"); p.wait_for_selector("#surveyCallsInput", state="visible", timeout=15000)
+    p.wait_for_function("document.querySelector('#surveyCallsInput').value !== ''", timeout=15000); p.wait_for_timeout(1500)
     calls = int(p.input_value("#surveyCallsInput")); talked = int(p.input_value("#surveyOwnersTalkedInput")); agreed = int(p.input_value("#surveyOwnersAgreedInput"))
     ecalls = counts_for(u, "seller", local_midnight(mon), local_midnight(fri + datetime.timedelta(days=1)))
     etalk = q(f"""select count(*) n from dials d join dial_lists l on l.id=d.list_id where l.deleted_at is null and d.created_by='{u}'
@@ -179,6 +189,6 @@ if __name__ == "__main__":
         for k in pick:
             try: SCEN[k](b)
             except Exception as e:
-                check(f"scenario {k} ran without crashing", False, traceback.format_exc()[-500:])
+                check(f"scenario {k} ran without crashing", False, traceback.format_exc()[-1100:])
         b.close()
     print(f"\n{sum(results)}/{len(results)} passed")

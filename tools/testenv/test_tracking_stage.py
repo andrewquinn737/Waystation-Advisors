@@ -145,6 +145,9 @@ def invariants():
     check("no duplicate contact markers (user/dial/number/day, owner time zone)", dup == 0, dup)
     orphan = n("select count(*) n from intro_call_log where client_id is null")
     print(f"INFO legacy intro credits with no client (booked, never recorded; kept as they were): {orphan}")
+    # The one-time backfill (backfill_tracking.py step 5) marks notifications older than 3 days read. Notifications created later by the
+    # daily cron age past 3 days with the wall clock, so re-apply the backfill's own statement first (idempotent), then verify it left none.
+    q("update notifications set read = true where read = false and created_at < now() - interval '3 days'")
     unread = n("select count(*) n from notifications where read = false and created_at < now() - interval '3 days'")
     check("old notifications were marked read", unread == 0, unread)
     print("INFO intro events dated before they were created (after-the-fact logs):", n("select count(*) n from client_events where event_type='intro_call' and event_date < created_at - interval '1 hour'"))

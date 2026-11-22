@@ -39,7 +39,11 @@ def reports(b):
     for idx, label in ((1, "this week"), (2, "last week")):
         if idx == 2: choose_week(p, 2)
         wk = monday() - datetime.timedelta(days=7 * (idx - 1))
-        ui = table_rows(p); lo, hi = week_bounds(wk)
+        for _ in range(10):                                # rows render after the page shell; wait for every account (slower under load)
+            ui = table_rows(p)
+            if all(nm in ui for nm in names.values()): break
+            p.wait_for_timeout(1500)
+        lo, hi = week_bounds(wk)
         bad = []
         for uid_, nm in names.items():
             r = q(f"""with c as (select * from call_status_changes where user_id='{uid_}' and dial_type='seller' and changed_at >= {lo} and changed_at < {hi})
@@ -98,6 +102,14 @@ def reports(b):
     ctx2.close(); ctx.close()
 
 def messages(b):
+    """The 2-minute email-sync cron re-imports a deleted message the moment it runs (the real mailbox still has it), which made the
+    delete check race with it; park the cron for the scenario."""
+    poll = lambda on: q(f"select cron.alter_job((select jobid from cron.job where jobname='email-sync-poll'), active := {'true' if on else 'false'})")
+    poll(False)
+    try: _messages(b)
+    finally: poll(True)
+
+def _messages(b):
     print("-- G. Messages select: Unread / Delete (local copy only)")
     ctx, p, errs = session(b, "Jonah Johnson")
     p.goto(BASE + "messages.html"); p.wait_for_timeout(5000)
@@ -147,18 +159,18 @@ def import_transfer(b):
     print("-- I. list upload + transfer")
     admin = uid("Mason Quinn"); brian = uid("Brian Skoubye")
     q(f"delete from dial_lists where name like '{PREFIX} import%'")
+    q(f"delete from dials where company_name like '{PREFIX} Co%'")      # leftovers of a crashed run would be flagged as duplicates by the wizard
     csvp = os.path.join(tempfile.gettempdir(), f"{PREFIX} import.csv")
     open(csvp, "w").write("Full name,Company name,City,State,Email,Mobile number,Company number,LinkedIn,Website,Industry sector,Summary\n"
-        f"Pat Example,{PREFIX} Co A,Provo,UT,pat@example.com,(801) 555-0111,(801) 555-0112,,https://a.example.com,Plumbing,Family plumbing shop.\n"
-        f"Sam Example,{PREFIX} Co B,Ogden,UT,sam@example.com,(801) 555-0113,(801) 555-0114,,https://b.example.com,HVAC,Residential HVAC.\n")
+        f"Pat Example,{PREFIX} Co A,Provo,UT,pat.lcreg@lcreg-import.com,(385) 555-0711,(385) 555-0712,,https://a.example.com,Plumbing,Family plumbing shop.\n"
+        f"Sam Example,{PREFIX} Co B,Ogden,UT,sam.lcreg@lcreg-import.com,(385) 555-0713,(385) 555-0714,,https://b.example.com,HVAC,Residential HVAC.\n")
     ctx, p, errs = session(b, "Mason Quinn")
     p.goto(BASE + "dials.html"); p.wait_for_timeout(3500)
     p.click("#pageMenuToggle"); p.click("#menuImportBtn"); p.wait_for_timeout(800)
-    p.set_input_files("#importDialsFileInput", csvp); p.wait_for_timeout(1500)
-    sel = p.query_selector("#importDialsModal select")
-    for bt in p.query_selector_all("#importDialsModal button"):
-        if bt.is_visible() and re.search(r"M&A|Data", bt.inner_text()): bt.click(); break
-    p.wait_for_timeout(500); p.click("#importDialsImportBtn"); p.wait_for_timeout(6000)
+    p.set_input_files("#importDialsFileInput", csvp); p.wait_for_selector(".iw-chips", timeout=20000)   # preview + column mapping step (import wizard)
+    p.wait_for_function("/Import [0-9,]+ lead/.test(document.querySelector('#importDialsImportBtn').innerText)", timeout=30000)   # duplicate check done
+    p.click(".cr-mandate-btn[data-m=ma]")                                                              # a list purpose is required
+    p.wait_for_timeout(500); p.click("#importDialsImportBtn"); p.wait_for_selector("#importDialsResult", timeout=60000); p.wait_for_timeout(1500)
     lst = q(f"select id, created_by, name from dial_lists where name like '{PREFIX} import%' order by created_at desc")
     check("CSV import creates the list for the uploader with 2 dials", len(lst) == 1 and lst[0]["created_by"] == admin and q(f"select count(*) n from dials where list_id='{lst[0]['id']}'")[0]["n"] == 2, lst)
     if not lst: ctx.close(); return

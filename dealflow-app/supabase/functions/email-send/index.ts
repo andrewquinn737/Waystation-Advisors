@@ -36,6 +36,10 @@
 //    suppresses the address; none exists yet, so the Post header is deliberately NOT sent (sending it without a
 //    working endpoint would be worse than omitting it).
 //
+// Deliverability (2026-11-30, docs/DELIVERABILITY.md): sequence (1:1 cold) mail carries NO List-Unsubscribe header (a bulk-mail
+// marker; stop requests are handled by reply detection + suppression); bodies declare a Content-Transfer-Encoding; the To header
+// carries the recipient's name; Microsoft-hosted recipients are paced per mailbox/domain (deferred rows return to 'pending').
+//
 // Two ways in:
 //  1. A signed-in user's JWT + request body (below).
 //  2. Mass email's queue: pg_cron -> dispatch_scheduled_emails() posts
@@ -76,6 +80,7 @@ function buildRawMessage(opts: {
   fromAddr: string;
   fromName?: string | null;
   to: string[];
+  toName?: string | null;
   cc?: string[];
   subject: string;
   text?: string;
@@ -86,7 +91,9 @@ function buildRawMessage(opts: {
   attachments?: { filename: string; contentType: string; base64: string }[];
 }): string {
   const fromHeader = opts.fromName ? `${encodeHeader(opts.fromName)} <${opts.fromAddr}>` : opts.fromAddr;
-  const headers: string[] = [`From: ${fromHeader}`, `To: ${opts.to.join(", ")}`];
+  const toHeader = opts.toName && opts.to.length === 1 && /^[\p{L}\p{N} .'\-]+$/u.test(opts.toName.trim())
+    ? `${encodeHeader(opts.toName.trim())} <${opts.to[0]}>` : opts.to.join(", ");
+  const headers: string[] = [`From: ${fromHeader}`, `To: ${toHeader}`];
   if (opts.cc?.length) headers.push(`Cc: ${opts.cc.join(", ")}`);
   headers.push(`Subject: ${encodeHeader(opts.subject || "(no subject)")}`);
   headers.push(`Date: ${new Date().toUTCString()}`);
@@ -121,8 +128,16 @@ function buildRawMessage(opts: {
       headers.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
       return headers.join("\r\n") + "\r\n\r\n" + bodyPart;
     }
+    // Plain ASCII goes as 7bit; anything else is base64 so no 8-bit body is ever sent without a declared encoding
+    // (an undeclared 8-bit body is a classic filter signal).
     headers.push("Content-Type: text/plain; charset=utf-8");
-    return headers.join("\r\n") + "\r\n\r\n" + bodyPart;
+    if (/^[\x00-\x7f]*$/.test(bodyPart)) {
+      headers.push("Content-Transfer-Encoding: 7bit");
+      return headers.join("\r\n") + "\r\n\r\n" + bodyPart;
+    }
+    headers.push("Content-Transfer-Encoding: base64");
+    const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(bodyPart.replace(/\r?\n/g, "\r\n"))));
+    return headers.join("\r\n") + "\r\n\r\n" + (b64.match(/.{1,76}/g) || []).join("\r\n");
   }
 
   headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
@@ -140,6 +155,24 @@ function buildRawMessage(opts: {
   }
   parts.push(`--${mixedBoundary}--`);
   return headers.join("\r\n") + "\r\n\r\n" + parts.join("\r\n\r\n");
+}
+
+// Which mail provider hosts a recipient domain (MX lookup, cached 30 days in recipient_domains).
+async function resolveProvider(admin: ReturnType<typeof createClient>, addr: string): Promise<string> {
+  const domain = String(addr).split("@")[1]?.toLowerCase();
+  if (!domain) return "unknown";
+  const { data: hit } = await admin.from("recipient_domains").select("provider, checked_at").eq("domain", domain).maybeSingle();
+  if (hit && Date.now() - new Date(hit.checked_at).getTime() < 30 * 864e5) return hit.provider;
+  let provider = "other", mx = "";
+  try {
+    const recs = await Deno.resolveDns(domain, "MX");
+    mx = recs.sort((a, b) => a.preference - b.preference).map((r) => r.exchange.toLowerCase()).join(" ");
+    if (/protection\.outlook\.com|mail\.protection\.|outlook\.com\.?(\s|$)|hotmail\.com/.test(mx)) provider = "microsoft";
+    else if (/google\.com|googlemail\.com/.test(mx)) provider = "google";
+    else if (/yahoodns|yahoo\.com/.test(mx)) provider = "yahoo";
+  } catch { provider = "unknown"; }
+  await admin.from("recipient_domains").upsert({ domain, provider, mx: mx.slice(0, 300), checked_at: new Date().toISOString() });
+  return provider;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -173,6 +206,8 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
 
   let callerUserId: string;
   let scheduledTo: string | null = null;
+  let toName: string | null = null;
+  let isSequenceSend = false;
   if (CRON_SHARED_SECRET && req.headers.get("x-cron-secret") === CRON_SHARED_SECRET && body.scheduled_id) {
     // Queue path: everything comes from the row, claimed as 'sending' by
     // dispatch_scheduled_emails() — anything else is refused, so a row can
@@ -182,6 +217,8 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     if (row.status !== "sending") return jsonResponse({ error: `Scheduled email is ${row.status}, not sending.` }, 409);
     ctx.scheduledId = row.id;
     scheduledTo = row.to_address;
+    toName = row.recipient_name || null;
+    isSequenceSend = !!row.dial_id;
     callerUserId = row.created_by;
     body = {
       account_id: row.account_id,
@@ -276,6 +313,16 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     return jsonResponse({ error: "You don't have access to send from this account." }, 403);
   }
 
+  // Recipient-provider pacing (queue path only): Microsoft-hosted recipients are rate-limited per mailbox and per sending
+  // domain (see 20261130_deliverability.sql). A deferred row goes back to 'pending' with a later send_at; nothing is lost.
+  if (ctx.scheduledId) {
+    const target = to[0];
+    await resolveProvider(admin, target);
+    const { data: pace } = await admin.rpc("recipient_pacing", { p_account: account_id, p_to: target });
+    const pj = (pace ?? null) as { ok?: boolean; retry_at?: string; why?: string } | null;
+    if (pj && pj.ok === false) return jsonResponse({ error: `Deferred: ${pj.why}`, code: "deferred", retry_at: pj.retry_at }, 409);
+  }
+
   // Daily cap (rolling 24h). A queued email is already counted among the
   // "scheduled" (its own row is 'sending'), and was checked when it was
   // queued, so on that path only what has actually gone out counts; a direct
@@ -308,6 +355,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     fromAddr: account.email_address,
     fromName: account.label,
     to,
+    toName,
     cc,
     subject: subject || "",
     text,
@@ -317,7 +365,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     // Always included now (used to be mass-email-queue sends only) — see
     // header comment. A plain mailto: back to the sending mailbox itself,
     // so it needs no unsubscribe-handling endpoint of our own.
-    listUnsubscribe: `<mailto:${account.email_address}?subject=unsubscribe>`,
+    listUnsubscribe: isSequenceSend ? undefined : `<mailto:${account.email_address}?subject=unsubscribe>`,
     attachments,
   }).replace(/\r?\n/g, "\r\n");
 
@@ -477,7 +525,9 @@ Deno.serve(async (req: Request) => {
     await admin
       .from("scheduled_emails")
       .update(
-        j.code === "unknown"
+        j.code === "deferred"
+          ? { status: "pending", claimed_at: null, error: null, send_at: String(j.retry_at || new Date(Date.now() + 15 * 60000).toISOString()) }
+          : j.code === "unknown"
           ? { status: "unknown", error: "Send result unknown — check Sent folder" }
           : j.code === "suppressed"
           ? { status: "cancelled", error: "Recipient is on the suppression list." }

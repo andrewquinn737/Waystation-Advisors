@@ -7,6 +7,7 @@
 //   list:       { kind, offset?, limit? } -> { items, total, has_more, folder }
 //   get:        { kind, uid } -> { message }
 //   attachment: { kind, uid, index } -> { filename, content_type, base64 }
+//   headers:    { kind, uid } -> { headers } (raw header block, diagnosis only)
 // kind: inbox | sent | spam | trash | drafts | scheduled
 //
 // Access: the mailbox's owner, an admin, or the team lead of the owner's team (read-only), by the
@@ -103,6 +104,16 @@ async function handle(req: Request): Promise<Response> {
       }
       items.sort((a, b) => b.uid - a.uid);
       return jsonResponse({ items, total: uids.length, has_more: offset + limit < uids.length, folder: folder.name });
+    }
+    if (action === "headers") {
+      // Raw header block of one message (Authentication-Results, X-Forefront-Antispam-Report, SCL...) for deliverability diagnosis.
+      const uid = Number(body.uid);
+      if (!uid) return jsonResponse({ error: "uid is required." }, 400);
+      const raw = await imapFetchRaw(c, uid);
+      if (!raw.length) return jsonResponse({ error: "That message no longer exists." }, 404);
+      const txt = new TextDecoder().decode(raw.slice(0, 60000));
+      const end = txt.search(/\r?\n\r?\n/);
+      return jsonResponse({ uid, folder: folder.name, headers: end === -1 ? txt : txt.slice(0, end), size: raw.length });
     }
     if (action === "get" || action === "attachment") {
       const uid = Number(body.uid);

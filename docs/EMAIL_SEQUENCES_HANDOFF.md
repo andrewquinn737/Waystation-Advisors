@@ -203,3 +203,9 @@ Wave 1 stage agents running: Importing (TEST-IMPORT), Calling+Transcripts (TEST-
 Tracking+Reporting+Intro calls (TEST-TRACK, migration 20261129). Each runs only its own tests.
 Wave 2 (after): Email sending/deliverability stage (fix Microsoft junk placement; seed-test Gmail/Outlook/Yahoo; confirm threading
 + reply-stop with real replies), then integrator run_all.sh, then page-by-page design/function/bug review loops until clean.
+
+## 2026-11-22 deliverability + threading/reply-stop (stage agent)
+- Microsoft junk root cause and fixes: docs/DELIVERABILITY.md (auth all pass; recipient-tenant spam filter on new tenants; app-side fixes shipped; tenant steps for Mason).
+- `20261130_deliverability.sql` (recipient_domains, recipient_provider, recipient_pacing) + email-send (no List-Unsubscribe on sequence mail, CTE, named To, Microsoft pacing, `deferred` outcome) + email-live `headers` action. Deployed to TEST.
+- `20261130b_revoke_public_exec.sql`: calendly_* / set_intro_call_time / link_call_outcome were executable by anon (found by test_hardening). Ships to live with the stage migrations.
+- Real-mail test `tools/testenv/test_thread_reply_stop.py` (not in run_all): follow-up threads correctly, reply stops the sequence and creates the reply task.
