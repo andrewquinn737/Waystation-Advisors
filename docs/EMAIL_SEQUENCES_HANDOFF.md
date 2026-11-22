@@ -151,3 +151,12 @@ admin onboarding/Claude pairing + connector campaign tools, C = intern simplific
 - Telnyx webhook still points at the LIVE function. Outbound test calls: live's handler only updates `calls` rows matched on
   `telnyx_call_id`, which live does not have, so it writes nothing. Inbound: someone calling a pool number back is screened by LIVE's data
   (rejected, or rung to a live rep if that number was dialed on live today). Test numbers should be Mason's own cell; don't call back the pool number.
+
+## 2026-11-21 late: Mason's issue list -> fixes (in progress)
+1 reply task auto-completes on a recorded outbound reply (no check mark); "Waiting for your reply", overdue after 2 biz days.
+2 badge text: "They replied – emails stopped" / "You replied". 3 Launch spacing in campaign table. 4 "…" menu works + List details.
+5 list transfer re-pins unsent leads to the new owner's mailboxes. 6 upload-to-admin-then-transfer flow tested = original.
+7 follow-up threading verified in the 57-mailbox campaign test. 8 every report/PDF/survey verified against DB.
+9 copy ALL live data into TEST (live read-only), test logins per real user. 10 BEFORE import: call lock on TEST (only +15024196436),
+email redirect stays, auto-send paused. 11 full regression with real data, every role, incl. previously untested items.
+Mason: "Do NOT send out any live emails/calls."
