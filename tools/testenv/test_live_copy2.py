@@ -179,7 +179,8 @@ def import_transfer(b):
     p.click(f".dial-tab:has-text('{PREFIX} import')"); p.wait_for_timeout(1200)
     if not p.is_visible("#dialTabTransferBtn"): p.click(f".dial-tab:has-text('{PREFIX} import')"); p.wait_for_timeout(1000)
     p.click("#dialTabTransferBtn"); p.wait_for_timeout(1500)
-    p.click(f"#dialTabTransferList :text('Brian Skoubye')"); p.wait_for_timeout(3000)
+    p.click(f"#dialTabTransferList .dial-tab-transfer-option:has-text('Brian Skoubye')"); p.wait_for_timeout(400)
+    p.click("#dialTabTransferList .dial-tab-transfer-confirm [data-yes]"); p.wait_for_timeout(3000)   # round 2: transfer asks to confirm
     r = q(f"select created_by from dial_lists where id='{lid}'")[0]
     check("Transfer moves the list to the chosen intern", r["created_by"] == brian, r)
     check("Transfer moves its dials too", q(f"select count(*) n from dials where list_id='{lid}' and created_by='{brian}'")[0]["n"] == 2)

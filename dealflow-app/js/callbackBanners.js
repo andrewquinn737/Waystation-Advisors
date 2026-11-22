@@ -111,7 +111,8 @@ export function initCallbackBanners(profile) {
     callbacks = await loadTodaysCallbacks([profile.id]);
     loadedAt = Date.now();
     evaluate();
-    if (firstOpen) {
+    // Profile shows no banner, so it must not use up the day's first-open listing (it would never appear on Calls).
+    if (firstOpen && document.body.dataset.page !== "profile.html") {
       firstOpen = false; // only the first load of the day lists everything; later ones only add "coming up" banners
       try { localStorage.setItem(DAY_KEY(profile.id), todayStr()); } catch { /* storage blocked */ }
     }

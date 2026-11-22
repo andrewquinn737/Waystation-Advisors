@@ -276,6 +276,8 @@ def browser(lid):
         p.goto(BASE + "profile.html"); p.wait_for_timeout(4500)
         txt = p.inner_text("body"); errs_start = list(errs)
         check("Profile lists the overdue callback", "Tracker Probe Overdue" in txt and "overdue" in txt.lower(), txt[-500:])
+        check("Profile shows no callback banner (its own Callbacks box is right there)", p.locator(".callback-banner").count() == 0)
+        p.goto(BASE + "dials.html"); p.wait_for_timeout(4500)   # round 2: the banner lives on the other pages
         check("Overdue callback banner at the top of the page", p.locator(".callback-banner").count() >= 1 and "overdue callback" in p.inner_text("#callbackBanners").lower() and p.locator(".callback-banner").first.bounding_box()["height"] <= 48, p.inner_text("#callbackBanners")[:200])
         check("Upcoming: past unconfirmed intro call asks 'Did it happen?'", "Tracker Probe Late" in txt and "Did it happen" in txt)
         check("Upcoming: auto-booked intro shows 'time to be set'", "Tracker Probe Pending" in txt and "time to be set" in txt)
