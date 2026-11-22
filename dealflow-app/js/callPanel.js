@@ -5,7 +5,9 @@ import { escapeHtml } from "./clientForm.js";
 
 let el = null;
 
-export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
+const OUTCOMES = [["no_response", "No answer"], ["unable_to_contact", "Wrong number"], ["not_interested", "Not interested"], ["busy_callback", "Call back"], ["callback_interested", "Interested"]];
+
+export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutcome, onNext }) {
   el?.remove();
   el = document.createElement("div");
   el.className = "call-panel";
@@ -21,6 +23,7 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
     <div class="call-panel-captions"></div>
     <div class="call-panel-summary hidden"></div>
     <div class="call-panel-warn hidden"></div>
+    <div class="call-panel-outcome hidden"></div>
     <div class="call-panel-actions">
       <button type="button" class="btn secondary" data-act="mute">Mute</button>
       <button type="button" class="btn secondary" data-act="keypad">Keypad</button>
@@ -93,6 +96,20 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf }) {
       const h = el.querySelector('[data-act="hangup"]');
       h.textContent = "Close"; h.classList.remove("call-hangup");
       h.onclick = () => this.close();
+      // One tap logs the outcome (written to the dial AND linked to this call by the database), another moves to the next company.
+      const box = $(".call-panel-outcome");
+      if (onOutcome || onNext) {
+        box.classList.remove("hidden");
+        box.innerHTML = (onOutcome ? `<div class="call-outcome-label">How did it go?</div><div class="call-outcome-chips">${OUTCOMES.map(([v, l]) => `<button type="button" class="btn secondary call-outcome-chip" data-v="${v}">${l}</button>`).join("")}</div><div class="call-outcome-msg help-text"></div>` : "") +
+          (onNext ? `<button type="button" class="btn call-next" data-act="next">Next company</button>` : "");
+        box.querySelectorAll(".call-outcome-chip").forEach((b) => onTap(b, async () => {
+          const ok = await onOutcome(b.dataset.v);
+          box.querySelectorAll(".call-outcome-chip").forEach((x) => x.classList.toggle("active", ok && x === b));
+          box.querySelector(".call-outcome-msg").textContent = ok ? "Saved to this call." : "Open the company card to set the outcome.";
+        }));
+        const nx = box.querySelector('[data-act="next"]');
+        if (nx) onTap(nx, () => { this.close(); onNext(); });
+      }
     },
     summary(text) {
       const s = $(".call-panel-summary");

@@ -41,6 +41,25 @@ async function logNative(profile, dial, to, owner_state, skip_reason, method) {
   }).then(() => {}, () => {});
 }
 
+// Why the microphone could not be opened, in words an intern can act on. The call still goes out on the phone's dialer.
+function micProblem(err) {
+  const n = err?.name || "";
+  const ua = navigator.userAgent || "";
+  const ios = /iPhone|iPad/.test(ua);
+  if (n === "NotFoundError" || n === "OverconstrainedError") return { reason: "mic_missing", msg: "No microphone was found on this device." };
+  if (n === "NotReadableError" || n === "AbortError") return { reason: "mic_busy", msg: "Another app is using the microphone. Close it (or end any other call), then try again." };
+  const fix = ios ? "In Safari tap the aA button in the address bar, then Website Settings, then set Microphone to Allow. (Installed app: Settings > Waystation > Microphone.)"
+    : /Android/.test(ua) ? "Tap the lock icon next to the address, then Permissions, then set Microphone to Allow."
+    : "Click the lock icon at the left of the address bar and set Microphone to Allow.";
+  return { reason: "mic_denied", msg: "The microphone is blocked for this site, so the live transcript and recording are off. " + fix + " Your next call will use it automatically; no reload needed." };
+}
+let lastExplained = 0;
+function explainFallback(why) {
+  if (Date.now() - lastExplained < 10 * 60 * 1000) return; // once per 10 minutes, so a run of calls is not nagged
+  lastExplained = Date.now();
+  showNotice(why.msg, { title: "This call used your phone's dialer" });
+}
+
 // opts: { dial, phone, method ('mobile'|'company'), profile, onDialed(), onSummary(callId), fallbackTel(phone) }
 export async function startCall(opts) {
   const { dial, phone, method, profile } = opts;
@@ -73,6 +92,7 @@ export async function startCall(opts) {
     name: dial.full_name || dial.company_name, company: dial.company_name,
     onHangup: () => { try { call?.hangup(); } catch { /* ignore */ } if (!call) finish("Call cancelled"); },
     onMute: (m) => setMuted(m),
+    onOutcome: opts.onOutcome, onNext: opts.onNext,
     onDtmf: (d) => { try { call?.dtmf(d); } catch { /* call not connected yet */ } },
   });
 
@@ -205,8 +225,9 @@ export async function startCall(opts) {
       const patch = { ended_at: endedAt.toISOString(), answered: !!answeredAt };
       if (answeredAt) patch.duration_sec = Math.max(0, Math.round((endedAt - answeredAt) / 1000));
       if (transcribe && answeredAt && lines === 0) { patch.transcribed = false; patch.skip_reason = "stt_failed"; }
+      else if (transcribe && !answeredAt) patch.transcribed = false; // nobody picked up: there is nothing to transcribe or summarize
       await supabase.from("calls").update(patch).eq("id", callId);
-      if (transcribe && lines >= 4) {
+      if (transcribe && lines >= 1) { // every transcribed call gets a summary (short ones are noted in code by call-summary)
         panel.summary("Summarizing the call…");
         const { data } = await supabase.functions.invoke("call-summary", { body: { call_id: callId } });
         if (data?.summary) { panel.summary(data.summary); opts.onSummary?.(callId); }
@@ -226,8 +247,7 @@ export async function startCall(opts) {
   async function notConnected(c) {
     if (finished) return;
     finished = true;
-    const cause = [c?.cause, c?.causeCode ?? c?.sipCode].filter((x) => x != null && x !== "").join(" ");
-    if (callId) await supabase.from("calls").update({ ended_at: new Date().toISOString(), transcribed: false, skip_reason: ("not_connected " + cause).trim().slice(0, 80) }).eq("id", callId);
+    if (callId) await supabase.from("calls").update({ ended_at: new Date().toISOString(), transcribed: false, skip_reason: "not_connected" }).eq("id", callId);
     cleanupMedia(); panel.close();
     showNotice("The in-app call couldn't connect, so nothing was recorded for this contact. You can call from your phone instead.", {
       title: "Call didn't connect", actionLabel: "Call from my phone",
@@ -244,7 +264,12 @@ export async function startCall(opts) {
 
   try {
     try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-    catch { await logNative(profile, dial, to, dial.state, "mic_denied", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
+    catch (err) {
+      const why = micProblem(err);
+      await logNative(profile, dial, to, dial.state, why.reason, method); cleanupMedia(); panel.close(); opts.fallbackTel(phone);
+      explainFallback(why); // the call itself goes ahead on the phone's dialer; this says why it has no transcript and how to fix it
+      return;
+    }
     document.addEventListener("visibilitychange", onVis); document.addEventListener("visibilitychange", onVisWake); onVisWake();
     watchMic();
 

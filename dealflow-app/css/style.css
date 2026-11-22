@@ -1992,6 +1992,13 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .call-panel-summary { margin: 8px 0; font-size: 13px; line-height: 1.4; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
 .call-panel-warn { margin: 8px 0; padding: 7px 10px; border-radius: 8px; background: #fdecea; color: #b3261e; font-size: 13px; font-weight: 600; line-height: 1.35; }
 .call-panel-warn.hidden { display: none; }
+.call-panel-outcome { margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.call-panel-outcome.hidden { display: none; }
+.call-outcome-label { font-size: 12px; font-weight: 600; opacity: .8; }
+.call-outcome-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.call-outcome-chip { padding: 6px 10px; font-size: 13px; }
+.call-outcome-chip.active { background: var(--primary, #1f4fd8); color: #fff; border-color: transparent; }
+.call-next { width: 100%; }
 /* Muted: unmistakable, so an accidental tap on Mute is noticed straight away. */
 .call-panel.is-muted { border-color: #d1453b; }
 .call-panel-actions .btn.is-muted { background: #d1453b; border-color: #d1453b; color: #fff; }

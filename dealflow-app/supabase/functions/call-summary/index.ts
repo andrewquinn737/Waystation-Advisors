@@ -68,8 +68,17 @@ Deno.serve(async (req: Request) => {
 
     const { data: lines, error: le } = await admin.from("call_lines").select("speaker, text").eq("call_id", call.id).order("start_ms");
     if (le) { console.error("lines error", le.message); return json({ error: "Couldn't read the transcript: " + le.message }, 500); }
-    if (!lines || lines.length < 4) return json({ skipped: "too_short", lines: lines?.length ?? 0 });
+    if (!lines || lines.length < 1) return json({ skipped: "too_short", lines: 0 });
     const label = (sp: string) => (sp === "intern" ? "Caller" : "Other side");
+    // Every transcribed call gets a summary (40% had none: calls with 1-3 lines were skipped). Under 3 lines is not enough for
+    // the model to say anything true, so the note is built in code from the words that were actually captured.
+    if (lines.length < 3) {
+      const said = lines.map((l: { speaker: string; text: string }) => `${l.speaker === "intern" ? "Caller" : "Other side"}: "${l.text.trim().slice(0, 120)}"`).join(" ");
+      const short = `Very short call, only a few words were captured. ${said}`;
+      const { error: se } = await admin.from("calls").update({ summary: short, summary_at: new Date().toISOString() }).eq("id", call.id);
+      if (se) console.error("summary save failed", se.message);
+      return json({ summary: short });
+    }
     const text = lines.map((l: { speaker: string; text: string }) => `${label(l.speaker)}: ${l.text}`).join("\n").slice(0, 60000);
 
     let summary = "";

@@ -652,6 +652,9 @@ function placeCall(dial, phone, method) {
     onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     onRecordingSaved: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     fallbackTel: (num) => dialViaPhone(dial, method, num),
+    // After hangup: one-tap outcome (the DB links it to this call) and straight on to the next company.
+    onOutcome: async (status) => (currentDial?.id === dial.id && dialMode === "view" ? !!(await updateDialStatus(status)) : false),
+    onNext: () => { const t = nextCompanyTarget(); if (t?.dial) { primeAudio(); runAutodial(t); } else showNotice("There are no more uncontacted dials with a phone number in this list.", { title: "Next company" }); },
   });
 }
 document.addEventListener(
@@ -682,10 +685,9 @@ async function loadDialTranscript() {
   const dialId = currentDial.id;
   const { data, error } = await supabase
     .from("calls")
-    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary, dial_method, recording_path")
+    .select("id, started_at, duration_sec, answered, transcribed, skip_reason, summary, dial_method, recording_path, mode, call_outcome")
     .eq("dial_id", dialId)
     .eq("direction", "outbound")
-    .eq("mode", "in_app")
     .order("started_at", { ascending: false })
     .limit(5);
   const el = document.getElementById("dialTranscriptBody");
@@ -698,13 +700,16 @@ async function loadDialTranscript() {
     .map((c) => {
       const when = new Date(c.started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       const dur = c.duration_sec ? ` · ${Math.floor(c.duration_sec / 60)}:${String(c.duration_sec % 60).padStart(2, "0")}` : "";
-      const body = c.summary
+      const NATIVE = { mic_denied: "the microphone was blocked", mic_busy: "the microphone was in use", mic_missing: "no microphone was found", unknown_state: "the state couldn't be determined", no_cell: "no cell number on the profile" };
+      const body = c.mode === "native"
+        ? `Called from the phone's own dialer${NATIVE[c.skip_reason] ? ` (${NATIVE[c.skip_reason]})` : ""}: no transcript or recording.`
+        : c.summary
         ? escapeHtml(c.summary)
         : !c.answered
           ? "Not answered."
           : c.skip_reason
-            ? "Not recorded (call-recording rules for this state)."
-            : "No summary (call was too short).";
+            ? (c.skip_reason === "stt_failed" ? "The live transcript failed on this call." : "Not recorded (call-recording rules for this state).")
+            : c.transcribed ? "Summary is still being prepared." : "No transcript.";
       const lines = c.transcribed && c.answered ? `<details data-call-id="${c.id}"><summary>Full transcript</summary><div class="dial-transcript-lines"></div></details>` : "";
       const line = c.dial_method === "company" ? "Company line" : c.dial_method === "mobile" ? "Mobile" : "Call";
       const rec = c.recording_path ? `<div class="dial-recording" data-path="${escapeHtml(c.recording_path)}"><button type="button" class="btn secondary dial-recording-play">▶ Play recording</button></div>` : "";
@@ -3109,6 +3114,16 @@ function autodialTarget(newStatus) {
   const list = visibleDials();
   const i = list.findIndex((d) => d.id === currentDial.id);
   const after = i >= 0 ? [...list.slice(i + 1), ...list.slice(0, i)] : list; // then wrap around
+  const next = after.find((d) => (d.contact_status || "uncontacted") === "uncontacted" && (d.mobile_phone || d.company_phone));
+  return next ? { dial: next } : { none: true };
+}
+
+// "Next company" in the call bar: the next uncontacted dial with a phone number, whether or not Autodial is on.
+function nextCompanyTarget() {
+  if (!currentDial) return null;
+  const list = visibleDials();
+  const i = list.findIndex((d) => d.id === currentDial.id);
+  const after = i >= 0 ? [...list.slice(i + 1), ...list.slice(0, i)] : list;
   const next = after.find((d) => (d.contact_status || "uncontacted") === "uncontacted" && (d.mobile_phone || d.company_phone));
   return next ? { dial: next } : { none: true };
 }
