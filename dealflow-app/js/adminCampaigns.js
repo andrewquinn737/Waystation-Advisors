@@ -74,10 +74,9 @@ function render() {
   const open = camps.filter((c) => c.status !== "done"), done = camps.filter((c) => c.status === "done");
   $("cpSummary").textContent = "";
   const t = totals();
-  $("cpTotals").innerHTML = camps.length ? `<div class="cp-strip-h">All campaigns<small>${plural(open.length, "in progress", "in progress")}${done.length ? `, ${done.length} finished` : ""}</small></div>${statCells(t)}` : "";
-  $("cpTotals").classList.toggle("hidden", !camps.length);
+  const total = `<div class="cp-row cp-total"><div class="cp-name"><b>All campaigns</b><span>${open.length} in progress${done.length ? `, ${done.length} finished` : ""}</span></div><div class="cp-status"></div>${statCells(t)}<div class="cp-act"></div></div>`;
   const shown = showDone ? camps : open;
-  $("cpList").innerHTML = shown.length ? `<div class="cp-head" aria-hidden="true"><div>Campaign</div><div>Status</div>${STATS.map(([, l]) => `<div>${l === "Emails sent" ? "Sent" : l}</div>`).join("")}<div></div></div>${shown.map(row).join("")}` : `<p class="ad-empty">${camps.length ? "Nothing in progress." : "No campaigns yet. One appears here as soon as a list with email leads is uploaded."}</p>`;
+  $("cpList").innerHTML = shown.length ? `<div class="cp-head" aria-hidden="true"><div>Campaign</div><div>Status</div>${STATS.map(([, l]) => `<div class="num">${l === "Emails sent" ? "Sent" : l}</div>`).join("")}<div></div></div>${total}${shown.map(row).join("")}` : `<p class="ad-empty">${camps.length ? "Nothing in progress." : "No campaigns yet. One appears here as soon as a list with email leads is uploaded."}</p>`;
   $("cpList").classList.toggle("cp-table", !!shown.length);
   const tg = $("cpToggleDone"); tg.classList.toggle("hidden", !done.length); tg.textContent = showDone ? "Hide finished" : `Show finished (${done.length})`;
 }

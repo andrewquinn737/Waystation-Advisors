@@ -135,7 +135,16 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
         <div class="mc-sub">${esc(who || "—")}</div></div>
       <div class="dh-side">${done}${icons}</div></div>`;
   }
-  // One clear button per follow-up: what to do, in words. Calls open the company card too, so the outcome is right there.
+  // One quiet tonal action per follow-up (same width on every row, so the column lines up); "Done" is a small check to its left.
+  // Calls open the company card too, so the outcome is right there.
+  const SV = (d, w) => `<svg viewBox="0 0 24 24" width="${w}" height="${w}" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="${d}"/></svg>`;
+  const IC = {
+    call: SV("M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z", 16),
+    link: SV("M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5", 16),
+    mail: SV("M4 6h16v12H4zM4 7l8 6 8-6", 16),
+    check: SV("M5 12.5l4.5 4.5L19 7.5", 20),
+  };
+  const goLabel = (ic, text) => `${IC[ic]}<span>${text}</span>`;
   function actionHtml(t, d) {
     const first = esc(String(d.full_name || "").trim().split(/\s+/)[0] || "");
     if (t.kind === "call" || t.kind === "call_company") {
@@ -144,16 +153,16 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       // Same call path as the company card's phone icon (.contact-action-call, handled in dials.js): in-app call or the phone's
       // dialer, and the contact is recorded for today either way.
       const method = num === d.mobile_phone ? "mobile" : "company";
-      return num ? `<button type="button" class="btn small dh-act dh-go contact-action-call" data-dial-id="${esc(d.id)}" data-tel="${esc(num)}" data-method="${method}">${label}</button>`
-                 : `<button type="button" class="btn small dh-act dh-go" data-open="${esc(d.id)}">Open</button>`;
+      return num ? `<button type="button" class="dh-act dh-go contact-action-call" data-dial-id="${esc(d.id)}" data-tel="${esc(num)}" data-method="${method}" aria-label="${label}">${goLabel("call", label)}</button>`
+                 : `<button type="button" class="dh-act dh-go" data-open="${esc(d.id)}">${goLabel("call", "Open")}</button>`;
     }
-    const doneBtn = `<button type="button" class="btn secondary small dh-act" data-done="${esc(t.id)}">Done</button>`;
+    const doneBtn = `<button type="button" class="dh-act dh-done-btn" data-done="${esc(t.id)}" aria-label="Mark done" title="Mark done">${IC.check}</button>`;
     if (t.kind === "linkedin") {
       const url = d.linkedin || ("https://www.linkedin.com/search/results/people/?keywords=" + encodeURIComponent([d.full_name, d.company_name].filter(Boolean).join(" ")));
-      return `<a class="btn small dh-act dh-go" href="${esc(url)}" target="_blank" rel="noopener" data-stop>Open LinkedIn</a>${doneBtn}`;
+      return `${doneBtn}<a class="dh-act dh-go" href="${esc(url)}" target="_blank" rel="noopener" data-stop>${goLabel("link", "LinkedIn")}</a>`;
     }
     if (t.kind === "reply") {
-      return `<a class="btn small dh-act dh-go" href="messages.html?from=${encodeURIComponent(d.email || "")}" data-stop>Read reply</a>${doneBtn}`;
+      return `${doneBtn}<a class="dh-act dh-go" href="messages.html?from=${encodeURIComponent(d.email || "")}" data-stop>${goLabel("mail", "Reply")}</a>`;
     }
     return doneBtn;
   }
