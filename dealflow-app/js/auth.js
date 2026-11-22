@@ -263,7 +263,7 @@ function navItems(role) {
 function ensureSimpleCss() {
   if (document.getElementById("simpleCss")) return;
   const l = document.createElement("link");
-  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=2";
+  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=4";
   document.head.appendChild(l);
 }
 

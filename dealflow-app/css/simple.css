@@ -25,9 +25,8 @@
 body.role-intern #seqPanel,
 body.role-intern .dial-contacted-today-display,
 body.role-intern .seq-stop-btn { display: none !important; }
-/* Calls: no triangle or gear menus (leads and admins keep them) */
+/* Calls: no triangle menu for interns (leads and admins keep it). The gear stays for everyone: it holds Advanced settings (Autodial, call recording, transcript calling). */
 body.role-intern[data-page="dials.html"] #pageMenuToggle,
-body.role-intern[data-page="dials.html"] #pageSettingsBtn,
 /* Inbox: no gear (sync, folders, select) and no mailbox picker */
 body.role-intern[data-page="messages.html"] #pageSettingsBtn,
 body.role-intern[data-page="messages.html"] #menuMailboxesBtn { display: none !important; }
@@ -38,3 +37,14 @@ body:not([data-page="profile.html"]) #dealSideToggleBtn,
 body:not([data-page="profile.html"]) #menuAccountsVisibleBtn { display: none !important; }
 /* Clients' gear only held those two (and Notifications, which is on Profile) */
 body[data-page="clients.html"] #pageSettingsBtn { display: none !important; }
+
+/* ---- Narrow desktop windows (a browser resized to phone width; real phones get the bottom tab bar instead) ----
+   The top bar used to run ~200px past the screen: brand + 5 links + name + role + Log out. Wrap it and trim the extras. */
+@media (max-width: 720px) {
+  html.is-desktop-device .topnav-bar { flex-wrap: wrap; gap: 6px 10px; padding: 8px 12px; }
+  html.is-desktop-device .topnav-bar .brand { display: none; }
+  html.is-desktop-device .topnav-bar .links { gap: 10px; flex: 1 1 100%; order: 2; flex-wrap: wrap; }
+  html.is-desktop-device .topnav-bar .who { flex: 1 1 100%; order: 1; min-width: 0; justify-content: space-between; gap: 8px; }
+  html.is-desktop-device .topnav-bar .who > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+  html.is-desktop-device .topnav-bar .who .role-badge { flex: 0 0 auto; }
+}

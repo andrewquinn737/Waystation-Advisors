@@ -121,8 +121,15 @@ def isolate_owner_mailboxes():
         q(f"""insert into email_accounts (owner_id, label, email_address, imap_host, smtp_host, username, password, mandate, daily_send_limit, source)
               values ('{uid(CALEB)}', 'TEST-TEMP-BOX', 'seq-fixture-{i}-{SALT}@test-example.org', 'x', 'x', 'x', 'x', 'data', 5, 'test')""")
 
+def poll(active):
+    """The email-sync cron (every 2 min) would log in to the fake fixture mailboxes (host 'x'), fail, and stamp last_sync_error on them,
+    which flips the dispatcher's 'inbox is being read' hold at a random moment (the intermittent 73/75 follow-up failures).
+    Park it for the run; the finally block turns it back on."""
+    q(f"select cron.alter_job((select jobid from cron.job where jobname='email-sync-poll'), active := {'true' if active else 'false'})")
+
 def run():
     cleanup()
+    poll(False)
     for e in ("masonquinn10@gmail.com", "mason.alex.quinn@gmail.com", "mason@waystationadvisors.com"):
         seed_mv(e, "ok")
     isolate_owner_mailboxes()
@@ -510,6 +517,7 @@ if __name__ == "__main__":
         traceback.print_exc(); run_ok = False
     finally:
         cleanup()
+        poll(True)
         q("delete from email_messages where message_id in ('<t1@x>','<r1@x>','<b1@x>','<u1@x>','<u2@x>','<u3@x>','<self1@x>')")
     fails = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(fails)}/{len(results)} passed" + ("" if run_ok else " (run aborted)"))

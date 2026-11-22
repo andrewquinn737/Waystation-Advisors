@@ -20,4 +20,7 @@ export const SUPABASE_ANON_KEY = IS_PROD
 // expose publicly, same trust level as the anon key above. The matching
 // private key lives server-side only, in the app_secrets table (readable
 // only by the send-push Edge Function's service-role client).
-export const VAPID_PUBLIC_KEY = "BKmi1-1Ytinb51D-iqCLXs7jbB4KaG4NDKiiCuXVGkIGZuvqHK88tUb3UC9Ugsp50z9ZDanL9Q64QjFDp3DS82w";
+// The test project has its own keypair (private half in the TEST project's app_secrets), so test pushes never share live keys.
+export const VAPID_PUBLIC_KEY = IS_PROD
+  ? "BKmi1-1Ytinb51D-iqCLXs7jbB4KaG4NDKiiCuXVGkIGZuvqHK88tUb3UC9Ugsp50z9ZDanL9Q64QjFDp3DS82w"
+  : "BF0sSAqn2OxZDtGty5Xf49DUSHJavThiYFTf2u-X_ni6kSgge90fFmHfV44HAJQpOON2PpIg1iYXkl5SkFnnZ2E";
