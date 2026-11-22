@@ -7,6 +7,7 @@
 // Response: { decision: 'record'|'no_record'|'native', reason, state, login_token?, from_number?, caller_id_name? }
 //   decision 'native' => the app must use the phone's own dialer (state unknown even after the area code).
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { callAllowed, TEST_CALL_MSG } from "../_shared/testCallLock.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +38,8 @@ Deno.serve(async (req: Request) => {
     try { body = await req.json(); } catch { return json({ error: "Invalid request body." }, 400); }
     const to = e164(body.to_number || "");
     if (!to) return json({ error: "That phone number isn't a valid US number." }, 400);
+
+    if (!callAllowed(to)) return json({ error: TEST_CALL_MSG, code: "test_call_blocked" }, 403);
 
     const { data: consent, error: ce } = await admin.rpc("call_consent", { p_to: to, p_state: body.owner_state || null });
     if (ce) return json({ error: ce.message }, 500);

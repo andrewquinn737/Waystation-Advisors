@@ -12,7 +12,7 @@ def secret_set(pairs):
 
 def boxes():
     return q("""select a.id, a.owner_id, lower(a.email_address) email, a.label, p.email login, p.full_name oname
-                from email_accounts a join profiles p on p.id=a.owner_id order by p.full_name, a.email_address""")
+                from email_accounts a join profiles p on p.id=a.owner_id where coalesce(a.source,'')<>'live_copy' order by p.full_name, a.email_address""")
 
 def person(b):
     lab = (b["label"] or "").strip()

@@ -4,6 +4,32 @@ Method: every user-facing item on origin/main was walked in real Chrome (tools/t
 
 **Totals: 61 OK, 10 CHANGED (intentional), 2 BROKEN and fixed, 0 still broken.**
 
+## Real-data pass (2026-11-22): live data copied into TEST, real roles
+
+Method: `tools/testenv/copy_live_to_test.py` copied every live business table into TEST (30 real accounts as `live.<name>@example.com` test logins, same uuids). `tools/testenv/test_live_copy.py` (+ `test_live_copy2.py`) then walks Chrome as Mason's admin copy, a real team lead (Jonah Johnson), a real intern (Brian Skoubye, Jacob Farnsworth) and an independent lead (Kayden Hyde), and checks every number against SQL. It is part of `run_all.sh`.
+
+| Item | Result | Notes |
+|---|---|---|
+| Every page loads with no console/network errors, 4 real roles | OK | profile, clients, calls, inbox (+ admin) |
+| Profile: companies contacted this week / today, quota line, 6 weekly bars | OK | Equal to call_status_changes for interns and the independent lead; admin/lead >= own count |
+| Callbacks today + Upcoming events on Profile | OK | Consistent with callback_tasks / client_events; a callback set from the card shows on Profile and the call sheet |
+| Reports table, totals, this and last week | OK | Equals report_dial_rollups; attempted contacts equal the raw log |
+| Reports buyer view, Create PDF, Send PDF | OK | PDF numbers match the screen; share-sheet and download paths both work |
+| Team report | OK | Survey table renders |
+| Team lead sees only teams he leads | OK | Jonah leads Team 3 and Team 2 (team_lead_teams) |
+| Weekly survey (open, auto-fill, submit, lock) | OK | Auto-fill equals DB; submit row equals what was shown; button locks |
+| Quotas | OK | 50 minus this week's companies |
+| Call logging + Profile counts | OK | Outcome writes call_status_changes, Profile +1 |
+| Call lock in the UI | OK | Call on a real owner: "Test app: calls limited to the test number"; no calls row |
+| Messages Unread / Delete | OK | |
+| Deleted tabs restore / purge | OK | |
+| List upload (CSV) + transfer to an intern | OK | List and dials move; intern sees it |
+| Intake submit | OK | Nothing posted |
+| Phone width (375px, mobile UA), 3 roles, 4 pages | OK | |
+| **LIVE finding:** weekly survey "Owners talked to" is 0 for every past week | Known | `dials.called_today_date` was never written on live; fixed by migration 20261126b + js/dials.js (already on the live-rollout list) |
+| **LIVE finding:** real mailboxes share addresses with the 57 test mailboxes | Handled | The 6 copied live accounts are renamed `<local>+livecopy@<domain>`, `source='live_copy'`, no credentials, sync off |
+
+
 
 ## Profile
 
@@ -17,12 +43,12 @@ Method: every user-facing item on origin/main was walked in real Chrome (tools/t
 | Quota chart + companies contacted this week | OK | Renders for admin/lead/intern |
 | Outreach calls / Intro calls view switch | OK |  |
 | Upcoming events + Callbacks today lists | OK | Callback set from the Calls card shows on Profile |
-| Reports modal: type, range, select week/buyer, accounts visible | OK | Opened as admin and lead; PDF buttons not clicked |
+| Reports modal: type, range, select week/buyer, accounts visible | OK | Opened as admin and lead. With real data (2026-11-22): table = report_dial_rollups = raw call log for Team 3, this and last week; Create PDF (blob PDF tab), Send PDF (share sheet and download) clicked; every on-screen number is in the PDF text |
 | Teams modal: view, add team, add account (UI) | OK | Created and removed a team and an account |
 | Admin delete account | OK | admin-delete-account (and non-admin refused) |
 | Temporary password / admin-create-account | OK | Function + UI form |
 | Links popup (share app, trainings) | OK |  |
-| Deleted tabs (view, select bar, restore / reassign / purge buttons) | OK | Deleted a list as lead, saw it as admin |
+| Deleted tabs (view, select bar, restore / reassign / purge buttons) | OK | Deleted-tab menu is admin-only (hidden for a lead, as designed). Real-data run as admin: restore keeps all dials, purge removes list + dials |
 | Advanced settings: personalized email, About us email, personalized texting | OK |  |
 | Sellers/Buyers toggle on Profile | OK |  |
 | Sellers/Buyers + Accounts visible in the Calls and Clients gear | CHANGED | Profile only (design: one place per setting) |
@@ -51,7 +77,7 @@ Method: every user-facing item on origin/main was walked in real Chrome (tools/t
 | Callback time (set, banner, Profile list) | OK |  |
 | Call notes autosave | OK | Saved to DB |
 | Intro call scheduling popup + required-info check | OK | Calendly itself is an embed; see Connections |
-| Intake / questionnaire intro popup | OK | Function checked; posts nowhere on TEST |
+| Intake / questionnaire intro popup | OK | intake-submit run on a questionnaire-flow client (buyer with tracking_flow): 200, slack and sheet not_configured, nothing posted |
 | Recommended first/second email, personalized email/text settings | OK |  |
 | Texting (Text button on the card, personalized body) | OK | sms: link on each number |
 | Quick-send icons on call-sheet rows | OK |  |
@@ -87,7 +113,7 @@ Method: every user-facing item on origin/main was walked in real Chrome (tools/t
 | Reply from a thread (intern) | OK | Compose opens prefilled; not sent |
 | Sent view + thread with attachment chip | OK |  |
 | Spam / Trash / Scheduled / Bounces | OK | Same live-read mechanism as original; with 33 mailboxes the first load takes a while |
-| Select mode (Unread, Delete) | OK | Bar opens; actions not clicked |
+| Select mode (Unread, Delete) | OK | Real-data run as a lead: Unread flips is_read for the thread, Delete removes only the local copy (rows restored by the copier afterwards) |
 | Received/Sent in the Viewing popup | CHANGED | Inbox / Sent tabs on the page |
 | Interns: inbox shows replies only, no gear | CHANGED | Design |
 | New-email push notification | OK | send-push 200 to a real browser subscription |

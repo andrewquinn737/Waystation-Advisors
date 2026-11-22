@@ -43,9 +43,19 @@ def run():
     check("survey query: 'Owners talked to' = 4", c == 200 and len(rows) == 4, (c, rows))
     q("delete from dial_lists where name like 'TEST-CALLING %'")
 
+    # CALL LOCK: a non-allowlisted number is refused before any Telnyx call; the test number gets a token
     c, r = fn("telnyx-token", {"to_number": "+18015550123", "owner_state": "UT"})
-    check("telnyx-token 200 with a login token and the caller number", c == 200 and r.get("login_token") and r.get("from_number") == "+18012517644" and r.get("decision") == "record", (c, {k: v for k, v in r.items() if k != "login_token"}))
-    cid = q(f"insert into calls (user_id, mode, started_at, to_number, owner_state, transcribed) values ('{uid(CALEB)}', 'in_app', now(), '+18015550123', 'UT', true) returning id")[0]["id"]
+    check("call lock: telnyx-token refuses a non-test number", c == 403 and r.get("code") == "test_call_blocked" and not r.get("login_token") and "limited to the test number" in r.get("error", ""), (c, r))
+    c, r = fn("telnyx-token", {"to_number": "+15024196436", "owner_state": "KY"})
+    check("call lock: telnyx-token 200 with a login token for the test number", c == 200 and r.get("login_token") and r.get("from_number"), (c, {k: v for k, v in r.items() if k != "login_token"}))
+    c, r = api(CALEB, "POST", "/calls", {"user_id": uid(CALEB), "mode": "native", "to_number": "(801) 555-0123"})
+    check("call lock: client cannot create a call row for a non-test number", c >= 400 and "test number" in json.dumps(r), (c, r))
+    c, r = api(CALEB, "POST", "/calls?select=id", {"user_id": uid(CALEB), "mode": "native", "to_number": "502-419-6436"})
+    check("call lock: client can create a call row for the test number", c in (200, 201), (c, r))
+    q(f"delete from calls where to_number='502-419-6436'")
+    c, r = api(CALEB, "POST", "/rpc/test_call_policy", {})
+    check("call lock: policy lists only the test number", c == 200 and r == {"allow": ["+15024196436"]}, (c, r))
+    cid = q(f"insert into calls (user_id, mode, started_at, to_number, owner_state, transcribed) values ('{uid(CALEB)}', 'in_app', now(), '+15024196436', 'UT', true) returning id")[0]["id"]
     c, r = fn("deepgram-token", {"call_id": cid})
     check("deepgram-token 200 with a token", c == 200 and r.get("token"), (c, r.get("error")))
     q(f"delete from calls where id='{cid}'")

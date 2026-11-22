@@ -559,7 +559,7 @@ def run():
 
     # ================================================================ 9. Vault
     print("-- 9. Vault")
-    a = q("select count(*) n, count(password) pw, count(password_secret_id) sid from email_accounts where label not like 'TEST-HARD-BOX%'")[0]
+    a = q("select count(*) n, count(password) pw, count(password_secret_id) sid from email_accounts where label not like 'TEST-HARD-BOX%' and coalesce(source,'') <> 'live_copy'")[0]
     check("every mailbox password lives in Vault; plaintext column is empty on test", a["pw"] == 0 and a["sid"] == a["n"], a)
     pwb, _ = tmp_box(CALEB, f"vault-{TAG}.example", password="Sup3r-Secret-Value")
     raw = q(f"select s.secret from vault.secrets s join email_accounts a on a.password_secret_id=s.id where a.id='{pwb}'")[0]["secret"]

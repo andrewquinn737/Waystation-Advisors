@@ -182,3 +182,15 @@ Optional: privacy-safe click tracker on live (needs Mason's go-ahead).
   `dials.html?list=<id>` deep link. Upload-then-transfer flow checked in browser: same import/transfer code as origin/main, plus mandate + sequence prep.
 - Tests: test_campaigns.py `_transfer_and_reply` (17 checks). Ships to live: both migrations + the JS.
 
+
+## 2026-11-22: TEST call lock + live data copied into TEST (items 8-11)
+- **Call lock (TEST only):** env secret `TEST_CALL_ALLOWLIST=+15024196436` (Mason's cell). `telnyx-token` and `telnyx-webhook` (`_shared/testCallLock.ts`)
+  refuse any other number when `SUPABASE_URL` is not live (fail closed if unset); migration `20261128_test_call_lock.sql` rejects client `calls` inserts for other
+  numbers where `app_secrets.IS_TEST_PROJECT=1` (set by hand on TEST only, so it is inert on live); `js/testCallGuard.js` blocks tel: dialing with
+  "Test app: calls limited to the test number". Telnyx webhook on TEST still points at the live function (unchanged).
+- **Live data copy:** `tools/testenv/copy_live_to_test.py [--dry-run] [--tables a,b]` (idempotent). 30 auth users with the live uuids as `live.<name>@example.com`; logins in
+  `~/Projects/First Project/TEST_LOGINS_LIVE_COPY.md` (outside the repo, chmod 600). Not copied: app_secrets, temp passwords, push subscriptions, Telnyx credentials,
+  caller_numbers (unique e164 already on TEST). Live mailboxes arrive without credentials, sync off, scheduled mail cancelled, as `<local>+livecopy@<domain>`, `source='live_copy'`.
+  Live people who share a name with a TEST fixture account get " (live copy)" on their name (name matching is ambiguity-safe by design).
+- **Regression with real data:** `test_live_copy.py` + `test_live_copy2.py` (in run_all.sh). Live rollout needs only: migration 20261128 is inert on live (no IS_TEST_PROJECT row);
+  the two edge functions and `testCallGuard.js` are harmless on live (guard returns null policy). Don't deploy them unless you want the shared helper.

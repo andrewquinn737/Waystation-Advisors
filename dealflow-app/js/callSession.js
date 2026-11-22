@@ -7,6 +7,7 @@
 import { supabase } from "./supabaseClient.js";
 import { toE164 } from "./phoneUtil.js";
 import { showNotice } from "./notice.js";
+import { callBlocked } from "./testCallGuard.js";
 import { openCallPanel } from "./callPanel.js";
 import { startCallAudio } from "./callAudio.js";
 import { startTranscript } from "./callTranscript.js";
@@ -46,6 +47,7 @@ export async function startCall(opts) {
   if (active) { showNotice("You're already on a call. Hang up first.", { title: "Call in progress" }); return; }
   const to = toE164(phone);
   if (!to) { opts.fallbackTel(phone); return; }
+  if (await callBlocked(to)) return;
   if (!toE164(profile.phone)) {
     showNotice("Add your cell number to your profile (Profile → Edit) before calling. We need it to ring you if an owner calls back.", {
       title: "Add your cell number", actionLabel: "Go to Profile", onAction: () => { window.location.href = "profile.html"; },
@@ -247,6 +249,7 @@ export async function startCall(opts) {
     watchMic();
 
     const { data: t, error: te } = await withTimeout(supabase.functions.invoke("telnyx-token", { body: { to_number: to, owner_state: dial.state || null } }), 8000, "token");
+    if (te?.context?.status === 403) { cleanupMedia(); panel.close(); active = false; finished = true; showNotice("Test app: calls limited to the test number", { title: "Test app" }); return; }
     if (te || !t) throw new Error("token");
     if (t.decision === "native") { await logNative(profile, dial, to, dial.state, "unknown_state", method); cleanupMedia(); panel.close(); opts.fallbackTel(phone); return; }
     transcribe = t.decision === "record";

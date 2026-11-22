@@ -22,6 +22,7 @@ import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, setVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
 import { startCall, isCallActive, primeAudio } from "./callSession.js";
+import { callBlocked } from "./testCallGuard.js";
 import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
@@ -942,7 +943,8 @@ async function autoMarkContacted(dial, method) {
 // has really taken over, which shows up as this page going into the background. (Cancelling the prompt
 // leaves the page in front, so nothing is recorded; a pending tap expires after 45 s.)
 let pendingNative = null;
-function dialViaPhone(dial, method, phone) {
+async function dialViaPhone(dial, method, phone) {
+  if (await callBlocked(phone)) return;
   pendingNative = { dial, method, at: Date.now(), left: false, busy: false };
   window.location.href = `tel:${phone}`;
 }
@@ -4326,8 +4328,6 @@ if (isAdmin || isTeamLead) {
   els.menuCategoriesBtn.classList.add("hidden");
 }
 
-await loadLists();
-
 // ?list=<id> (Admin > Campaigns > List details): open Calls on that list.
 {
   const listLinkId = new URLSearchParams(window.location.search).get("list");
@@ -4344,6 +4344,8 @@ await loadLists();
     window.history.replaceState({}, "", "dials.html");
   }
 }
+await loadLists();
+
 // ---------------------------------------------------------------------------
 // Deep-link support: ?dial=<id> opens straight into that dial's detail popup
 // — used by Messages' "click a participant's name" feature (see

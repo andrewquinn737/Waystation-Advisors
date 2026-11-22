@@ -18,6 +18,7 @@
 //      rep presses a key is the owner's call answered and bridged to the rep; voicemail answers it at the end.
 // Nothing is ever recorded or transcribed for an all-party/unknown-state caller.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { callAllowed } from "../_shared/testCallLock.ts";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const TELNYX = "https://api.telnyx.com/v2";
@@ -78,6 +79,7 @@ async function dialLeg(ib: string, a: string, pool: string, idx: number) {
   const targets = await legTargets(row?.matched_user_id, pn?.fallback_user_id || null);
   const t = targets[idx];
   if (!t) return voicemail(ib, a, false);
+  if (!callAllowed(t.phone)) return dialLeg(ib, a, pool, idx + 1); // TEST call lock: never ring a non-allowlisted phone
   const s = await secrets();
   await tx("/calls", { connection_id: s.TELNYX_CALLBACK_APP_ID, to: t.phone, from: pool, timeout_secs: 15, client_state: enc({ ib, ph: "b", a, pool, idx, who: t.who, uid: t.user }) });
 }
