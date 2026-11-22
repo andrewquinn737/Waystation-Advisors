@@ -100,6 +100,8 @@ andrew_rows = [
 if __name__ == "__main__":
     lc = reset_list("DEMO Call sheet", CALEB); build(CALEB, lc, caleb_rows)
     la = reset_list("DEMO Lead sheet", ANDREW); build(ANDREW, la, andrew_rows)
+    ADMIN = "test.admin@example.com"  # admins see their own lists on Calls, so give the test admin the same demo sheet
+    lx = reset_list("DEMO Call sheet", ADMIN); build(ADMIN, lx, caleb_rows)
     print("Caleb list", lc, q(f"select count(*) from dials where list_id='{lc}'")[0]["count"], "dials;",
           "replies:", q("select count(*) from email_messages where from_address like 'demo.%@example.com'")[0]["count"])
     print("Andrew list", la, q(f"select count(*) from dials where list_id='{la}'")[0]["count"], "dials")
