@@ -194,3 +194,12 @@ Optional: privacy-safe click tracker on live (needs Mason's go-ahead).
   Live people who share a name with a TEST fixture account get " (live copy)" on their name (name matching is ambiguity-safe by design).
 - **Regression with real data:** `test_live_copy.py` + `test_live_copy2.py` (in run_all.sh). Live rollout needs only: migration 20261128 is inert on live (no IS_TEST_PROJECT row);
   the two edge functions and `testCallGuard.js` are harmless on live (guard returns null policy). Don't deploy them unless you want the shared helper.
+
+## 2026-11-22 status
+Done: fixes 1-6 (06580ba), call lock + live data copy (c943ea3; test logins in First Project/TEST_LOGINS_LIVE_COPY.md),
+real-data regression 100/100, run_all ALL GREEN. 57-mailbox campaign: 47 sent, 24 inbox, 17 JUNK (all Microsoft recipients),
+6 unseen, 0 bounces; reply-stop + threading NOT yet confirmed.
+Wave 1 stage agents running: Importing (TEST-IMPORT), Calling+Transcripts (TEST-CALL, ≤2 calls to Mason's cell),
+Tracking+Reporting+Intro calls (TEST-TRACK, migration 20261129). Each runs only its own tests.
+Wave 2 (after): Email sending/deliverability stage (fix Microsoft junk placement; seed-test Gmail/Outlook/Yahoo; confirm threading
++ reply-stop with real replies), then integrator run_all.sh, then page-by-page design/function/bug review loops until clean.
