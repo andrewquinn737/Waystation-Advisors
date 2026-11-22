@@ -50,3 +50,5 @@
 
 .iw-skiprow td { color: var(--text-muted); }
 .iw-skiprow .iw-tag { margin-top: 0; }
+
+.iw-copycell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }

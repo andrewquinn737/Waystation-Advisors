@@ -21,13 +21,12 @@ export function sniffDelimiter(text) {
   return best;
 }
 
-export function parseCSV(text, delimiter) {
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  const delim = delimiter || sniffDelimiter(text);
+// A quote only OPENS a quoted field at the start of a field (so Joe's 5" Pipe Co is plain text). `literal` = never open one.
+function scan(text, delim, literal) {
   const rows = [];
   let row = [];
   let field = "";
-  let inQuotes = false;
+  let inQuotes = false, atStart = true, unclosed = false;
   const len = text.length;
   let i = 0;
   while (i < len) {
@@ -35,23 +34,41 @@ export function parseCSV(text, delimiter) {
     if (inQuotes) {
       if (ch === '"') {
         if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
+        inQuotes = false; i++; continue; // closes; anything glued after it (ABC "The Best" Plumbing) just continues the field
       }
-      // fast path: copy up to the next quote in one slice
       const next = text.indexOf('"', i);
-      if (next === -1) { field += text.slice(i); i = len; break; }
+      if (next === -1) { field += text.slice(i); i = len; unclosed = true; break; }
       field += text.slice(i, next); i = next; continue;
     }
-    if (ch === '"') { inQuotes = true; i++; continue; }
-    if (ch === delim) { row.push(field); field = ""; i++; continue; }
+    if (ch === '"' && atStart && !literal) { inQuotes = true; atStart = false; i++; continue; }
+    if (ch === delim) { row.push(field); field = ""; atStart = true; i++; continue; }
     if (ch === "\r") {
-      row.push(field); rows.push(row); row = []; field = "";
+      row.push(field); rows.push(row); row = []; field = ""; atStart = true;
       i += text[i + 1] === "\n" ? 2 : 1; continue;
     }
-    if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
-    field += ch; i++;
+    if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; atStart = true; i++; continue; }
+    field += ch; atStart = false; i++;
   }
   if (field.length || row.length) { row.push(field); rows.push(row); }
+  return { rows, unclosed };
+}
+const ragged = (rows) => { const n = rows[0] ? rows[0].length : 0; return rows.filter((r) => r.length !== n && r.some((c) => c.trim() !== "")).length; };
+
+// Returns an array of string arrays; `.warnings` lists anything odd (an unbalanced quote that was read as plain text).
+export function parseCSV(text, delimiter) {
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  const delim = delimiter || sniffDelimiter(text);
+  let { rows, unclosed } = scan(text, delim, false);
+  const warnings = [];
+  if (unclosed || ragged(rows) > Math.max(2, rows.length * 0.05)) {
+    // A stray quote swallowed part of the file. Re-read treating every quote as plain text; keep whichever reads cleaner.
+    const alt = scan(text, delim, true).rows;
+    if (unclosed || ragged(alt) < ragged(rows)) {
+      rows = alt;
+      warnings.push("This file has a quote mark that is not closed, so quotes were read as plain text. Check the preview rows.");
+    }
+  }
+  Object.defineProperty(rows, "warnings", { value: warnings, enumerable: false }); // not enumerable: the result still compares equal to a plain array
   return rows;
 }
 
@@ -401,12 +418,13 @@ export function matchServerDuplicates(dials, serverHits) {
 // One-call analysis for a parsed file.
 export function analyzeFile(text, fileName) {
   const t0 = performance.now();
-  const all = parseCSV(text).filter((r) => r.some((c) => (c || "").trim() !== ""));
+  const parsed = parseCSV(text);
+  const all = parsed.filter((r) => r.some((c) => (c || "").trim() !== ""));
   const headers = all[0] || [];
   const dataRows = all.slice(1);
   const blankRows = 0;
   const { map, how } = autoMapColumns(headers, dataRows);
-  return { fileName, rows: all, headers, dataRows, map, how, blankRows, parseMs: Math.round(performance.now() - t0) };
+  return { fileName, warnings: parsed.warnings || [], binary: /[\u0000-\u0008\u000e-\u001f]/.test(text.slice(0, 2000)), rows: all, headers, dataRows, map, how, blankRows, parseMs: Math.round(performance.now() - t0) };
 }
 
 // Mapping must give the caller something to work with.

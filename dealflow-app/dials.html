@@ -170,8 +170,9 @@
          this bar again. -->
     <div class="toolbar hidden" id="dialsSearchBar">
       <input type="search" id="dialsSearchInput" placeholder="Search this tab..." />
-      <button type="button" class="btn secondary small" id="dialsSearchCloseBtn">&times;</button>
+      <button type="button" class="btn secondary small" id="dialsSearchCloseBtn" aria-label="Close search">&times;</button>
     </div>
+    <div class="dials-search-count hidden" id="dialsSearchCount" aria-live="polite"></div>
 
     <div id="errorBox" class="error-msg hidden"></div>
     <div id="offlineNotice" class="offline-notice hidden"></div>
@@ -618,6 +619,7 @@
       <label class="check-row" style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px"><input type="checkbox" id="introCallPastOk" style="width:auto;margin:0" /> This call already happened (log it after the fact)</label>
       <div id="introCallTimeError" class="error-msg hidden"></div>
       <div class="form-actions">
+        <button type="button" class="btn secondary" id="introCallTimeCancelBtn">Cancel</button>
         <button type="button" class="btn" id="introCallTimeConfirmBtn">Save</button>
       </div>
     </div>

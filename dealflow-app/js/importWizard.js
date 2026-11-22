@@ -3,7 +3,9 @@
 import { supabase } from "./supabaseClient.js";
 import { escapeHtml } from "./clientForm.js";
 import { createNotification } from "./notifications.js";
-import { prepareList, describePrepare } from "./copyReview.js";
+import { prepareList, describePrepare, MANDATES } from "./copyReview.js";
+import { msg } from "./copyCommon.js";
+import { withoutAi } from "./teamScope.js";
 import {
   analyzeFile, buildDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates,
   mappingProblems, stripInternal, FIELD_LABELS,
@@ -94,7 +96,8 @@ export function createImportWizard(ctx) {
         if (my !== seq) return;
         it.a = analyzeFile(text, it.file.name);
         it.map = { ...it.a.map };
-        if (it.a.rows.length < 2) { it.status = "error"; it.error = "This file has no data rows (only a header or nothing at all)."; }
+        if (it.a.binary) { it.status = "error"; it.error = "This isn't a CSV file. Export the sheet as CSV (File > Download > .csv) and choose that."; }
+        else if (it.a.rows.length < 2) { it.status = "error"; it.error = "This file has no data rows (only a header or nothing at all)."; }
         else if (it.a.headers.length < 2 && it.a.rows.length > 1 && !/[,;\t]/.test(text.slice(0, 500))) { it.status = "error"; it.error = "This does not look like a CSV (no columns found)."; }
         else { it.status = "ok"; recompute(it); it.open = items.length === 1; }
       } catch (e) {
@@ -103,10 +106,11 @@ export function createImportWizard(ctx) {
     }
     if (items.length > 1) { const f = items.find((i) => i.status === "ok"); if (f) f.open = true; }
     render(); emit();
+    refreshMailboxWarning();
     for (const it of items) if (it.status === "ok") await serverCheck(it);
   }
 
-  function clear() { seq++; items = []; busy = false; root.innerHTML = ""; emit(); }
+  function clear() { seq++; items = []; busy = false; mbWarn = ""; root.innerHTML = ""; emit(); }
 
   // ---- assignees ----
   async function loadAssignees() {
@@ -114,7 +118,7 @@ export function createImportWizard(ctx) {
     let q = supabase.from("profiles").select("id, full_name, role").order("full_name", { ascending: true });
     if (ctx.isTeamLead) q = q.or(`role.eq.admin,and(role.in.(intern,independent_lead),team_id.in.(${ctx.teamIdsOf(ctx.profile).join(",")})),id.eq.${ctx.profile.id}`);
     const { data } = await q;
-    assignees = (data || []).filter((p) => p.id !== ctx.profile.id);
+    assignees = withoutAi(data).filter((p) => p.id !== ctx.profile.id);
     render();
   }
   const roleLabel = (r) => ({ admin: "admin", team_lead: "team lead", intern: "intern", independent_lead: "lead" }[r] || r || "");
@@ -165,7 +169,7 @@ export function createImportWizard(ctx) {
     }
     const noContact = s.no_contact
       ? `<label class="iw-check"><input type="checkbox" data-act="nocontact" data-i="${idx}" ${it.skipNoContact ? "checked" : ""}> Skip the ${plural(s.no_contact, "row", "rows")} with no email and no phone <span class="iw-muted">(nothing to call or email)</span></label>` : "";
-    const probs = it.problems.map((p) => `<div class="iw-err">${escapeHtml(p)}</div>`).join("");
+    const probs = it.problems.map((p) => `<div class="iw-err">${escapeHtml(p)}</div>`).join("") + (it.a.warnings || []).map((w) => `<div class="iw-warn">${escapeHtml(w)}</div>`).join("");
     const cols = it.a.headers.map((h, ci) => {
       const cur = it.map[ci] || "";
       const how = it.a.how[ci] && it.map[ci] === it.a.map[ci] ? it.a.how[ci] : "";
@@ -176,9 +180,9 @@ export function createImportWizard(ctx) {
         ${how === "typo" ? `<span class="iw-tag">matched despite spelling</span>` : how === "contents" ? `<span class="iw-tag">guessed from the values</span>` : ""}</div>`;
     }).join("");
     const mappedFields = Object.entries(it.map).filter(([, f]) => f).map(([, f]) => f);
-    const previewCols = [...new Set(["full_name", "company_name", "email", "mobile_phone", "company_phone", "city", "state"].filter((f) => mappedFields.includes(f) || (f === "full_name" && mappedFields.includes("first_name"))))];
+    const previewCols = [...new Set(["full_name", "company_name", "email", "mobile_phone", "company_phone", "city", "state", "email_subject", "email_1", "email_2"].filter((f) => mappedFields.includes(f) || (f === "full_name" && mappedFields.includes("first_name"))))];
     const mark = (i) => (it.skip.get(i) === "dup_file" ? "repeat in file" : it.skip.get(i) === "dup_existing" ? "already in system" : it.skip.get(i) === "no_contact" ? "no contact info" : "");
-    const prev = it.dials.slice(0, 5).map((d, i) => `<tr${mark(i) ? ` class="iw-skiprow"` : ""}>${previewCols.map((f) => `<td>${escapeHtml(d[f] || "")}</td>`).join("")}${mark(i) ? `<td><span class="iw-tag">${mark(i)} (skipped)</span></td>` : "<td></td>"}</tr>`).join("");
+    const prev = it.dials.slice(0, 5).map((d, i) => `<tr${mark(i) ? ` class="iw-skiprow"` : ""}>${previewCols.map((f) => `<td${/^email_/.test(f) ? ` class="iw-copycell"` : ""}>${escapeHtml(/^email_/.test(f) ? String(d[f] || "").slice(0, 60) : d[f] || "")}</td>`).join("")}${mark(i) ? `<td><span class="iw-tag">${mark(i)} (skipped)</span></td>` : "<td></td>"}</tr>`).join("");
     return `<div class="iw-item ${it.open ? "iw-open" : ""}">
       <button type="button" class="iw-head iw-toggle" data-act="toggle" data-i="${idx}" aria-expanded="${it.open}"><span class="iw-caret">${it.open ? "▾" : "▸"}</span> <b>${escapeHtml(it.name)}</b> <span class="iw-muted">${plural(s.total, "row", "rows")}${skipped ? `, ${num(rows)} to import` : ""}</span></button>
       ${it.open ? `<div class="iw-body">
@@ -199,7 +203,23 @@ export function createImportWizard(ctx) {
     const opts = [`<option value="">Me (${escapeHtml(ctx.profile.full_name || "you")})</option>`]
       .concat(assignees.map((p) => `<option value="${p.id}" ${p.id === assigneeId ? "selected" : ""}>${escapeHtml(p.full_name)}${p.role ? ` (${roleLabel(p.role)})` : ""}</option>`)).join("");
     return `<div class="iw-assign"><label for="iwAssign">Assign to</label><select id="iwAssign" data-act="assign">${opts}</select>
-      <div class="iw-muted iw-small">${assigneeId ? `${escapeHtml(assigneeName())} gets the list right after the import and is notified.` : "The list stays with you. You can still transfer it later."}</div></div>`;
+      <div class="iw-muted iw-small">${assigneeId ? `${escapeHtml(assigneeName())} gets the list right after the import and is notified.` : "The list stays with you. You can still transfer it later."}</div>
+      ${mbWarn ? `<div class="iw-warn" id="iwMbWarn">${escapeHtml(mbWarn)}</div>` : ""}</div>`;
+  }
+
+  // Warn (do not block) when the person who will own the list has no mailbox for this kind of outreach: the emails would wait.
+  let mbWarn = "", mbSeq = 0;
+  async function refreshMailboxWarning() {
+    const my = ++mbSeq, mandate = ctx.getMandate && ctx.getMandate();
+    const owner = assigneeId || ctx.profile.id;
+    if (!mandate || ctx.type?.() === "buyer" || !items.some((i) => i.status === "ok")) { if (mbWarn) { mbWarn = ""; render(); } return; }
+    let n = null;
+    try { const { data, error } = await supabase.rpc("owner_mailbox_count", { p_owner: owner, p_mandate: mandate }); if (!error) n = data; } catch { /* no warning if we cannot tell */ }
+    if (my !== mbSeq) return;
+    const label = MANDATES.find((m) => m.value === mandate)?.label || mandate;
+    const who = assigneeId ? assigneeName().split(" ")[0] : "You";
+    mbWarn = n === 0 ? `${who} ${assigneeId ? "has" : "have"} no mailbox for ${label} outreach yet. The emails will not send until an admin adds one. Calls still work.` : "";
+    render();
   }
 
   // Async updates must not wipe a tab name the person is typing.
@@ -231,7 +251,7 @@ export function createImportWizard(ctx) {
       case "dupmode": it.dupMode = t.value; applySkips(it); render(); emit(); break;
       case "nocontact": it.skipNoContact = t.checked; applySkips(it); render(); emit(); break;
       case "name": it.name = t.value; break;
-      case "assign": assigneeId = t.value; render(); break;
+      case "assign": assigneeId = t.value; render(); refreshMailboxWarning(); break;
     }
   });
   root.addEventListener("input", (e) => { if (e.target.dataset?.act === "name") items[Number(e.target.dataset.i)].name = e.target.value; });
@@ -291,7 +311,7 @@ export function createImportWizard(ctx) {
         res.ms.insert = Math.round(performance.now() - t0);
         res.skipped = { dup_file: [...it.skip.values()].filter((v) => v === "dup_file").length, dup_existing: [...it.skip.values()].filter((v) => v === "dup_existing").length, no_contact: [...it.skip.values()].filter((v) => v === "no_contact").length };
       } catch (e) {
-        res.error = e.message || String(e);
+        res.error = msg(e);
         // A half-imported list is worse than none: remove it so the retry starts clean.
         if (listId) { try { await supabase.from("dial_lists").delete().eq("id", listId); res.error += " (nothing was kept; try again)"; } catch { /* leave it */ } res.id = null; }
         continue;
@@ -305,13 +325,13 @@ export function createImportWizard(ctx) {
           if (error) throw error;
           createNotification(target, `${ctx.profile.full_name} sent you a list of people to contact.`, "dial_transfer");
           res.assignedTo = assigneeName(); res.ms.assign = Math.round(performance.now() - t1);
-        } catch (e) { res.assignError = e.message || String(e); }
+        } catch (e) { res.assignError = msg(e); }
       }
       res.ms.callable = Math.round(performance.now() - tAll); // rows are in and the list is with its owner: callable now
       if (opts.mandate) {
         const t2 = performance.now();
         progress(`${res.name}: setting up sequences...`);
-        try { res.seq = await prepareList(listId); } catch (e) { res.seqError = e.message || String(e); }
+        try { res.seq = await prepareList(listId, (left) => left && progress(`${res.name}: setting up sequences (${num(left)} left)...`)); } catch (e) { res.seqError = msg(e); }
         res.ms.prepare = Math.round(performance.now() - t2);
       }
       res.ms.total = Math.round(performance.now() - tAll);
@@ -334,14 +354,26 @@ export function createImportWizard(ctx) {
         `${plural(r.inserted, "lead", "leads")} added${skipTxt ? ` (skipped ${skipTxt})` : ""}${r.assignedTo ? `, sent to ${escapeHtml(r.assignedTo)}` : ""}. Ready to call now.`,
         r.assignError ? `<span class="bad">Could not assign: ${escapeHtml(r.assignError)}. The list is in your account; use Transfer.</span>` : "",
         r.seq ? escapeHtml(describePrepare(r.seq)) : "",
-        r.seqError ? `<span class="bad">Sequence setup failed: ${escapeHtml(r.seqError)}. Use "Run sequence setup" in the list menu.</span>` : "",
+        r.seqError ? `<span class="bad">Sequence setup did not finish: ${escapeHtml(r.seqError)}</span> <button type="button" class="iw-link" data-retry-seq="${r.id}" data-name="${escapeHtml(r.name)}">Retry</button>` : "",
       ].filter(Boolean);
       return `<div class="f">${lines.join("<br>")}</div>`;
     }).join("");
+    box.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-retry-seq]");
+      if (!b) return;
+      b.disabled = true; b.textContent = "Retrying...";
+      try {
+        const seq = await prepareList(b.dataset.retrySeq);
+        b.parentNode.innerHTML = `<b>${escapeHtml(b.dataset.name)}</b><br>${escapeHtml(describePrepare(seq))}`;
+      } catch (err) {
+        b.disabled = false; b.textContent = "Retry";
+        b.previousElementSibling && (b.previousElementSibling.textContent = "Sequence setup did not finish: " + msg(err));
+      }
+    });
     return box;
   }
 
-  return { setFiles, clear, run, renderResult, loadAssignees, summary, isBusy: () => busy,
+  return { setFiles, clear, run, refreshMailboxWarning, renderResult, loadAssignees, summary, isBusy: () => busy,
     setAssignee: (id) => { assigneeId = id || ""; render(); },
     // for tests
     _items: () => items };

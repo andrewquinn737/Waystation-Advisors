@@ -1,4 +1,4 @@
-import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import {
@@ -573,6 +573,11 @@ function clientCompanyAndLocation(c) {
 // Person responsible) — see skeletonListHtml in js/placeholders.js.
 const CLIENTS_SKELETON_COLUMN_WIDTHS = ["55%", "60%", "45%", "40%"];
 
+function showClientsLoadFailed() {
+  els.tableWrap.innerHTML = `<div class="empty-state" role="alert"><p>Couldn't load your clients. Nothing is lost.</p><button type="button" class="btn secondary" id="clientsRetryBtn">Retry</button></div>`;
+  document.getElementById("clientsRetryBtn")?.addEventListener("click", loadClients);
+}
+
 async function loadClients() {
   // Shown the instant a fetch starts (see placeholders.js) rather than
   // leaving the previous side's now-stale rows up, or a blank area, while
@@ -590,9 +595,9 @@ async function loadClients() {
     // error message, since falling back to stale data would hide an actual
     // bug (bad RLS, bad query, etc). Only a network-shaped failure (see
     // js/offlineCache.js) falls back to the last successfully loaded list.
-    if (!isNetworkError(error)) { els.tableWrap.innerHTML = ""; return showError(els.errorBox, error); }
+    if (!isNetworkError(error)) return showClientsLoadFailed();
     const cached = cacheGet(cacheKey);
-    if (!cached) { els.tableWrap.innerHTML = ""; return showOfflineNotice(false); }
+    if (!cached) { showClientsLoadFailed(); return showOfflineNotice(false); }
     clients = cached;
     showOfflineNotice(true);
     await loadClientProgressStages();
@@ -842,10 +847,12 @@ function positionCategoriesSubmenu() {
   const submenuWidth = els.categoriesSubmenu.offsetWidth || 190;
   let left = rect.right + 8;
   let top = rect.top;
+  els.categoriesSubmenu.style.minWidth = "";
   if (left + submenuWidth > window.innerWidth) {
     left = rect.left - submenuWidth - 8;
     // No room on either side (a phone-width menu): drop it just under the button instead of covering the labels
-    if (left < 8) { left = 8; top = rect.bottom + 4; }
+    // anchored: same left edge and width as the Categories row, so it reads as opening from that item
+    if (left < 8) { left = rect.left; top = rect.bottom + 4; els.categoriesSubmenu.style.minWidth = `${Math.min(rect.width, window.innerWidth - 16)}px`; }
   }
   els.categoriesSubmenu.style.left = `${Math.max(8, left)}px`;
   els.categoriesSubmenu.style.top = `${top}px`;
@@ -951,7 +958,7 @@ if (isAdmin || isTeamLead) {
       // clients in the first place, filter or no filter.
       if (isAdmin) {
         const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
-        return error ? [] : data || [];
+        return error ? [] : withoutAi(data);
       }
       return loadTeamScopeAccounts(profile);
     },
@@ -963,7 +970,7 @@ if (isAdmin || isTeamLead) {
     getTeams: groupsByTeam(profile, isAdmin)
       ? async () => {
           const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
-          return error ? [] : data || [];
+          return error ? [] : withoutAi(data);
         }
       : undefined,
     onChange: renderTable,
@@ -1014,7 +1021,7 @@ if (isAdmin || isTeamLead) {
       const buyerIds = [...new Set(clients.map((c) => c.intended_buyer_id).filter(Boolean))];
       if (!buyerIds.length) return [];
       const { data, error } = await supabase.from("clients").select("id, full_name").in("id", buyerIds).order("full_name", { ascending: true });
-      return error ? [] : data || [];
+      return error ? [] : withoutAi(data);
     },
     onChange: renderTable,
     escapeHtml,
@@ -2375,13 +2382,13 @@ function openEditEventModal(eventId) {
 // handleScheduleIntroCallFromDial in js/dials.js). eventDate/time are
 // whatever was chosen in openEventDetailsModal.
 // Inline choice inside the intro-call popup. Resolves "move", "add", or null (cancel).
-function askMoveOrAddIntro(pending) {
+function askMoveOrAddIntro(pending, newWhen) {
   return new Promise((resolve) => {
-    const when = new Date(pending.event_date).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const fmt = (d) => new Date(d).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     const box = document.createElement("div");
     box.className = "intro-choice";
-    box.innerHTML = `<p class="help-text" style="font-size:14px;color:var(--text)">There is already an intro call (${escapeHtml(when)}). Move it to this time, or add a new one?</p>
-      <div class="form-actions"><button type="button" class="btn" data-c="move">Move the existing one</button><button type="button" class="btn secondary" data-c="add">Add a new one</button><button type="button" class="btn secondary" data-c="cancel">Cancel</button></div>`;
+    box.innerHTML = `<p class="help-text" style="font-size:14px;color:var(--text)">This client already has an intro call on <b>${escapeHtml(fmt(pending.event_date))}</b>. What should happen with ${escapeHtml(fmt(newWhen))}?</p>
+      <div class="form-actions"><button type="button" class="btn secondary" data-c="move">Move the ${escapeHtml(fmt(pending.event_date))} call to ${escapeHtml(fmt(newWhen))}</button><button type="button" class="btn secondary" data-c="add">Add a second intro call</button><button type="button" class="btn secondary" data-c="cancel">Cancel</button></div>`;
     els.introCallPopupBody.appendChild(box);
     box.addEventListener("click", (e) => {
       const c = e.target.closest("[data-c]")?.dataset.c;
@@ -2398,21 +2405,31 @@ function openTimelineIntroCall(eventDate, time, timezone) {
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
     profile,
-    onScheduled: async (client) => {
+    onScheduled: async (client, info) => {
       // A pending intro call already exists: never overwrite it silently. Ask: move it to this time, or add a second one.
-      const { data: pend } = await supabase.from("client_events").select("id, event_date").eq("client_id", client.id)
-        .eq("event_type", "intro_call").eq("confirmed", false).order("created_at", { ascending: false }).limit(1);
-      let mode = "move";
-      if (pend?.length) {
-        mode = await askMoveOrAddIntro(pend[0]);
-        if (!mode) return { cancelled: true };
-      }
+      const { data: pend } = await supabase.from("client_events").select("id, event_date, created_at").eq("client_id", client.id)
+        .eq("event_type", "intro_call").eq("confirmed", false).limit(50);
+      // The one a "move" changes: the nearest upcoming pending call, else the latest created (same rule as set_intro_call_time).
+      const now = Date.now(), up = (pend || []).filter((x) => Date.parse(x.event_date) >= now).sort((x, y) => Date.parse(x.event_date) - Date.parse(y.event_date));
+      const target = up[0] || (pend || []).slice().sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
+      const when = eventDate || new Date().toISOString(), via = info?.skipped ? "manual" : "calendly_link";
+      const errEl = els.introCallPopupBody.querySelector("#introCallError");
       // "move" = the same single entry point as Dials (updates the pending event); "add" = a second, separate intro call.
-      // The database writes the one-per-client "Intro calls" credit and notifies the team. The popup shows success only if this worked.
-      const { error: introErr } = await supabase.rpc(mode === "add" ? "add_intro_call" : "set_intro_call_time", mode === "add"
-        ? { p_client_id: client.id, p_event_date: eventDate || new Date().toISOString(), p_time: time || null, p_timezone: time ? timezone : null, p_via: "calendly_link", p_past_ok: true }
-        : { p_client_id: client.id, p_dial_id: null, p_event_date: eventDate || new Date().toISOString(), p_time: time || null, p_timezone: time ? timezone : null, p_via: "calendly_link", p_past_ok: true });
-      if (introErr) return { error: introErr };
+      // The database writes the one-per-client "Intro calls" credit and notifies the team. The popup shows success only if this worked;
+      // after a failure the Move / Add choice comes back so nothing has to be reopened.
+      for (;;) {
+        let mode = "move";
+        if (target) {
+          mode = await askMoveOrAddIntro(target, when);
+          if (!mode) return { cancelled: true };
+        }
+        const common = { p_client_id: client.id, p_event_date: when, p_time: time || null, p_timezone: time ? timezone : null, p_via: via, p_past_ok: true };
+        const { error: introErr } = await supabase.rpc(mode === "add" ? "add_intro_call" : "set_intro_call_time", mode === "add" ? common : { ...common, p_dial_id: null });
+        if (!introErr) break;
+        if (!target) return { error: introErr };
+        errEl.textContent = introErr.message || String(introErr); errEl.classList.remove("hidden");
+      }
+      errEl?.classList.add("hidden");
       await loadClientEvents();
       renderModalBody();
       setTimeout(() => els.introCallPopup.classList.add("hidden"), 1500); // success text shows first (see wireIntroCallForm)

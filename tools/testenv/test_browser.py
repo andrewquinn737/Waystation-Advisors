@@ -4,7 +4,8 @@ Run: python3 test_browser.py   (needs the local server on :5173 and Google Chrom
 import sys, re, time
 import sb
 from playwright.sync_api import sync_playwright
-from browser_regress import BASE, login, new_page, USERS
+from browser_regress import BASE, login, new_page, USERS, creds
+creds_for = lambda role: creds(USERS[role])
 results = []
 def check(name, cond, detail=""):
     results.append(bool(cond)); print(("PASS " if cond else "FAIL ") + name + ("" if cond else f"  -> {str(detail)[:300]}"))
@@ -84,6 +85,108 @@ def round1(b):
     ctx.close()
     print()
 
+def round2(b):
+    """Round-2 review fixes: Calls load failure, outcome-save error, intro-time Cancel, tab scoping, transfer picker, touch targets, nav badge,
+    scheduled folder, Reports week, AI Assistant in pickers, login deep link. Test data is TEST-R2 and removed at the end."""
+    print("-- round 2 review fixes")
+    adm = sb.test_sql("select id from profiles where full_name='Test Admin'")[0]["id"]
+    ids = {}
+    try:
+        for k in ("A", "B"):
+            ids[k] = sb.test_sql(f"insert into dial_lists(name,dial_type,status,created_by,mandate,sort_order) values ('TEST-R2 list {k}','seller','current','{adm}','ma',900) returning id")[0]["id"]
+        d = {}
+        for k in ("A", "B"):
+            for n in (1, 2):
+                d[k + str(n)] = sb.test_sql(f"insert into dials(list_id,created_by,company_name,full_name,email,mobile_phone,city,state,industry,contact_status) values ('{ids[k]}','{adm}','TEST-R2 Co {k}{n}','Rae {k}{n}','r2{k.lower()}{n}@testr2.example','(801) 555-01{ord(k) % 10}{n}','Provo','UT','Plumbing','uncontacted') returning id")[0]["id"]
+        for k in ("A", "B"):   # one overdue call task per list
+            sb.test_sql(f"insert into sequence_tasks(dial_id,list_id,owner_id,step,seq_day,kind,due_on,status) values ('{d[k+'1']}','{ids[k]}','{adm}',1,1,'call',current_date-2,'pending')")
+        ctx = b.new_context(viewport={"width": 375, "height": 812}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        def click_tab(k):
+            if not p.query_selector(f'.dial-tab[data-id="{ids[k]}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
+            p.click(f'.dial-tab[data-id="{ids[k]}"]:not(.active)') if p.query_selector(f'.dial-tab[data-id="{ids[k]}"]:not(.active)') else None; p.wait_for_timeout(2500)
+        def open_list(k):
+            p.goto(BASE + "dials.html"); p.wait_for_selector(".dial-tab", timeout=15000); click_tab(k)
+        # -- tab scoping
+        open_list("A")
+        txt = p.inner_text("#dialsTableWrap")
+        check("Calls: Past due shows only this tab's follow-ups (not other lists')", "TEST-R2 Co A1" in txt and "TEST-R2 Co B1" not in txt, txt[:300])
+        check("Calls: a note says follow-ups are due in other lists, with a way to show them", "due in other lists" in txt and p.locator("[data-scope]").count() == 1, txt[:200])
+        p.click("[data-scope]"); p.wait_for_timeout(400)
+        check("Calls: 'Show all lists' adds the other tabs' follow-ups", "TEST-R2 Co B1" in p.inner_text("#dialsTableWrap"))
+        # -- Show N more has no '(N left)'
+        check("Calls: no 'N left' wording on Show more", "left)" not in p.inner_text("#dialsTableWrap"))
+        # -- load failure: retry state, never 'all caught up'
+        open_list("A")
+        p.route("**/rest/v1/dials?*list_id=eq.*", lambda r: r.fulfill(status=500, body='{"message":"boom"}', headers={"content-type": "application/json"}))
+        click_tab("B")
+        t = p.inner_text("#dialsTableWrap")
+        check("Calls: a failed load shows a Retry state, never 'all caught up'", "Retry" in t and "caught up" not in t and p.locator(".dials-load-failed").count() == 1, t[:200])
+        p.unroute("**/rest/v1/dials?*list_id=eq.*"); p.click("[data-reload-dials]"); p.wait_for_timeout(2500)
+        check("Calls: Retry reloads the list", p.locator(".dials-load-failed").count() == 0 and "TEST-R2 Co B" in p.inner_text("#dialsTableWrap"), p.inner_text("#dialsTableWrap")[:200])
+        # -- outcome save failure stays visible
+        open_list("A"); p.locator(".dh-row", has_text="TEST-R2 Co A2").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+        p.route("**/rest/v1/dials?id=eq.*", lambda r: r.fulfill(status=500, body='{"message":"new row violates row-level security"}', headers={"content-type": "application/json"}) if r.request.method == "PATCH" else r.continue_())
+        p.click('.dial-outcome[data-outcome="no_response"]'); p.wait_for_timeout(1500)
+        vis = p.is_visible("#dialModalError"); et = p.inner_text("#dialModalError") if vis else ""
+        check("Calls: a failed outcome save leaves a visible error (not cleared by the re-render)", vis and "not saved" in et and "row-level" not in et.lower(), et)
+        check("Calls: the outcome buttons work again after the failure", p.locator(".dial-outcome:not([disabled])").count() >= 4)
+        p.unroute("**/rest/v1/dials?id=eq.*")
+        # -- intro-time Cancel puts the status back and leaves no client
+        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000); p.click("#manualIntroBtn")
+        p.wait_for_selector("#introCallTimeModal:not(.hidden)", timeout=8000)
+        check("Calls: 'Confirm the scheduled time' has a Cancel button", p.is_visible("#introCallTimeCancelBtn"))
+        p.click("#introCallTimeCancelBtn"); p.wait_for_timeout(1500)
+        row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A2']}') c from dials where id='{d['A2']}'")[0]
+        check("Calls: Cancel on the time step puts the dial back and leaves no client", not p.is_visible("#introCallTimeModal") and row["contact_status"] != "intro_call_scheduled" and row["c"] == 0, row)
+        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000); p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeModal:not(.hidden)")
+        p.keyboard.press("Escape"); p.wait_for_timeout(1500)
+        row = sb.test_sql(f"select contact_status from dials where id='{d['A2']}'")[0]
+        check("Calls: Esc on the time step also backs out", not p.is_visible("#introCallTimeModal") and row["contact_status"] != "intro_call_scheduled", row)
+        # -- touch targets (375): inbox tabs, gear
+        p.goto(BASE + "messages.html"); p.wait_for_selector(".mail-tab", timeout=15000)
+        hs = p.evaluate("[...document.querySelectorAll('.mail-tab, #pageSettingsBtn')].map(e => Math.round(e.getBoundingClientRect().height))")
+        check("Inbox: tabs and gear are 44px tall", all(h >= 44 for h in hs), hs)
+        ctx.close()
+        # -- 1280: transfer picker
+        ctx = b.new_context(viewport={"width": 1280, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, "admin"); open_list("A")
+        p.click(".dial-tab.active"); p.wait_for_timeout(500)
+        if p.is_visible("#dialTabTransferBtn"):
+            p.click("#dialTabTransferBtn"); p.wait_for_selector(".dial-tab-transfer-option", timeout=8000)
+            names = p.eval_on_selector_all(".dial-tab-transfer-option", "o=>o.map(x=>x.textContent)")
+            check("Transfer: People list has role labels, no AI Assistant, and a search box", all(re.search(r"(admin|team lead|intern|lead)$", n) for n in names) and not any("AI Assistant" in n for n in names) and p.is_visible(".dial-tab-transfer-search"), names[:5])
+            p.fill(".dial-tab-transfer-search", "caleb"); p.wait_for_timeout(200)
+            check("Transfer: search narrows the list", 0 < p.locator(".dial-tab-transfer-option:visible").count() < len(names))
+            p.locator(".dial-tab-transfer-option:visible").first.click()
+            check("Transfer: choosing someone asks to confirm first (Cancel / Send)", p.is_visible("[data-yes]") and p.is_visible("[data-no]"))
+        else:
+            check("Transfer: the tab menu is reachable", False, "no transfer button")
+        ctx.close()
+        # -- DB-side checks
+        defs = sb.test_sql("select prosrc from pg_proc where proname='compute_report_rollups'")[0]["prosrc"]
+        check("Reports: a week runs Monday to Sunday (weekend work counted)", "v_period_start + 7" in defs and "v_period_start + 5" not in defs)
+        ai = sb.test_sql("select id from profiles where full_name='AI Assistant'")
+        ctx = b.new_context(viewport={"width": 1280, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        p.goto(BASE + "clients.html"); p.wait_for_timeout(2500); p.click("#pageSettingsBtn"); p.click("#menuAccountsVisibleBtn"); p.wait_for_timeout(1500)
+        p.goto(BASE + "admin.html#campaigns"); p.wait_for_function("document.querySelector('#cpList') && document.querySelector('#cpList').innerText.length > 20", timeout=20000); p.wait_for_timeout(1500)
+        check("Admin > Campaigns loads, and the column is named 'Companies emailed'", "Couldn't load" not in p.inner_text("#cpList") and "Companies emailed" in p.inner_text("#cpList"), p.inner_text("#cpList")[:200])
+        src = sb.test_sql("select prosrc from pg_proc where proname='admin_campaigns'")[0]["prosrc"]
+        line = [l for l in src.split("\n") if "'contacted'" in l][0]
+        check("Companies emailed counts first emails that went out (email_1_message_id), not replies/completions", "email_1_message_id is not null" in line and "replied" not in line, line)
+        p.goto(BASE + "clients.html"); p.wait_for_timeout(2500); p.click("#pageSettingsBtn"); p.click("#menuAccountsVisibleBtn"); p.wait_for_timeout(1500)
+        check("Accounts visible does not list the AI Assistant", "AI Assistant" not in p.inner_text("#accountsVisiblePopup"), p.inner_text("#accountsVisiblePopup")[:200])
+        ctx.close()
+        # -- logged-out deep link returns to the page that was asked for
+        ctx = b.new_context(viewport={"width": 1280, "height": 800}); errs = []; p = new_page(ctx, errs)
+        p.goto(BASE + "messages.html?from=zz%40nowhere.test"); p.wait_for_url(re.compile(r"login\.html"), timeout=15000)
+        email, pw = creds_for("admin"); p.fill("#email", email); p.fill("#password", pw); p.click("#submitBtn"); p.wait_for_url(re.compile(r"messages\.html"), timeout=20000)
+        check("Login: a logged-out deep link returns to that page after signing in", "messages.html" in p.url and "from=" in p.url, p.url)
+        ctx.close()
+    finally:
+        sb.test_sql("delete from sequence_tasks where list_id in (select id from dial_lists where name like 'TEST-R2 %')")
+        sb.test_sql("delete from clients where source_dial_id in (select d.id from dials d join dial_lists l on l.id=d.list_id where l.name like 'TEST-R2 %')")
+        sb.test_sql("delete from dial_lists where name like 'TEST-R2 %'")
+    print()
+
 def run():
     with sync_playwright() as pw:
         b = pw.chromium.launch(channel="chrome", headless=True)
@@ -115,6 +218,7 @@ def run():
                 check(f"{role}: {pg}.html has no sideways scroll at 375px", w <= 376, w)
             ctx.close()
         round1(b)
+        round2(b)
         b.close()
     print(f"\n{sum(results)}/{len(results)} passed")
 run()

@@ -283,7 +283,7 @@ export function wireDeletedTabsPopup({ menuBtn, closePageHeaderMenu, escapeHtml 
     const roleLabel = { admin: "Admin", team_lead: "Team lead", independent_lead: "Independent lead", intern: "Intern" };
     el.reassignSelect.innerHTML =
       `<option value="">Choose an account…</option>` +
-      (data || [])
+      (data || []).filter((p) => p.full_name !== "AI Assistant")
         .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.full_name || "Unnamed")} (${roleLabel[p.role] || p.role})</option>`)
         .join("");
     // Restore stays disabled until an account is actually picked.

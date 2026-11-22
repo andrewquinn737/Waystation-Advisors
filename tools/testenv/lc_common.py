@@ -2,7 +2,8 @@
 git-ignored ~/Projects/First Project/TEST_LOGINS_LIVE_COPY.md."""
 import os, re
 from playwright.sync_api import sync_playwright
-BASE = "http://localhost:5173/"
+import os
+BASE = os.environ.get("WS_BASE", "http://localhost:5173/")
 LOG = os.path.expanduser("~/Projects/First Project/TEST_LOGINS_LIVE_COPY.md")
 def creds(name):
     for l in open(LOG):

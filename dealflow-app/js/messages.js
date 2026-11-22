@@ -135,7 +135,9 @@ async function loadAccounts() {
 async function refreshUnread() {
   if (!canManageMail) return;
   unreadByAccount = await loadUnreadCounts(accounts.map((a) => a.id));
-  const total = [...unreadByAccount.values()].reduce((n, x) => n + x, 0);
+  // The count is for mailboxes this person owns (not read-only copies of other people's).
+  const total = accounts.filter((a) => a.mine).reduce((n, a) => n + (unreadByAccount.get(a.id) || 0), 0);
+  window.dispatchEvent(new CustomEvent("inbox-unread", { detail: total }));
   document.title = `${total ? `(${total > 99 ? "99+" : total}) ` : ""}Inbox \u2014 Waystation Advisors`;
 }
 
@@ -509,50 +511,52 @@ async function loadLiveFolder(loadMore = false) {
   }
   const ids = all;
   if (!loadMore) {
-    els.wrap.innerHTML = loadingHtml(`Loading from ${all.length > 1 ? `${all.length} mailboxes` : "the mailbox"}… this can take up to half a minute.`);
-    liveState = { kind, items: [], accountState: new Map(), scheduled: [], failures: [] };
+    els.wrap.innerHTML = loadingHtml(kind === "scheduled" ? "Loading scheduled emails…" : `Loading from ${all.length > 1 ? `${all.length} mailboxes` : "the mailbox"}…`);
+    liveState = { kind, items: [], accountState: new Map(), scheduled: [], failures: [], loading: 0, total: 0 };
   }
   const state = liveState;
-  const targets = ids.filter((id) => !loadMore || state.accountState.get(id)?.hasMore);
-  // A few mailboxes at a time (each is a live IMAP login), never all of them at once.
-  const results = [];
-  for (let i = 0; i < targets.length; i += 5) {
-    results.push(
-      ...(await Promise.all(
-        targets.slice(i, i + 5).map(async (id) => {
-          const offset = loadMore ? state.accountState.get(id).offset : 0;
-          try {
-            return { id, data: await liveCall({ action: "list", account_id: id, kind, offset, limit: LIVE_PAGE }) };
-          } catch (e) {
-            return { id, error: e };
-          }
-        })
-      ))
-    );
-    if (folderView !== kind || liveState !== state) return;
-  }
-  if (folderView !== kind || liveState !== state) return; // user switched away while loading
-  for (const r of results) {
-    if (r.error) {
-      state.failures.push(`${mailboxEmail(r.id)}: ${r.error.message || r.error}`);
-      state.accountState.set(r.id, { offset: 0, hasMore: false });
-      continue;
-    }
-    for (const it of r.data.items || []) state.items.push({ ...it, accountId: r.id });
-    const prev = loadMore ? state.accountState.get(r.id).offset : 0;
-    state.accountState.set(r.id, { offset: prev + (r.data.items || []).length, hasMore: !!r.data.has_more });
-  }
-  state.items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
   if (kind === "scheduled") {
+    // Scheduled mail lives in our own table: no mailbox login needed, so it is instant.
     const { data } = await supabase
       .from("scheduled_emails")
       .select("id, account_id, recipient_name, to_address, subject, send_at, status, error")
       .in("account_id", all)
       .in("status", ["pending", "sending", "failed"])
       .order("send_at", { ascending: true });
+    if (folderView !== kind || liveState !== state) return;
     state.scheduled = (data || []).filter((r) => r.status !== "failed" || Date.now() - new Date(r.send_at).getTime() < 3 * 86400000);
+    renderLiveFolder();
+    return;
   }
-  renderLiveFolder();
+  const targets = ids.filter((id) => !loadMore || state.accountState.get(id)?.hasMore);
+  state.total = targets.length; state.loading = targets.length;
+  // A few mailboxes at a time (each is a live IMAP login), never all of them at once. Each batch is shown the moment it arrives.
+  for (let i = 0; i < targets.length; i += 5) {
+    const results = await Promise.all(
+      targets.slice(i, i + 5).map(async (id) => {
+        const offset = loadMore ? state.accountState.get(id).offset : 0;
+        try {
+          return { id, data: await liveCall({ action: "list", account_id: id, kind, offset, limit: LIVE_PAGE }) };
+        } catch (e) {
+          return { id, error: e };
+        }
+      })
+    );
+    if (folderView !== kind || liveState !== state) return; // user switched away while loading
+    for (const r of results) {
+      if (r.error) {
+        state.failures.push(`${mailboxEmail(r.id)}: ${r.error.message || r.error}`);
+        state.accountState.set(r.id, { offset: 0, hasMore: false });
+        continue;
+      }
+      for (const it of r.data.items || []) state.items.push({ ...it, accountId: r.id });
+      const prev = loadMore ? state.accountState.get(r.id).offset : 0;
+      state.accountState.set(r.id, { offset: prev + (r.data.items || []).length, hasMore: !!r.data.has_more });
+    }
+    state.loading = Math.max(0, targets.length - (i + 5));
+    state.items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    renderLiveFolder();
+  }
 }
 
 function renderLiveFolder() {
@@ -602,8 +606,11 @@ function renderLiveFolder() {
       .join("")
   );
   const empty = !state.items.length && !(state.kind === "scheduled" && state.scheduled.length);
+  if (state.loading) parts.unshift(`<div class="mail-note">Still loading ${state.loading} of ${state.total} mailboxes…</div>`);
   const hasMore = [...state.accountState.values()].some((s) => s.hasMore);
-  els.wrap.innerHTML = empty
+  els.wrap.innerHTML = empty && state.loading
+    ? loadingHtml(`Loading from ${state.total} mailboxes…`)
+    : empty
     ? `<div class="empty-state">${state.failures.length ? parts.join("") : `Nothing in ${FOLDER_LABELS[state.kind]}.`}</div>`
     : `<div class="team-member-list">${parts.join("")}${hasMore ? `<button type="button" class="btn secondary" id="liveLoadMoreBtn" style="margin:8px auto; display:block;">Load more</button>` : ""}</div>`;
 
@@ -1192,6 +1199,12 @@ function saveDraft() {
     else sessionStorage.removeItem(draftKey(pendingCompose.threadId));
   } catch { /* storage blocked */ }
 }
+// ...and it is saved as you type (a refresh, a dropped connection or a stray reload keeps it), not only on Cancel / X.
+let draftTimer;
+const saveDraftSoon = () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); };
+for (const el of [els.composeBody, els.composeToInput, els.composeSubjectInput]) el?.addEventListener("input", saveDraftSoon);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveDraft(); });
+addEventListener("pagehide", saveDraft);
 function closeCompose() {
   saveDraft();
   els.composeModal.classList.add("hidden");
@@ -1274,10 +1287,12 @@ refreshUnread().catch(() => {});
 // working, and the list refreshes itself when it finishes. A failure here is
 // deliberately quiet (the 2-minute background sync keeps running regardless,
 // and a manual "Sync now" still reports errors).
+let leavingPage = false;
+addEventListener("pagehide", () => { leavingPage = true; });
 if (canManageMail && accounts.length) {
   runSync().then((result) => {
     if (result.ok) refreshAfterSync();
-    else console.error("Auto-sync failed", result.error);
+    else if (!leavingPage && !/abort|failed to fetch|load failed|networkerror/i.test(String(result.error?.message || result.error))) console.error("Auto-sync failed", result.error);
   });
 }
 
@@ -1289,9 +1304,12 @@ if (canManageMail && accounts.length) {
   const from = new URLSearchParams(window.location.search).get("from");
   if (from) {
     window.history.replaceState({}, "", "messages.html");
-    const { data: hit } = await supabase.from("email_messages").select("thread_id")
-      .eq("direction", "inbound").ilike("from_address", from.trim().replace(/[\\%_]/g, "\\$&")).order("sent_at", { ascending: false }).limit(1);
-    if (hit && hit[0]?.thread_id) { replyThreadId = hit[0].thread_id; await openThread(replyThreadId); }
+    const { data: hits } = await supabase.from("email_messages").select("thread_id, account_id")
+      .eq("direction", "inbound").ilike("from_address", from.trim().replace(/[\\%_]/g, "\\$&")).order("sent_at", { ascending: false }).limit(20);
+    // Prefer the newest thread in a mailbox this person can answer from; an intern only gets a read-only copy otherwise.
+    const hit = (hits || []).filter((h) => h.thread_id);
+    const pick = hit.find((h) => canWriteAccount(h.account_id)) || hit[0];
+    if (pick) { replyThreadId = pick.thread_id; await openThread(replyThreadId); }
     else showError(els.errorBox, new Error("That reply isn't in the inbox yet. Your inbox is still below.")); // keep the list, don't wipe it
   }
 }

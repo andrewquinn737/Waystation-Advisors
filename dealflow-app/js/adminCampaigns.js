@@ -35,7 +35,7 @@ async function load() {
 }
 function retryLink() { const el = $("cpMsg"), b = document.createElement("button"); b.type = "button"; b.className = "ad-link"; b.textContent = "Retry"; b.onclick = load; el.appendChild(b); }
 
-const STATS = [["emails_sent", "Emails sent"], ["contacted", "Contacted"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
+const STATS = [["emails_sent", "Emails sent"], ["contacted", "Companies emailed"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
 const statCells = (n) => STATS.map(([k, label]) => { const v = n[k] ?? 0; return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${label}</span></div>`; }).join("");
 export const designPrompt = (c) => `Use the Waystation CRM connector: design_campaign for list ${c.name} (list_id ${c.list_id})`;
 

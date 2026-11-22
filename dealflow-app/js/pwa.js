@@ -58,3 +58,19 @@ document.addEventListener("visibilitychange", () => {
     window.location.reload();
   }
 });
+
+// Offline: a page that cannot reach the server used to sit on its skeleton for good. Say so, and reload when the connection returns.
+function offlineBanner() {
+  let el = document.getElementById("offlineBanner");
+  if (navigator.onLine) { el?.remove(); return; }
+  if (el) return;
+  el = document.createElement("div");
+  el.id = "offlineBanner";
+  el.setAttribute("role", "status");
+  el.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:500;padding:10px 16px;text-align:center;font-size:14px;background:#2f3b4a;color:#fff";
+  el.textContent = "You're offline. This page will load when you're back online.";
+  document.body.appendChild(el);
+}
+window.addEventListener("offline", offlineBanner);
+window.addEventListener("online", () => { document.getElementById("offlineBanner")?.remove(); if (document.querySelector(".skeleton, .skeleton-row, #pageLoadingOverlay:not(.hidden)")) window.location.reload(); });
+window.addEventListener("load", () => setTimeout(offlineBanner, 3000));

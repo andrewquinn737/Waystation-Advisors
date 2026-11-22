@@ -288,7 +288,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 /* Settings icon button, right side of the header — same icon/position on
    Profile/Clients/Dials. Intentionally has no click behavior yet. */
 .page-header-settings {
-  width: 30px; height: 30px; flex-shrink: 0; border-radius: 6px; border: 1px solid var(--border);
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 6px; border: 1px solid var(--border);
   background: var(--bg); color: var(--text-muted); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
@@ -1016,11 +1016,13 @@ html.is-desktop-device .contact-action-tel:not(.contact-action-call) { display: 
    markup for that one event type). */
 .timeline-box-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .timeline-edit-btn {
-  flex-shrink: 0; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; padding: 0;
+  flex-shrink: 0; width: 44px; height: 44px; margin: -11px; border: none; background: none; position: relative; isolation: isolate;
+  color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
 }
-@media (hover: hover) { .timeline-edit-btn:hover { background: var(--bg); border-color: var(--accent); color: var(--accent); } }
+/* the 22px circle you see; the button around it is the 44px touch area */
+.timeline-edit-btn::before, .timeline-confirm-btn::before { content: ""; position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); z-index: -1; }
+@media (hover: hover) { .timeline-edit-btn:hover { color: var(--accent); } .timeline-edit-btn:hover::before { background: var(--bg); border-color: var(--accent); } }
 
 /* Triangle toggle next to a confirmed event's title — right-side-up
    (collapsed) by default on every fresh render; clicking it adds .expanded
@@ -1047,12 +1049,11 @@ html.is-desktop-device .contact-action-tel:not(.contact-action-call) { display: 
    happened yet so they never get this control. Click toggles
    client_events.confirmed (see toggleClientEventConfirmed in js/clients.js). */
 .timeline-confirm-btn {
-  flex-shrink: 0; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: #fff; cursor: pointer;
+  flex-shrink: 0; width: 44px; height: 44px; margin: -11px; border: none; background: none; position: relative; isolation: isolate; color: #fff; cursor: pointer;
   display: flex; align-items: center; justify-content: center; padding: 0;
 }
-@media (hover: hover) { .timeline-confirm-btn:hover { border-color: var(--success); } }
-.timeline-confirm-btn.confirmed { background: var(--success); border-color: var(--success); }
+@media (hover: hover) { .timeline-confirm-btn:hover::before { border-color: var(--success); } }
+.timeline-confirm-btn.confirmed::before { background: var(--success); border-color: var(--success); }
 
 /* Dashed divider between future-dated events (clustered above, since the
    list sorts newest-first) and today-or-past events below — only rendered
@@ -1250,12 +1251,21 @@ html.is-mobile-device .dial-tab.active { touch-action: none; }
    panels reusing the same .page-header-menu shell as #dialTabArchiveMenu
    above; .dial-tab-options-back is the row that returns to it. */
 .dial-tab-options-back { border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; margin-bottom: 2px; }
-.dial-tab-transfer-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+.dial-tab-transfer-list { display: flex; flex-direction: column; gap: 2px; }
 .dial-tab-transfer-option {
   display: block; width: 100%; text-align: left; padding: 8px; border: none; background: none;
   border-radius: 6px; font-size: 13px; color: var(--text); cursor: pointer; font-family: inherit;
 }
 @media (hover: hover) { .dial-tab-transfer-option:hover { background: var(--gold-soft); } }
+.dial-tab-transfer-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; }
+.dial-tab-transfer-option small { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
+.dial-tab-transfer-option[hidden] { display: none; }
+.dial-tab-transfer-search { width: 100%; box-sizing: border-box; margin: 2px 0 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+.dial-tab-transfer-opts { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+.dial-tab-transfer-opts.hidden, .dial-tab-transfer-confirm.hidden { display: none; }
+.dial-tab-transfer-confirm { padding: 8px; font-size: 13.5px; display: flex; flex-direction: column; gap: 10px; }
+.dial-tab-transfer-confirm-btns { display: flex; gap: 8px; }
+.dial-tab-transfer-confirm-btns .btn { flex: 1; min-height: 44px; }
 .dial-tab-transfer-empty { padding: 8px; font-size: 12.5px; color: var(--text-muted); }
 /* The tab's current owner, shown non-clickable at the top of the Transfer
    list (see openTransferMenu in js/dials.js) — same padding/font as a real
@@ -2067,7 +2077,8 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .callback-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .callback-field-time { font-weight: 600; }
 /* Profile's "Callbacks for today" rows: ones more than 30 minutes ago are dimmed. */
-.callback-row.is-past { opacity: .55; }
+.callback-row.is-past { opacity: .8; }
+.callback-row.is-past .upcoming-event-meta { color: #8a5a00; }
 
 /* Top-of-app callback banner (js/callbackBanners.js): ONE compact line, expands on tap. */
 .callback-banners { padding: 0 12px; }
@@ -2086,3 +2097,28 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 @media (prefers-color-scheme: dark) { .callback-banner.soon { background: #3a1f1c; } }
 .call-panel-who { min-width: 0; flex: 1 1 auto; }
 .call-panel-meta { flex: 0 0 auto; font-size: 12px; }
+
+/* Toast (js/notice.js showToast): muted slate, errors in a quiet red */
+.ws-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translate(-50%, 12px); max-width: min(92vw, 420px);
+  background: #2f3b4a; color: #fff; padding: 11px 16px; border-radius: 10px; font-size: 14px; line-height: 1.35; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+  opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 400; }
+.ws-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.ws-toast.bad { background: #8a3b36; }
+
+/* Calls popups (callback time, confirm intro time, Open Calendly): muted slate, same family as the Calls tone tokens, not saturated blue / yellow */
+#callbackTimeModal .btn:not(.secondary):not(.danger), #introCallTimeModal .btn:not(.secondary):not(.danger), #introCallPopup .btn.yellow,
+#noticeModal .btn:not(.secondary):not(.danger) { background: var(--tone); color: #fff; }
+@media (hover: hover) { #callbackTimeModal .btn:not(.secondary):not(.danger):hover, #introCallTimeModal .btn:not(.secondary):not(.danger):hover, #introCallPopup .btn.yellow:hover { background: var(--tone-hover); } }
+
+/* Calls search: one clear button (ours), the browser's own is hidden; a match count under it */
+#dialsSearchInput::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+.dials-search-count { font-size: 13px; color: var(--text-muted); padding: 0 4px 6px; }
+.dials-search-count.hidden { display: none; }
+
+/* Reports table: wide at 375px, so soft shadows on whichever edge has more to scroll to */
+#reportsTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background: linear-gradient(to right, var(--surface) 30%, rgba(255,255,255,0)) left center / 28px 100% no-repeat local,
+              linear-gradient(to left, var(--surface) 30%, rgba(255,255,255,0)) right center / 28px 100% no-repeat local,
+              radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.16), rgba(0,0,0,0)) left center / 10px 100% no-repeat scroll,
+              radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.16), rgba(0,0,0,0)) right center / 10px 100% no-repeat scroll; }
+#reportsTableWrap table { min-width: 560px; }

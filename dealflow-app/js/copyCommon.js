@@ -2,7 +2,14 @@
 import { escapeHtml } from "./clientForm.js";
 
 export const $ = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
-export const msg = (e) => (e && (e.message || e.details || e.hint)) || "Something went wrong";
+// Never show raw SQL / server wording to a person: timeouts and database errors get a plain sentence.
+export const msg = (e) => {
+  const t = String((e && (e.message || e.details || e.hint)) || e || "");
+  if (/statement timeout|canceling statement|timeout|timed out/i.test(t)) return "That took longer than the server allows. Nothing was lost. Press Retry to continue.";
+  if (/failed to fetch|networkerror|load failed|network request/i.test(t)) return "No connection to the server. Check your internet and press Retry.";
+  if (/violates|syntax error|relation .* does not exist|column .* does not exist|permission denied|\bpgrst\d+|\bselect\b.*\bfrom\b/i.test(t)) return "The server could not finish that. Press Retry; if it keeps failing, tell an admin.";
+  return t || "Something went wrong";
+};
 export const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 // ---------------------------------------------------------------------------

@@ -36,13 +36,13 @@ export function mountAiStatusCard(host) {
           <div class="ad-row"><button type="button" class="btn secondary small" id="aiCopy">Copy setup command</button></div><div class="ad-muted" id="aiCopyNote"></div></li>
         <li>Wait about 15 seconds. The line above turns green: "Claude connected".</li>
       </ol>
-      <p class="ad-muted">To switch the chat off, set <code>ai_chat_enabled</code> to anything but <code>true</code> in app_secrets. Details: docs/AI_WORKER.md.</p>
+      <p class="ad-muted">Need to switch the chat off or fix the connection? Ask the developer who set up the server.</p>
     </details>`;
   host.appendChild(card);
   const stat = card.querySelector("#aiCardStat");
   card.querySelector("#aiCopy").onclick = async (e) => {
     const cmd = await fetchSetupCommand(), note = card.querySelector("#aiCopyNote");
-    if (!cmd) { note.textContent = "The setup command isn't stored yet. Ask whoever set up the server (docs/AI_WORKER.md)."; return; }
+    if (!cmd) { note.textContent = "The setup command isn't stored yet. Ask the developer who set up the server."; return; }
     try { await navigator.clipboard.writeText(cmd); e.target.textContent = "Copied"; note.textContent = ""; } catch { note.textContent = "Couldn't copy. Allow clipboard access and try again."; }
   };
   async function refresh() {

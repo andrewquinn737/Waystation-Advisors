@@ -17,9 +17,14 @@ def _req(tok, path, body=None, method=None, raw=False, _try=0):
             d = f.read()
             return d if raw else json.loads(d or b"null")
     except urllib.error.HTTPError as e:
-        if e.code == 429 and _try < 6:     # Management API throttle (parallel suites): back off and retry
+        if (e.code in (429, 502, 503, 504, 544)) and _try < 6:     # Management API throttle / pooler timeout (parallel suites, busy TEST db): back off and retry
             import time; time.sleep(2 * (_try + 1)); return _req(tok, path, body, method, raw, _try + 1)
         raise RuntimeError(f"{e.code} {e.read().decode()[:2000]}")
+    except (TimeoutError, urllib.error.URLError) as e:
+        # a read timeout may mean the server DID run it: only repeat plain reads
+        if _try < 3 and isinstance(body, dict) and str(body.get("query", "")).lstrip().lower().startswith("select") and not re.search(r"\b(set_config|nextval|insert|update|delete)\b", str(body.get("query", "")), re.I):
+            import time; time.sleep(3 * (_try + 1)); return _req(tok, path, body, method, raw, _try + 1)
+        raise
 
 _WRITE = re.compile(r"\b(insert|update|delete|create|alter|drop|truncate|grant|revoke|comment|copy|call|do|vacuum|reindex|cluster|refresh|lock|security|nextval|setval|pg_terminate_backend|pg_cancel_backend)\b|\b(http_\w+|net\.\w+)|\b(un)?schedule\s*\(", re.I)
 

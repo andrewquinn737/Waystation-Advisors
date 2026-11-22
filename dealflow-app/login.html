@@ -113,7 +113,9 @@
           saved = (await supabase.auth.getSession()).data.session;
         }
         if (!saved) throw new Error("This device can't save your sign-in (its browser storage is full or blocked). Close other tabs, clear this site's data in Settings, and try again.");
-        window.location.href = "profile.html";
+        let next = "profile.html";
+        try { const n = sessionStorage.getItem("login_next") || ""; sessionStorage.removeItem("login_next"); if (/^[a-z]+\.html(\?[^#]*)?$/i.test(n) && !/^(login|index)\.html/i.test(n)) next = n; } catch { /* storage blocked */ }
+        window.location.href = next;
       } catch (err) {
         errorBox.classList.remove("hidden");
         errorBox.style.background = "#fdecec";

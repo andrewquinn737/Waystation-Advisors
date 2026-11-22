@@ -35,3 +35,7 @@ export async function findTeamLead(teamId, columns = "id, email, calendly_link")
   const { data: lead } = await supabase.from("profiles").select(columns).eq("id", extra[0].profile_id).eq("role", "team_lead").maybeSingle();
   return lead || null;
 }
+
+// The AI Assistant account is a worker, not a person: it never appears in a person picker (assign, transfer, accounts, reports).
+export const isAiAssistant = (p) => (p?.full_name || "").trim() === "AI Assistant";
+export const withoutAi = (rows) => (rows || []).filter((p) => !isAiAssistant(p));

@@ -4,6 +4,7 @@
 //          in the highest group it qualifies for. dials.js owns the list data and the company card; this file owns the sheet.
 import { supabase } from "./supabaseClient.js";
 import { escapeHtml as esc } from "./clientForm.js";
+import { skeletonSheetHtml } from "./placeholders.js";
 
 const TZ = "America/Denver";
 const PAGE = 100; // rows rendered per group before "Show more"
@@ -37,9 +38,9 @@ function callbackText(iso) {
 }
 
 export function initDialsHome({ profile, getList, getDials, openCard, isSheet, isHidden, rowIcons, wireIcons }) {
-  let tasks = [], taskDials = [], followErr = "", queue = null, queueErr = false;
+  let tasks = [], taskDials = [], followErr = "", firstLoadDone = false, queue = null, queueErr = false;
   let nextByDial = new Map(); // dial_id -> its next upcoming step (for group 8 "In sequence")
-  let emptyText = "You're all caught up.", groups = [];
+  let emptyText = "You're all caught up.", groups = [], allLists = false, otherCount = 0; // follow-ups from other tabs are hidden unless allLists
   const tz = validTz(profile?.timezone) ? profile.timezone : TZ;
   const wrap = () => $("dialsTableWrap");
   const openState = new Map(), shown = new Map(); // group n -> open? / rows rendered
@@ -48,7 +49,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   const rank = (t) => (t.kind === "reply" ? 0 : 1);
   async function loadFollowups() {
     const { data, error } = await supabase.from("my_followups").select("*").limit(500);
-    if (error) { followErr = "Couldn't load follow-ups."; if (isSheet()) renderSheet(); return; }
+    if (error) { followErr = "Couldn't load follow-ups."; firstLoadDone = true; if (isSheet()) renderSheet(); return; }
     followErr = "";
     tasks = (data || []).filter((t) => KIND[t.kind] && !["done", "skipped"].includes(t.status) && (!t.owner_id || t.owner_id === profile.id))
       .map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || String(a.t.due_on).localeCompare(String(b.t.due_on)) || a.i - b.i).map((x) => x.t);
@@ -65,6 +66,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     nextByDial = new Map();
     for (const u of up || []) if (!nextByDial.has(u.dial_id)) nextByDial.set(u.dial_id, u);
     tasks = tasks.filter((t) => byId.has(t.dial_id));
+    firstLoadDone = true;
     if (isSheet()) renderSheet();
   }
 
@@ -83,6 +85,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     return 0;
   }
   function buildGroups() {
+    otherCount = 0;
     const today = localDate(tz), list = getList(), mine = list ? getDials().filter((d) => d.list_id === list.id) : [];
     const cur = new Map(mine.map((d) => [d.id, d])), buckets = GROUPS.map(() => []), placed = new Set();
     // groups 1-2: one row per company, from its most urgent open task (replies first)
@@ -91,6 +94,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     const dialOf = new Map(taskDials.map((d) => [d.id, d]));
     for (const [id, ts] of per) {
       const d = cur.get(id) || dialOf.get(id); if (!d) continue;
+      if (list && !allLists && d.list_id !== list.id) { otherCount++; continue; } // Past due / Due today belong to the tab you are in
       const late = ts.filter((t) => t.due_on && t.due_on < today), pool = late.length ? late : ts;
       const t = pool.slice().sort((a, b) => rank(a) - rank(b) || String(a.due_on).localeCompare(String(b.due_on)))[0];
       buckets[late.length ? 0 : 1].push({ d, t, late: late.length ? dayDiff(today, t.due_on) : 0 });
@@ -174,7 +178,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   function bodyHtml(g) {
     const n = Math.min(g.items.length, shown.get(g.n) || PAGE), more = g.items.length - n;
     return g.items.slice(0, n).map((it) => rowHtml(g, it)).join("") +
-      (more > 0 ? `<button type="button" class="dh-more" data-more="${g.n}">Show ${Math.min(PAGE, more)} more (${more} left)</button>` : "");
+      (more > 0 ? `<button type="button" class="dh-more" data-more="${g.n}">Show ${Math.min(PAGE, more)} more</button>` : "");
   }
   function sectionHtml(g) {
     const open = isOpen(g);
@@ -186,9 +190,12 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   function renderSheet(empty) {
     if (typeof empty === "string") emptyText = empty;
     const w = wrap(); if (!w) return;
+    // Until the follow-ups are in, groups 1-2 are unknown: show the skeleton instead of a sheet that then jumps (unless there is no list at all).
+    if (!firstLoadDone && getList()) { w.innerHTML = skeletonSheetHtml(); return; }
     groups = buildGroups();
     const err = followErr ? `<div class="dh-empty">${esc(followErr)} <button type="button" class="dh-link" data-retry>Retry</button></div>` : "";
-    w.innerHTML = err + (groups.length ? groups.map(sectionHtml).join("") : `<div class="dh-empty dh-done">${esc(emptyText)}</div>`);
+    const scope = otherCount || allLists ? `<div class="dh-scope">${allLists ? "Follow-ups from all your lists" : `${otherCount} follow-up${otherCount === 1 ? "" : "s"} due in other lists`} <button type="button" class="dh-link" data-scope>${allLists ? "Only this tab" : "Show all lists"}</button></div>` : "";
+    w.innerHTML = err + scope + (groups.length ? groups.map(sectionHtml).join("") : followErr ? "" : `<div class="dh-empty dh-done">${esc(emptyText)}</div>`);
     mountRows(w);
   }
   // Order of the rows on screen (prev/next in the company card follows it).
@@ -200,6 +207,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   }
   const cardClick = (e) => {
     if (e.target.closest("[data-retry]")) return loadFollowups();
+    if (e.target.closest("[data-scope]")) { allLists = !allLists; return renderSheet(); }
     if (e.target.closest("[data-stop], .contact-actions")) return;
     const more = e.target.closest("[data-more]");
     if (more) { const n = +more.dataset.more; shown.set(n, (shown.get(n) || PAGE) + PAGE); return redrawGroup(n); }
@@ -258,5 +266,6 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   };
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadFollowups(); loadQueue(); } });
   loadFollowups(); loadQueue();
+  setTimeout(() => { if (!firstLoadDone) { firstLoadDone = true; if (isSheet()) renderSheet(); } }, 6000); // never leave the skeleton up for good
   return api;
 }

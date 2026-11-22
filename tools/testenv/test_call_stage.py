@@ -37,6 +37,7 @@ def run():
 
     # outcome link
     lid = str(uuid.uuid4())
+    q("delete from clients where source_dial_id in (select d.id from dials d join dial_lists l on l.id = d.list_id where l.name like 'TEST-CALL %')")  # intro-call dials make a client: remove it with the list
     q("delete from dial_lists where name like 'TEST-CALL %'")
     q(f"insert into dial_lists (id, name, dial_type, created_by) values ('{lid}', 'TEST-CALL {lid[:6]}', 'seller', '{uid(CALEB)}')")
     did = q(f"insert into dials (list_id, created_by, company_name, full_name, company_phone) values ('{lid}', '{uid(CALEB)}', 'TEST-CALL Co', 'Pat', '(502) 419-6436') returning id")[0]["id"]
@@ -72,6 +73,7 @@ def run():
         s = q(f"select summary from calls where id='{c2}'")[0]["summary"]
         if s: break
     check("catch-up job summarizes a 1-line call 2 days old", bool(s), s)
+    q("delete from clients where source_dial_id in (select d.id from dials d join dial_lists l on l.id = d.list_id where l.name like 'TEST-CALL %')")  # intro-call dials make a client: remove it with the list
     q(f"delete from callback_tasks where dial_id='{did}'"); q(f"delete from calls where dial_id='{did}'"); q("delete from dial_lists where name like 'TEST-CALL %'")
 
 def fn(name, body):

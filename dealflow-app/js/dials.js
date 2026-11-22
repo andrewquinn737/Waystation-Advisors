@@ -1,4 +1,4 @@
-import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
@@ -29,7 +29,8 @@ import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotic
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
 import { skeletonListHtml, skeletonSheetHtml } from "./placeholders.js";
 import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
-import { showNotice } from "./notice.js";
+import { showNotice, showToast } from "./notice.js";
+import { msg as friendlyMsg } from "./copyCommon.js";
 import { keepRecordingForDial, discardRecordingsForDial, signedRecordingUrl } from "./callRecordings.js";
 import { initDialsHome } from "./dialsHome.js";
 import { seqBadgeHTML, seqPanelHTML, wireSeqPanel, mountMandatePicker, defaultMandateForBuyer, prepareList, describePrepare, runSequenceSetupFlow } from "./copyReview.js";
@@ -50,6 +51,7 @@ const isTeamLead = profile?.role === "team_lead";
 initDefaultToSelf(profile.id);
 
 let allLists = []; // every dial_lists row (all types/statuses)
+let dialsLoadFailed = false; // the list's dials could not be loaded: show a Retry state, never "all caught up"
 let dials = []; // dials belonging to the currently selected tab
 // Buyer support was removed from the UI (the app was sellers-only for a
 // while) but the `dial_lists.dial_type` column never went away — it's now
@@ -1034,7 +1036,7 @@ async function openTransferMenu() {
   // sideways to a third account.
   const list = filteredLists().find((l) => l.id === archiveMenuTabId);
   const isOwnTab = !list || list.created_by === profile.id;
-  let query = supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true });
+  let query = supabase.from("profiles").select("id, full_name, role").order("full_name", { ascending: true });
   if (isTeamLead) {
     query = query.or(`role.eq.admin,and(role.in.(intern,independent_lead),team_id.in.(${teamIdsOf(profile).join(",")})),id.eq.${profile.id}`);
   }
@@ -1045,7 +1047,7 @@ async function openTransferMenu() {
     els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">Couldn't load accounts.</div>`;
     return;
   }
-  const targets = data || [];
+  const targets = withoutAi(data);
   if (!targets.length) {
     els.dialTabTransferList.innerHTML = `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`;
   } else {
@@ -1063,19 +1065,29 @@ async function openTransferMenu() {
     const ownerHTML = ownerTarget
       ? `<div class="dial-tab-transfer-owner">${escapeHtml(ownerTarget.full_name)} (tab owner)</div><div class="dial-tab-transfer-divider"></div>`
       : "";
-    const optionsHTML = otherTargets.length
-      ? otherTargets
-          .map((p) => `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}">${escapeHtml(p.full_name)}${p.id === profile.id ? " (you)" : ""}</button>`)
-          .join("")
-      : `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`;
-    els.dialTabTransferList.innerHTML = ownerHTML + optionsHTML;
-    els.dialTabTransferList.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
-      btn.addEventListener("click", () => completeTransfer(btn.dataset.id));
+    const ROLE = { admin: "admin", team_lead: "team lead", intern: "intern", independent_lead: "lead" };
+    const option = (p) => `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}" data-name="${escapeHtml(p.full_name || "")}"><span>${escapeHtml(p.full_name)}${p.id === profile.id ? " (you)" : ""}</span><small>${ROLE[p.role] || ""}</small></button>`;
+    const searchHTML = otherTargets.length > 6 ? `<input type="search" class="dial-tab-transfer-search" placeholder="Search people" aria-label="Search people" autocomplete="off">` : "";
+    els.dialTabTransferList.innerHTML = `${searchHTML}<div class="dial-tab-transfer-confirm hidden"></div><div class="dial-tab-transfer-opts">${ownerHTML}${otherTargets.length ? otherTargets.map(option).join("") : `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`}</div>`;
+    const confirmBox = els.dialTabTransferList.querySelector(".dial-tab-transfer-confirm");
+    const optsBox = els.dialTabTransferList.querySelector(".dial-tab-transfer-opts");
+    els.dialTabTransferList.querySelector(".dial-tab-transfer-search")?.addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      optsBox.querySelectorAll(".dial-tab-transfer-option").forEach((b) => { b.hidden = !!q && !b.dataset.name.toLowerCase().includes(q); });
+    });
+    // Two steps so a stray tap never hands a whole tab to the wrong person.
+    optsBox.querySelectorAll(".dial-tab-transfer-option").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        optsBox.classList.add("hidden"); confirmBox.classList.remove("hidden");
+        confirmBox.innerHTML = `<div>Send this tab to <b>${escapeHtml(btn.dataset.name)}</b>? They get all its leads.</div><div class="dial-tab-transfer-confirm-btns"><button type="button" class="btn secondary" data-no>Cancel</button><button type="button" class="btn secondary" data-yes>Send</button></div>`;
+        confirmBox.querySelector("[data-no]").addEventListener("click", () => { confirmBox.classList.add("hidden"); optsBox.classList.remove("hidden"); });
+        confirmBox.querySelector("[data-yes]").addEventListener("click", () => completeTransfer(btn.dataset.id, btn.dataset.name));
+      });
     });
   }
 }
 
-async function completeTransfer(targetId) {
+async function completeTransfer(targetId, targetName) {
   const tabId = archiveMenuTabId;
   if (!tabId) return;
   els.dialTabTransferMenu.classList.add("hidden");
@@ -1103,6 +1115,7 @@ async function completeTransfer(targetId) {
 
   archiveMenuTabId = null;
   currentListId = null;
+  showToast(`Sent to ${targetName || "them"}.`);
   await loadLists();
 }
 
@@ -1607,6 +1620,7 @@ const MAX_IMPORT_FILES = 10;
 const importWizard = createImportWizard({
   container: document.getElementById("importDialsPreview"),
   profile, isTeamLead, teamIdsOf,
+  getMandate: () => importMandate.get(), type: () => currentType,
   listNames: () => new Set(allLists.filter((l) => l.dial_type === currentType && !l.deleted_at).map((l) => (l.name || "").trim().toLowerCase())),
   onChange: (s) => {
     els.importDialsImportBtn.disabled = !s.readyFiles || s.loading || !s.rows;
@@ -1653,6 +1667,10 @@ els.menuImportBtn.addEventListener("click", () => {
 els.importDialsCancelBtn.addEventListener("click", () => {
   if (importWizard.isBusy()) return; // an import is running: let it finish
   els.importDialsModal.classList.add("hidden");
+});
+els.importDialsModal.addEventListener("click", (e) => { if (e.target.closest(".cr-mandate-btn")) importWizard.refreshMailboxWarning(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !els.importDialsModal.classList.contains("hidden") && !importWizard.isBusy() && !document.querySelector("#noticeModal:not(.hidden)")) els.importDialsModal.classList.add("hidden");
 });
 // The visible "Choose CSV files" button just proxies to the real (hidden)
 // file input (consistent look on desktop and mobile pickers). Shared by the
@@ -1718,7 +1736,7 @@ els.importDialsImportBtn.addEventListener("click", async () => {
       sortOrderStart: allLists.filter((l) => l.dial_type === currentType && l.status === "current").length,
     });
   } catch (err) {
-    els.importDialsError.textContent = err.message || "Could not import that CSV.";
+    els.importDialsError.textContent = friendlyMsg(err) || "Could not import that CSV.";
     els.importDialsError.classList.remove("hidden");
     els.importDialsCancelBtn.disabled = false;
     els.importDialsImportBtn.disabled = false;
@@ -2353,6 +2371,8 @@ function openCardFrom(set, index) {
   renderDialModal();
 }
 
+const loadFailedHTML = () => `<div class="empty-state dials-load-failed" role="alert"><p>Couldn't load this list. Nothing is lost.</p><button type="button" class="btn secondary" data-reload-dials>Retry</button></div>`;
+els.dialsTableWrap.addEventListener("click", (e) => { if (e.target.closest("[data-reload-dials]")) loadDials(); });
 async function loadDials() {
   if (dialSearchQuery.trim() && (await loadSearchPool())) {
     renderDialsTable();
@@ -2371,15 +2391,16 @@ async function loadDials() {
   const cacheKey = "dials_" + currentListId;
   const { data, error } = await supabase.from("dials").select("*").eq("list_id", currentListId);
   if (error) {
-    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    if (!isNetworkError(error)) { dials = []; dialsLoadFailed = true; renderDialsTable(); return; } // a retry state, never "all caught up"
     const cached = cacheGet(cacheKey);
-    if (!cached) return showOfflineNotice(false);
+    if (!cached) { dialsLoadFailed = true; renderDialsTable(); return showOfflineNotice(false); }
     dials = cached;
     showOfflineNotice(true);
     renderDialsTable();
     return;
   }
   hideOfflineNotice();
+  dialsLoadFailed = false;
   // Alphabetical A-Z by name (case/locale-insensitive) rather than
   // import/creation order.
   dials = (data || []).slice().sort((a, b) => (a.full_name || "").localeCompare(b.full_name || "", undefined, { sensitivity: "base" }));
@@ -2432,6 +2453,9 @@ function updateProspectCount(count) {
 
 function renderDialsTable() {
   home?.refreshEmails();
+  const sc = document.getElementById("dialsSearchCount");
+  if (sc) { const q = dialSearchQuery.trim(); sc.classList.toggle("hidden", !q); if (q) { const n = visibleDials().length; sc.textContent = n === 1 ? "1 match" : `${n} matches`; } }
+  if (dialsLoadFailed && currentListId) { els.dialsTableWrap.innerHTML = loadFailedHTML(); updateProspectCount(0); return; }
   if (home && sheetMode()) {
     home.renderSheet(!currentListId ? (simpleUi ? "No lists yet. Your team lead will add one." : "No lists yet for this category — tap + next to the tabs to create one.")
       : dials.length === 0 ? (simpleUi ? "No companies in this list yet." : `No dials in this list yet — use the arrow next to "Dials" and tap "Add new".`) : "You're all caught up.");
@@ -2651,8 +2675,17 @@ function wireOutcomeButtons() {
     wrap.querySelectorAll("button").forEach((x) => (x.disabled = true));
     const target = autodialTarget(value); // the Autodial setting (if on) still picks its own next company
     if (target) primeAudio();
+    // Remember where the dial was, so backing out of the "Confirm the scheduled time" step can put it back.
+    introRevert = value === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? { id: dial.id, status: dial.contact_status || "uncontacted" } : null;
     const saved = await updateDialStatus(value);
-    if (!saved) return renderDialModal(); // error shown by updateDialStatus; re-enable the buttons
+    if (!saved) { // error shown by updateDialStatus; re-enable the buttons, then put the error back (the re-render clears it)
+      const why = els.dialModalError.textContent;
+      renderDialModal();
+      els.dialModalError.textContent = `The outcome was not saved. Nothing changed, so tap it again.${why ? ` (${friendlyMsg(why)})` : ""}`;
+      els.dialModalError.classList.remove("hidden");
+      els.dialModalError.scrollIntoView({ block: "nearest" });
+      return;
+    }
     if (value === "intro_call_scheduled") return handleScheduleIntroCallFromDial(dial); // the existing intro-call flow
     if (target) return runAutodial(target);
     const def = OUTCOMES.find((o) => o.status === value);
@@ -3064,7 +3097,7 @@ async function updateDialStatus(newStatus) {
   if (pendingTask) {
     const outcome = { no_response: "no_answer", unable_to_contact: "no_answer", busy_callback: "busy_callback", callback_interested: "talked_callback", not_interested: "not_interested", intro_call_scheduled: "intro_booked" }[newStatus] || newStatus;
     const { error: taskErr } = await supabase.rpc("complete_sequence_task", { p_task_id: pendingTask.id, p_outcome: outcome, p_note: null, p_skip: false });
-    if (taskErr) console.error("complete_sequence_task failed", taskErr); else { home.taskDone(pendingTask.id); taskClosed = pendingTask.id; }
+    if (taskErr) { console.error("complete_sequence_task failed", taskErr); showToast("The follow-up task could not be closed. Refresh and check the task list.", "bad"); } else { home.taskDone(pendingTask.id); taskClosed = pendingTask.id; }
   }
   const data = { contact_status: newStatus };
   // The weekly survey's "Owners talked to" counts dials by called_today_date: stamp it when the outcome means an owner was reached
@@ -3110,7 +3143,7 @@ async function updateDialStatus(newStatus) {
   // earlier day or was logged by someone else (a team lead re-categorizing an
   // intern's dial) — otherwise the buyer reports keep the old category for it.
   const { error: syncErr } = await supabase.rpc("sync_latest_call_status", { p_dial_id: currentDial.id, p_status: newStatus });
-  if (syncErr) console.error("sync_latest_call_status failed", syncErr);
+  if (syncErr) { console.error("sync_latest_call_status failed", syncErr); showToast("The outcome was saved, but the call log did not update. Reports may be off until you retry.", "bad"); }
 
   renderDialModal();
   renderDialsTable();
@@ -3531,9 +3564,8 @@ async function createClientRecordFromDial(dial) {
 // client record itself finally gets created (see createClientFromDial),
 // bundled together with logging that client's very first Timeline entry, in
 // one step. Nothing about this client exists in the database until this
-// modal is actually confirmed. No cancel option — the booking is already
-// made in Calendly regardless, so backing out here (there's nothing to
-// "undo") just means reopening this dial's "Schedule intro call" again later
+// modal is actually confirmed. Cancel / Esc puts the dial back to its status from before the tap. The booking is already
+// made in Calendly regardless, so reopening this dial's "Schedule intro call" again later
 // to finish recording it.
 // Guards #introCallTimeConfirmBtn against accumulating more than one live
 // click listener if this modal is ever opened again before a previous
@@ -3543,6 +3575,7 @@ async function createClientRecordFromDial(dial) {
 // on Confirm re-runs every still-attached one, each independently creating
 // its own client + intro_call event for what was really only one booking.
 let introCallTimeConfirmCleanup = null;
+let introRevert = null; // { id, status }: the dial's status before "Intro call booked" was tapped
 
 function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false } = {}) {
   introCallTimeConfirmCleanup?.();
@@ -3631,9 +3664,31 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false 
   const cleanup = () => {
     modal.classList.add("hidden");
     confirmBtn.removeEventListener("click", onConfirmClick);
+    cancelBtn?.removeEventListener("click", onCancel);
+    modal.removeEventListener("click", onBackdrop);
+    document.removeEventListener("keydown", onKey);
     introCallTimeConfirmCleanup = null;
   };
+  // Cancel / Esc / tap outside: nothing was saved, so the dial goes back to what it was before "Intro call booked" was tapped.
+  const onCancel = async () => {
+    cleanup();
+    const back = !createdClient && !onConfirmed && introRevert?.id === dial.id && dial.contact_status === "intro_call_scheduled" ? introRevert : null;
+    introRevert = null;
+    if (!back) return;
+    const { error } = await supabase.from("dials").update({ contact_status: back.status }).eq("id", dial.id);
+    if (error) return showToast("The status could not be set back. Change it from the outcome buttons.", "bad");
+    dial.contact_status = back.status;
+    const idx = dials.findIndex((d) => d.id === dial.id); if (idx !== -1) dials[idx].contact_status = back.status;
+    renderDialModal(); renderDialsTable();
+    showToast("No time was saved, so the intro call is not booked.");
+  };
+  const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+  const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+  const cancelBtn = document.getElementById("introCallTimeCancelBtn");
   confirmBtn.addEventListener("click", onConfirmClick);
+  cancelBtn?.addEventListener("click", onCancel);
+  modal.addEventListener("click", onBackdrop);
+  document.addEventListener("keydown", onKey);
   introCallTimeConfirmCleanup = cleanup;
 }
 
@@ -3933,7 +3988,7 @@ if (isAdmin || isTeamLead) {
       // fetch a teammate's tabs/dials in the first place, filter or no filter.
       if (isAdmin) {
         const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
-        return error ? [] : data || [];
+        return error ? [] : withoutAi(data);
       }
       return loadTeamScopeAccounts(profile);
     },
@@ -3945,7 +4000,7 @@ if (isAdmin || isTeamLead) {
     getTeams: groupsByTeam(profile, isAdmin)
       ? async () => {
           const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
-          return error ? [] : data || [];
+          return error ? [] : withoutAi(data);
         }
       : undefined,
     onChange: renderTabs,

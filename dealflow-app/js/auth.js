@@ -9,7 +9,12 @@ import { defaultTimezone } from "./eventTime.js";
 // Why the app is sending someone back to the login page — shown there (login.html reads it) so a bounce is
 // never silent, and so login.html knows NOT to auto-forward into the app again (that was the endless loop).
 function goToLogin(reason) {
-  try { sessionStorage.setItem("login_reason", reason || "Please sign in again."); } catch { /* storage blocked */ }
+  try {
+    sessionStorage.setItem("login_reason", reason || "Please sign in again.");
+    // remember the page (and ?dial= / ?client= / ?from= link) that was asked for, so signing in lands there, not on Profile
+    const here = window.location.pathname.split("/").pop() + window.location.search;
+    if (/^[a-z]+\.html(\?|$)/i.test(here) && !/^(login|index)\.html/i.test(here)) sessionStorage.setItem("login_next", here);
+  } catch { /* storage blocked */ }
   window.location.href = "login.html";
 }
 
@@ -264,7 +269,7 @@ function navItems(role) {
 function ensureSimpleCss() {
   if (document.getElementById("simpleCss")) return;
   const l = document.createElement("link");
-  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=5";
+  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=7";
   document.head.appendChild(l);
 }
 
@@ -296,6 +301,27 @@ export function renderNav(profile) {
   `;
 
   document.getElementById("signOutBtn").addEventListener("click", signOut);
+  watchInboxBadge(profile);
+}
+
+// A count on the Inbox tab: unread mail in the mailboxes this person owns and can answer from (not other people's read-only ones).
+function setInboxBadge(n) {
+  // a data attribute drawn by CSS (::after), so the link's own text stays exactly "Inbox"
+  document.querySelectorAll('#topnav a[href="messages.html"]').forEach((a) => {
+    if (n > 0) { a.dataset.unread = n > 99 ? "99+" : String(n); a.setAttribute("aria-label", `Inbox, ${n} unread`); }
+    else { delete a.dataset.unread; a.removeAttribute("aria-label"); }
+  });
+}
+async function watchInboxBadge(profile) {
+  window.addEventListener("inbox-unread", (e) => setInboxBadge(Number(e.detail) || 0));
+  try {
+    const { data: acc } = await supabase.from("email_accounts").select("id").eq("owner_id", profile.id);
+    const ids = (acc || []).map((a) => a.id);
+    if (!ids.length) return;
+    const { count } = await supabase.from("email_messages").select("id", { count: "exact", head: true })
+      .eq("direction", "inbound").eq("is_read", false).eq("is_system", false).in("account_id", ids);
+    setInboxBadge(count || 0);
+  } catch { /* a missing badge is fine */ }
 }
 
 export function showError(el, err) {

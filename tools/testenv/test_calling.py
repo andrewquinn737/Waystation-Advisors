@@ -20,6 +20,7 @@ def fn(name, body):
 
 def run():
     lid = str(uuid.uuid4())
+    q("delete from clients where source_dial_id in (select d.id from dials d join dial_lists l on l.id = d.list_id where l.name like 'TEST-CALLING %')")  # intro-call dials make a client: remove it with the list
     q(f"delete from dial_lists where name like 'TEST-CALLING %'")
     q(f"insert into dial_lists (id, name, dial_type, created_by) values ('{lid}', 'TEST-CALLING {lid[:6]}', 'seller', '{uid(CALEB)}')")
     ids = {}
@@ -41,6 +42,7 @@ def run():
     # the weekly survey's own query (profile.js) now counts them
     c, rows = api(CALEB, "GET", f"/dials?select=id&created_by=eq.{uid(CALEB)}&list_id=eq.{lid}&contact_status=in.(not_interested,callback_interested,busy_callback,intro_call_scheduled)&called_today_date=gte.{today}&called_today_date=lte.{today}")
     check("survey query: 'Owners talked to' = 4", c == 200 and len(rows) == 4, (c, rows))
+    q("delete from clients where source_dial_id in (select d.id from dials d join dial_lists l on l.id = d.list_id where l.name like 'TEST-CALLING %')")  # intro-call dials make a client: remove it with the list
     q("delete from dial_lists where name like 'TEST-CALLING %'")
 
     # CALL LOCK: a non-allowlisted number is refused before any Telnyx call; the test number gets a token

@@ -49,9 +49,9 @@
 #cpTotals { display: none; }
 #cpList { margin-bottom: 12px; }
 #cpToggleDone { margin-top: 4px; }
-.cp-table { --cp-cols: minmax(0, 1fr) 104px repeat(6, 60px) 148px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.cp-table { --cp-cols: minmax(0, 1fr) 104px 60px 76px repeat(4, 60px) 148px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
 .cp-head, .cp-row { display: grid; grid-template-columns: var(--cp-cols); column-gap: 8px; align-items: center; padding: 0 14px; }
-.cp-head { min-height: 38px; font-size: 12px; font-weight: 600; color: var(--text-muted-strong); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.cp-head { min-height: 44px; font-size: 12px; line-height: 1.15; font-weight: 600; color: var(--text-muted-strong); border-bottom: 1px solid var(--border); }
 .cp-head .num { text-align: right; }
 .cp-row { min-height: 64px; padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .cp-row:last-child { border-bottom: 0; }
@@ -74,10 +74,12 @@
 .cp-act { display: grid; grid-template-columns: minmax(0, 1fr) 36px; column-gap: 8px; align-items: center; justify-items: end; padding-left: 20px; }
 .cp-act .btn { width: 100%; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; line-height: 32px; text-align: center; }
 .cp-more { width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-muted-strong); font-size: 18px; line-height: 1; cursor: pointer; }
-.cp-more:hover, .cp-more[aria-expanded="true"] { color: var(--text); background: var(--gold-soft); }
+@media (hover: hover) { .cp-more:hover { color: var(--text); background: var(--gold-soft); } }
+.cp-more[aria-expanded="true"] { color: var(--text); background: var(--gold-soft); }
 .cp-menu { position: fixed; z-index: 500; min-width: 190px; max-width: calc(100vw - 16px); padding: 4px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); display: flex; flex-direction: column; }
 .cp-menu button { text-align: left; background: none; border: 0; border-radius: 6px; padding: 0 12px; min-height: 44px; font: inherit; font-size: 14px; color: var(--text); cursor: pointer; }
-.cp-menu button:hover, .cp-menu button:focus-visible { background: var(--gold-soft); outline: none; }
+@media (hover: hover) { .cp-menu button:hover { background: var(--gold-soft); outline: none; } }
+.cp-menu button:focus-visible { background: var(--gold-soft); outline: none; }
 .cp-det { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
 .cp-det dt { color: var(--text-muted); } .cp-det dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
 .cp-det-h { margin: 14px 0 4px; font-size: 14px; }

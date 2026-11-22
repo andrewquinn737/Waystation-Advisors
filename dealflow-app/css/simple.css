@@ -63,3 +63,8 @@ body[data-page="messages.html"] #menuAccountsVisibleBtn { display: none !importa
 
 /* Reports tables scroll sideways inside their box on narrow screens instead of being cut off */
 #reportsTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Unread count on the Inbox tab (js/auth.js sets data-unread) */
+#topnav a[data-unread]::after { content: attr(data-unread); margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--tone); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; display: inline-block; vertical-align: middle; }
+.bottom-tabbar a { position: relative; }
+.bottom-tabbar a[data-unread]::after { position: absolute; top: 4px; left: 50%; margin-left: 8px; }

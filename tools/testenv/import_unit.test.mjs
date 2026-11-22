@@ -1,12 +1,34 @@
 // Run: node tools/testenv/import_unit.test.mjs   (pure engine: parser, auto-mapping, validation, duplicates)
 import assert from "node:assert/strict";
-import { parseCSV, autoMapColumns, buildDials, rowsToDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates, mappingProblems, cleanEmailCell, normEmail, stripInternal } from "../../dealflow-app/js/csvImport.js";
+import { parseCSV, analyzeFile, autoMapColumns, buildDials, rowsToDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates, mappingProblems, cleanEmailCell, normEmail, stripInternal } from "../../dealflow-app/js/csvImport.js";
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; } catch (e) { fail++; console.log("FAIL", n, "\n  ", e.message); } };
 
 t("BOM + CRLF + quoted commas/newlines/quotes", () => {
   const r = parseCSV('﻿Name,Company\r\n"Smith, Jo","Acme ""Best"" Co"\r\n"Li\nne",X\r\n');
   assert.deepEqual(r, [["Name", "Company"], ["Smith, Jo", 'Acme "Best" Co'], ["Li\nne", "X"]]);
+});
+t("stray quote inside an unquoted field is plain text (5\" pipe, ABC \"The Best\" Plumbing)", () => {
+  const r = parseCSV('Name,Company,City\nJoe,Joe\'s 5" Pipe Co,Provo\nAl,ABC "The Best" Plumbing,Orem\nBo,Plain Co,Lehi\n');
+  assert.equal(r.length, 4); assert.deepEqual(r[1], ["Joe", "Joe's 5\" Pipe Co", "Provo"]);
+  assert.equal(r[2][1], "ABC \"The Best\" Plumbing"); assert.deepEqual(r[3], ["Bo", "Plain Co", "Lehi"]);
+  assert.deepEqual(r.warnings, []);
+});
+t("a quoted field that is glued to text keeps the text", () => {
+  const r = parseCSV('A,B\n"The Best" Plumbing,x\n"Q, comma",y\n');
+  assert.equal(r.length, 3); assert.equal(r[1][1], "x"); assert.equal(r[1][0], "The Best Plumbing"); assert.equal(r[2][0], "Q, comma");
+});
+t("unclosed quote does not swallow the file: every line stays a row, with a warning", () => {
+  const lines = ["Name,Company,City"]; for (let i = 0; i < 50; i++) lines.push(`P${i},Co ${i},Provo`);
+  lines[10] = 'P9,"Unfinished Co,Provo';                 // opens a quote at field start and never closes it
+  const r = parseCSV(lines.join("\n") + "\n");
+  assert.equal(r.length, 51, "preview row count equals the file's line count"); assert.equal(r[30][1], "Co 29");
+  assert.ok(r.warnings.length === 1 && /quote/i.test(r.warnings[0]));
+});
+t("analyzeFile reports binary content and the quote warning", () => {
+  assert.equal(analyzeFile("%PDF-1.4\u0000\u0001\u0002 binary", "x.csv").binary, true);
+  assert.equal(analyzeFile("A,B\n1,2\n", "x.csv").binary, false);
+  assert.equal(analyzeFile('A,B\n"x,1\ny,2\n', "x.csv").warnings.length, 1);
 });
 t("lone CR line ends", () => assert.equal(parseCSV("a,b\rc,d\re,f").length, 3));
 t("semicolon and tab delimiters", () => {

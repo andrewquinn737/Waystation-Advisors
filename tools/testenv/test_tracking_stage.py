@@ -4,6 +4,8 @@ B. database invariants on the copied real data (after backfill_tracking.py)
 C. reconciliation: every report surface equals the raw log, for several real users, weeks and buyers
 D. browser: callbacks/overdue banner, Upcoming "did it happen", the intro flow end to end, Admin > Connect Calendly (desktop + 375px)
 Run: python3 test_tracking_stage.py [--no-browser]"""
+import os
+BASE = os.environ.get('WS_BASE', 'http://localhost:5173/')
 import sys, json, uuid, datetime, re
 import sb
 from test_sequences import q, uid, lit, login, api, URL, ANON, CALEB, LEAD_A, ADMIN, SEC
@@ -18,6 +20,7 @@ def cleanup():
     q("delete from notifications where message like '%TEST-TRACK%' or message like '%Tracker Probe%' or message like '%Pat Probe%'")
     q(f"delete from notifications where type = 'callback_overdue' and user_id = '{uid(CALEB)}' and created_at > now() - interval '1 day'")
     q("delete from clients where full_name like 'Tracker Probe%' or company_name like 'TEST-TRACK%'")
+    q("delete from clients where source_dial_id in (select d.id from dials d join dial_lists l on l.id = d.list_id where l.name like 'TEST-TRACK%')")  # intro-call dials make a client: remove it with the list
     q("delete from dial_lists where name like 'TEST-TRACK%'")
     q("delete from app_secrets where key in ('CALENDLY_TOKEN','CALENDLY_EVENT_TYPE_URI') and value like 'test-track%'")
 
@@ -190,7 +193,7 @@ def reconcile():
                 count(distinct s.dial_id) filter (where coalesce(s.contact_status_at_call, d.contact_status) <> 'uncontacted') cm,
                 count(*) ac,
                 count(distinct s.dial_id) filter (where coalesce(s.contact_status_at_call, d.contact_status) in ('not_interested','callback_interested','busy_callback','intro_call_scheduled')) talked_any
-              from w join call_status_changes s on s.dial_type='seller' and s.changed_at >= (w.ws::timestamp at time zone '{CHI}') and s.changed_at < ((w.ws+5)::timestamp at time zone '{CHI}')
+              from w join call_status_changes s on s.dial_type='seller' and s.changed_at >= (w.ws::timestamp at time zone '{CHI}') and s.changed_at < ((w.ws+7)::timestamp at time zone '{CHI}')
               left join dials d on d.id = s.dial_id group by 1,2),
       ro as (select user_id, period_start ws, sum(calls_made) cm, sum(attempted_contacts) ac from report_dial_rollups where period_type='week' and period_start in (select ws from w) group by 1,2)
       select count(*) n, count(*) filter (where coalesce(raw.cm,0) <> coalesce(ro.cm,0) or coalesce(raw.ac,0) <> coalesce(ro.ac,0)) bad,
@@ -260,7 +263,7 @@ def browser(lid):
             p = ctx.new_page()
             p.on("pageerror", lambda e: errs.append("PAGEERR " + str(e)[:200]))
             p.on("response", lambda r: errs.append(f"HTTP {r.status} {r.url[:120]}") if r.status >= 400 and "favicon" not in r.url and "telnyx" not in r.url else None)
-            p.goto("http://localhost:5173/login.html"); p.fill("#email", email); p.fill("#password", SEC["accounts"][email]["password"])
+            p.goto(BASE + "login.html"); p.fill("#email", email); p.fill("#password", SEC["accounts"][email]["password"])
             p.click("#submitBtn"); p.wait_for_url(re.compile(r"(profile|dials|admin|clients)\.html"), timeout=25000)
             return ctx, p, errs
         # overdue callback + past unconfirmed intro + pending-time intro, created BEFORE the first page load (banners list once a day)
@@ -270,7 +273,7 @@ def browser(lid):
         cl2 = q(f"insert into clients (client_type, full_name, company_name, assigned_to, created_by, intern_name) values ('seller','Tracker Probe Pending','TEST-TRACK pend','{uid(CALEB)}','{uid(CALEB)}','Caleb') returning id")[0]["id"]
         q(f"insert into client_events (client_id, event_type, event_date, details, created_by) values ('{cl2}','intro_call', now() + interval '1 day', '{{\"time_pending\":true,\"auto\":true}}', '{uid(CALEB)}')")
         ctx, p, errs = sess(CALEB)
-        p.goto("http://localhost:5173/profile.html"); p.wait_for_timeout(4500)
+        p.goto(BASE + "profile.html"); p.wait_for_timeout(4500)
         txt = p.inner_text("body"); errs_start = list(errs)
         check("Profile lists the overdue callback", "Tracker Probe Overdue" in txt and "overdue" in txt.lower(), txt[-500:])
         check("Overdue callback banner at the top of the page", p.locator(".callback-banner").count() >= 1 and "overdue callback" in p.inner_text("#callbackBanners").lower() and p.locator(".callback-banner").first.bounding_box()["height"] <= 48, p.inner_text("#callbackBanners")[:200])
@@ -280,7 +283,7 @@ def browser(lid):
         check("Profile loads with no errors", not errs, errs[:3])
         ctx.close()
         # mobile
-        ctx, p, errs = sess(CALEB, 375, 800); p.goto("http://localhost:5173/profile.html"); p.wait_for_timeout(4000)
+        ctx, p, errs = sess(CALEB, 375, 800); p.goto(BASE + "profile.html"); p.wait_for_timeout(4000)
         check("375px: no horizontal scroll on Profile", p.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), p.evaluate("document.documentElement.scrollWidth"))
         p.screenshot(path="/tmp/track_profile_375.png", full_page=True); ctx.close()
         b.close()

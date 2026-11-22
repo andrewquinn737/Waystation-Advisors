@@ -1,4 +1,4 @@
-import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { loadTodaysCallbacks } from "./callbackBanners.js";
 import { toE164 } from "./phoneUtil.js";
 import { supabase } from "./supabaseClient.js";
@@ -195,6 +195,8 @@ const els = {
   upcomingEventFrame: document.getElementById("upcomingEventFrame"),
   upcomingEventOverlayClose: document.getElementById("upcomingEventOverlayClose"),
 };
+// Wired first: Log out must work even while the page is still loading below.
+els.profileSignOutBtn?.addEventListener("click", signOut);
 
 // Opens a client (deep-linked straight to its Timeline, same URL the old
 // window.location.href navigation used) inside the fullscreen iframe overlay
@@ -2249,7 +2251,6 @@ els.teamsCloseBtn.addEventListener("click", () => {
   els.teamsAddMenu.classList.add("hidden");
   unlockPageScroll();
 });
-els.profileSignOutBtn.addEventListener("click", signOut);
 
 // ---------------------------------------------------------------------------
 // Weekly survey (intern-only) — replaces the old external Google Form link.
@@ -2614,7 +2615,7 @@ if (isAdminSync || isTeamLeadSync) {
       // place, filter or no filter.
       if (isAdminSync) {
         const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
-        return error ? [] : data || [];
+        return error ? [] : withoutAi(data);
       }
       return loadTeamScopeAccounts(profile);
     },
@@ -2626,7 +2627,7 @@ if (isAdminSync || isTeamLeadSync) {
     getTeams: groupsByTeam(profile, isAdminSync)
       ? async () => {
           const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
-          return error ? [] : data || [];
+          return error ? [] : withoutAi(data);
         }
       : undefined,
     onChange: async () => {

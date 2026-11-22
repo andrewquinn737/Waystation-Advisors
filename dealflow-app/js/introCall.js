@@ -132,10 +132,10 @@ export function wireIntroCallForm(container, opts) {
 
   // Runs the caller's onScheduled and shows the success line ONLY if it worked. onScheduled may throw or resolve to
   // { error } / { cancelled }; the message is shown here, inside the popup (never behind it).
-  async function finish(okText, fn) {
+  async function finish(okText, fn, info) {
     if (!fn) return;
     let res;
-    try { res = await fn(initialClient); } catch (e) { res = { error: e }; }
+    try { res = await fn(initialClient, info); } catch (e) { res = { error: e }; }
     if (res?.cancelled) return;
     if (res?.error) {
       errEl.textContent = res.error.message || String(res.error);
@@ -252,7 +252,7 @@ export function wireIntroCallForm(container, opts) {
 
       if (!initialClient) return;
 
-      await finish("Logged the intro call.", onScheduled);
+      await finish("Logged the intro call.", onScheduled, { skipped: true });
     });
   }
 }

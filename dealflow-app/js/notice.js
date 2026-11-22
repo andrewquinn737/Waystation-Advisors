@@ -65,3 +65,15 @@ export function showConnectEmailNotice() {
     },
   });
 }
+
+// A small non-blocking toast (bottom of the screen, gone after a few seconds). tone: "" | "bad".
+let toastTimer;
+export function showToast(text, tone = "") {
+  let el = document.getElementById("wsToast");
+  if (!el) { el = document.createElement("div"); el.id = "wsToast"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite"); document.body.appendChild(el); }
+  el.className = "ws-toast" + (tone ? " " + tone : "");
+  el.textContent = text;
+  requestAnimationFrame(() => el.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), tone === "bad" ? 7000 : 3500);
+}

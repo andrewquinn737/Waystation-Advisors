@@ -4,6 +4,7 @@
 
 import { showConnectEmailNotice } from "./notice.js";
 import { escapeHtml } from "./clientForm.js";
+import { formatPhoneDisplay } from "./phoneUtil.js";
 import { openQuickSend } from "./quickSend.js";
 import "./testCallGuard.js";
 
@@ -238,7 +239,7 @@ export function rfContact(label, value, kind, extra = "", personalizedEmailBody,
 function phoneNumberRow(number, kind, extra = "", personalizedTextingBody, callDialId, method) {
   return `
     <div class="rf-value-row" style="margin-bottom: 8px;">
-      <div class="rf-value">${escapeHtml(number)} <span class="help-text" style="display:inline;">(${kind})</span></div>
+      <div class="rf-value">${escapeHtml(formatPhoneDisplay(number))} <span class="help-text" style="display:inline;">(${kind})</span></div>
       ${contactActionIcons({ phone: number, extra, personalizedTextingBody, dialId: callDialId, method })}
     </div>`;
 }

@@ -86,10 +86,23 @@ export function mountMandatePicker(anchorEl) {
 // ---------------------------------------------------------------------------
 // Sequence setup (import + "Run sequence setup")
 // ---------------------------------------------------------------------------
-export async function prepareList(listId) {
-  const { data, error } = await supabase.rpc("seq_prepare_list", { p_list_id: listId });
-  if (error) throw error;
-  const r = data || { email_sequence: 0, call_sequence: 0, missing_copy: 0 };
+// Chunked and resumable: each call handles up to PREP_CHUNK leads and says how many are left; a failed chunk is retried, and a
+// retry (or the "Run sequence setup" menu item) picks up exactly where it stopped because only unset leads are touched.
+const PREP_CHUNK = 2500;
+export async function prepareList(listId, onProgress) {
+  const r = { email_sequence: 0, call_sequence: 0, missing_copy: 0 };
+  for (let guard = 0; guard < 200; guard++) {
+    let data = null, err = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      ({ data, error: err } = await supabase.rpc("seq_prepare_list", { p_list_id: listId, p_limit: PREP_CHUNK }));
+      if (!err) break;
+      await new Promise((res) => setTimeout(res, 600 * (attempt + 1)));
+    }
+    if (err) throw err;
+    r.email_sequence += data?.email_sequence || 0; r.call_sequence += data?.call_sequence || 0; r.missing_copy += data?.missing_copy || 0;
+    onProgress && onProgress(data?.remaining || 0);
+    if (!data || !data.remaining) break;
+  }
   // Server check right away, so the review opens with server results. A failure here is not fatal:
   // the review screen runs the check again when it opens.
   try { r.gate = await runCopyGate(listId); } catch (e) { r.gate_error = msg(e); }
@@ -103,7 +116,13 @@ export function describePrepare(r) {
   ];
   // One account of the email rows: the server check says how many are ready and how many are held for edits (rows with no copy
   // yet are among the held ones); without a server check, say how many have no copy.
-  if (r.gate) parts.push(`${r.gate.summary?.passed ?? 0} emails ready, ${r.gate.summary?.held ?? 0} held for edits${m ? ` (${m} of them have no copy yet)` : ""}`);
+  if (r.gate) {
+    // Say WHY rows are held: the most common reasons, numbers stripped so "Email 1 is 91 words" groups with "Email 1 is 88 words".
+    const tally = new Map();
+    for (const x of r.gate.results || []) for (const er of x.ok ? [] : (x.errors || []).slice(0, 1)) { const k = String(er?.message || er).replace(/\d+/g, "N").replace(/: ".*$/, "").slice(0, 70); tally.set(k, (tally.get(k) || 0) + 1); }
+    const why = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, n]) => `${k.replace(/N/g, "#")} (${n})`).join("; ");
+    parts.push(`${r.gate.summary?.passed ?? 0} emails ready, ${r.gate.summary?.held ?? 0} held for edits${m ? ` (${m} of them have no copy yet)` : why ? ` (${why})` : ""}`);
+  }
   else if (r.gate_error) { if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`); parts.push("server check will run when you open the review"); }
   else if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`);
   return parts.join(" · ");

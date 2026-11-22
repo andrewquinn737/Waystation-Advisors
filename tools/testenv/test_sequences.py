@@ -118,13 +118,15 @@ def isolate_owner_mailboxes():
     run and give CALEB five dedicated fake mailboxes (5/day each, data mandate, no sync) with known state. cleanup() undoes both."""
     q(f"update email_accounts set send_paused_reason='test isolation' where owner_id='{uid(CALEB)}' and coalesce(send_paused_reason,'')='' and label is distinct from 'TEST-TEMP-BOX'")
     for i in range(5):
-        q(f"""insert into email_accounts (owner_id, label, email_address, imap_host, smtp_host, username, password, mandate, daily_send_limit, source)
-              values ('{uid(CALEB)}', 'TEST-TEMP-BOX', 'seq-fixture-{i}-{SALT}@test-example.org', 'x', 'x', 'x', 'x', 'data', 5, 'test')""")
+        q(f"""insert into email_accounts (owner_id, label, email_address, imap_host, smtp_host, username, password, mandate, daily_send_limit, source, sync_enabled)
+              values ('{uid(CALEB)}', 'TEST-TEMP-BOX', 'seq-fixture-{i}-{SALT}@test-example.org', 'x', 'x', 'x', 'x', 'data', 5, 'test', false)""")
 
 def poll(active):
     """The email-sync cron (every 2 min) would log in to the fake fixture mailboxes (host 'x'), fail, and stamp last_sync_error on them,
     which flips the dispatcher's 'inbox is being read' hold at a random moment (the intermittent 73/75 follow-up failures).
-    Park it for the run; the finally block turns it back on."""
+    Park it for the run; the finally block turns it back on.
+    The fixtures are also created with sync_enabled=false: the edge function email-sync (run by any open Messages page, e.g. another session's browser) logs in to every
+    sync_enabled mailbox and stamps last_sync_error on these fake hosts, which flipped the hold at random. A mailbox that is not synced cannot be touched by it."""
     q(f"select cron.alter_job((select jobid from cron.job where jobname='email-sync-poll'), active := {'true' if active else 'false'})")
 
 def run():
@@ -142,7 +144,7 @@ def run():
         dict(email="pat1@example.com", **COPY), dict(email="pat2@example.com", **COPY)])
     code, res = rpc(CALEB, "seq_prepare_list", p_list_id=lid)
     check("prepare: owner can run it", code == 200, res)
-    check("prepare: personal -> email5, the rest -> backup", res == {"email_sequence": 5, "backup": 5, "call_sequence": 5, "missing_copy": 1}, res)
+    check("prepare: personal -> email5, the rest -> backup", res == {"email_sequence": 5, "backup": 5, "call_sequence": 5, "missing_copy": 1, "remaining": 0}, res)
     bk = q(f"select count(*) n, count(*) filter (where seq_state is null) ns from dials where list_id='{lid}' and sequence='backup'")[0]
     check("prepare: backup rows have no seq_state", bk == {"n": 5, "ns": 5}, bk)
     n = q(f"select count(*) n from sequence_tasks where list_id='{lid}'")[0]["n"]
@@ -150,7 +152,7 @@ def run():
     st = q(f"select copy_status from dial_lists where id='{lid}'")[0]["copy_status"]
     check("prepare: list waits for copy review", st == "pending_review", st)
     code, res = rpc(CALEB, "seq_prepare_list", p_list_id=lid)
-    check("prepare: re-running is a no-op", res == {"email_sequence": 0, "backup": 0, "call_sequence": 0, "missing_copy": 0}, res)
+    check("prepare: re-running is a no-op", res == {"email_sequence": 0, "backup": 0, "call_sequence": 0, "missing_copy": 0, "remaining": 0}, res)
     code, res = rpc(GAVIN, "seq_prepare_list", p_list_id=lid)
     check("prepare: another intern is refused", code != 200, (code, res))
     code, res = api(CALEB, "PATCH", f"/dials?list_id=eq.{lid}&email=eq.pat1@example.com", {"mv_result": "ok", "mv_checked_at": "2026-11-21T00:00:00Z"})

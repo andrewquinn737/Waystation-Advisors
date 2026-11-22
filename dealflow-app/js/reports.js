@@ -1,4 +1,4 @@
-import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf } from "./teamScope.js";
+import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { wireAccountsVisiblePopup, getVisibleAccountIds, initDefaultToSelf } from "./accountsVisible.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
@@ -251,7 +251,7 @@ function fmtPeriodLabel(periodStart, type) {
     return periodStart.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   }
   const end = new Date(periodStart);
-  end.setDate(end.getDate() + 4); // Friday
+  end.setDate(end.getDate() + 6); // Sunday (the week includes the weekend)
   return `Week of ${periodStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
@@ -267,7 +267,7 @@ function periodOfPhrase(periodStart, type) {
     return `month of ${periodStart.toLocaleDateString(undefined, { month: "long", year: "numeric" })}`;
   }
   const end = new Date(periodStart);
-  end.setDate(end.getDate() + 4);
+  end.setDate(end.getDate() + 6);
   return `week of ${periodStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
@@ -306,7 +306,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   async function getAllAccounts() {
     if (isAdminSync) {
       const { data, error } = await supabase.from("profiles").select("id, full_name, role, team_id").order("full_name", { ascending: true });
-      return error ? [] : data || [];
+      return error ? [] : withoutAi(data);
     }
     return loadTeamScopeAccounts(profile);
   }
@@ -316,7 +316,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // accounts can tell them apart at a glance. See accountsVisible.js.
   async function getTeamsForGrouping() {
     const { data, error } = await supabase.from("teams").select("id, name").order("sort_order", { ascending: true });
-    return error ? [] : data || [];
+    return error ? [] : withoutAi(data);
   }
 
   initDefaultToSelf(profile.id, REPORTS_ACCOUNTS_KEY);
@@ -378,7 +378,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   // Accounts visible happens to be narrowed right now.
   async function loadAvailableBuyers() {
     const { data, error } = await supabase.rpc("get_reports_available_buyers");
-    return error ? [] : data || [];
+    return error ? [] : withoutAi(data);
   }
 
   async function fetchOutreachRows(accounts) {
@@ -418,6 +418,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       return;
     }
     const buyerId = [...selectedBuyerIds][0];
+    if (!buyerId) { buyerCentric = null; return; } // the "Not attached to buyer" bucket has no client row to look up
     // Which wording this buyer's report uses (see QUESTIONNAIRE_LABEL_SET).
     // Falls back to the standard set if the lookup fails.
     const { data: flowRow } = await supabase.from("clients").select("tracking_flow").eq("id", buyerId).maybeSingle();
@@ -737,6 +738,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       }),
       { callsMade: 0, attemptedContacts: 0, ownersTalked: 0, ownersAgreed: 0, introCompleted: 0 }
     );
+    if (!rows.length) { lastTableData = { columns: [], rows: [] }; els.reportsTableWrap.innerHTML = `<div class="empty-state">No accounts selected. Choose who to include under Accounts visible.</div>`; return; }
     const columns = ["Account", callsLabel, "Attempted contacts", "Owners talked to", "Owners agreed to intro call", "Intro calls completed (confirmed leads)"];
     const dataRows = rows.map((r) => [r.name, r.callsMade, r.attemptedContacts, r.ownersTalked, r.ownersAgreed, r.introCompleted]);
     const totalsRow = ["Totals", totals.callsMade, totals.attemptedContacts, totals.ownersTalked, totals.ownersAgreed, totals.introCompleted];
@@ -755,6 +757,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   }
 
   function renderTeamTable(rows) {
+    if (!rows.length) { lastTableData = { columns: [], rows: [] }; els.reportsTableWrap.innerHTML = `<div class="empty-state">No accounts selected. Choose who to include under Accounts visible.</div>`; return; }
     const columns = ["Account", "Info accurate?", "Financial modeling", "Questions/concerns"];
     const dataRows = rows.map((r) => [
       r.name,

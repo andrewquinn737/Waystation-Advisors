@@ -67,7 +67,7 @@ export function initCallbackBanners(profile) {
   function render() {
     const rows = [...shown.values()].filter((c) => callbacks.some((x) => key(x) === key(c)));
     box.innerHTML = "";
-    if (!rows.length) return;
+    if (!rows.length || document.body.dataset.page === "profile.html") return; // Profile has its own Callbacks box right there
     const overdue = rows.filter((c) => c.overdue), today = rows.filter((c) => !c.overdue);
     const soon = today.find((c) => { const d = new Date(c.callback_at) - Date.now(); return d <= SOON_MS && d > -30 * 60 * 1000; });
     const bits = [];

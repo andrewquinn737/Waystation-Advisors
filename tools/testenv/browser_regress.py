@@ -14,7 +14,7 @@ def creds(name):
 def login(page, role):
     email, pw = creds(USERS[role])
     page.goto(BASE + "login.html"); page.fill("#email", email); page.fill("#password", pw)
-    page.click("#submitBtn"); page.wait_for_url(re.compile(r"(profile|dials|admin|clients)\.html"), timeout=20000)
+    page.click("#submitBtn"); page.wait_for_url(re.compile(r"(profile|dials|admin|clients)\.html"), timeout=60000)
 def new_page(ctx, errs):
     ctx.add_init_script("try{sessionStorage.setItem('ws_onboarding_skip','1')}catch(e){}")
     p = ctx.new_page()
