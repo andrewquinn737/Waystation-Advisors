@@ -24,6 +24,7 @@
 </script>
 <link rel="stylesheet" href="css/style.css" />
 <link rel="stylesheet" href="css/copyReview.css" />
+<link rel="stylesheet" href="css/importWizard.css" />
 <link rel="stylesheet" href="css/dialsHome.css" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
@@ -515,7 +516,7 @@
     <div class="modal">
       <h2>Import dials from CSV</h2>
       <div id="importDialsError" class="error-msg hidden"></div>
-      <p class="help-text" style="margin-top:0;">Column headers in the first row are matched to dial fields (First name, Last name, Company name, Email, Mobile phone, Company phone, LinkedIn, City, State, Website, Industry, Summary, Call notes) automatically. Select up to 10 files — each becomes its own tab.</p>
+      <p class="help-text" style="margin-top:0;">Choose up to 10 CSV files, each becomes its own tab. Columns are matched by their headers (Company name, Full name, Email, Mobile number, Company number, City, State, Website, ...); you will see a preview and can fix any column before importing. Duplicates are flagged, and you can assign the list to someone right here.</p>
       <div class="import-dials-dropzone" id="importDialsDropzone">
         <!-- Real, confirmed symptom on iOS: the Files picker's Recents tab
              would perpetually spin/never finish loading with a multi-MIME
@@ -537,6 +538,7 @@
         <div class="import-dials-drop-hint">or drag CSV files here</div>
       </div>
       <div id="importDialsFileName" class="help-text"></div>
+      <div id="importDialsPreview"></div>
       <!-- Same seller-tab-only concept as #newListBuyerRow — hidden entirely
            for a buyer-side import, see openImportDialsModal in js/dials.js. -->
       <div id="importDialsBuyerRow">

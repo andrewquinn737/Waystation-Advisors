@@ -16,9 +16,15 @@ const CORS = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
 export async function checkList(admin: SupabaseClient, listId: string) {
-  const { data: rows, error } = await admin.rpc("copy_gate_rows2", { p_list_id: listId });
-  if (error) throw new Error(error.message);
-  const leads = (rows || []) as Record<string, any>[];
+  // The API returns at most 1,000 rows per request, so read the list page by page (a 2,000-lead list was only
+  // half checked before, and the unchecked half could never pass the gate).
+  const leads: Record<string, any>[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error } = await admin.rpc("copy_gate_rows2", { p_list_id: listId }).order("id").range(from, from + 999);
+    if (error) throw new Error(error.message);
+    leads.push(...((page || []) as Record<string, any>[]));
+    if (!page || page.length < 1000) break;
+  }
   const res = lintBatch(leads.map((r) => ({ id: r.id, full_name: r.full_name, company_name: r.company_name,
     email_subject: r.email_subject, email_1: r.email_1, email_2: r.email_2 })));
   // cross-batch uniqueness: team sends of the last 180 days + other active/ready leads' copy
@@ -37,9 +43,13 @@ export async function checkList(admin: SupabaseClient, listId: string) {
     const t = texts.get(r.id)!;
     return { id: r.id, ok: errors.length === 0, errors, warnings: x.warnings, hash: r.hash, s1: t.s, fu: t.b };
   });
-  const { data: rec, error: e2 } = await admin.rpc("copy_gate_record", { p_list_id: listId, p_results: results });
-  if (e2) throw new Error(e2.message);
-  return { summary: rec, results: results.map(({ hash: _h, s1: _s, fu: _f, ...r }) => r) };
+  const summary = { passed: 0, held: 0, started_now: 0 };
+  for (let i = 0; i < Math.max(results.length, 1); i += 500) {
+    const { data: rec, error: e2 } = await admin.rpc("copy_gate_record", { p_list_id: listId, p_results: results.slice(i, i + 500) });
+    if (e2) throw new Error(e2.message);
+    summary.passed += rec?.passed || 0; summary.held += rec?.held || 0; summary.started_now += rec?.started_now || 0;
+  }
+  return { summary, results: results.map(({ hash: _h, s1: _s, fu: _f, ...r }) => r) };
 }
 
 if (import.meta.main) Deno.serve(async (req) => {

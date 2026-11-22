@@ -21,6 +21,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, setVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
+import { createImportWizard } from "./importWizard.js";
 import { startCall, isCallActive, primeAudio } from "./callSession.js";
 import { callBlocked } from "./testCallGuard.js";
 import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
@@ -498,333 +499,8 @@ function emptyDial() {
 // the file.
 // ---------------------------------------------------------------------------
 
-// Minimal RFC4180-ish CSV parser: handles quoted fields (including embedded
-// commas/newlines) and "" as an escaped quote inside a quoted field. Good
-// enough for CSVs exported from Excel/Google Sheets/Numbers, which is the
-// only realistic source here.
-function parseCSV(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-  let i = 0;
-  const len = text.length;
-  while (i < len) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i += 2;
-          continue;
-        }
-        inQuotes = false;
-        i++;
-        continue;
-      }
-      field += ch;
-      i++;
-      continue;
-    }
-    if (ch === '"') {
-      inQuotes = true;
-      i++;
-      continue;
-    }
-    if (ch === ",") {
-      row.push(field);
-      field = "";
-      i++;
-      continue;
-    }
-    if (ch === "\r") {
-      i++;
-      continue;
-    }
-    if (ch === "\n") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-      i++;
-      continue;
-    }
-    field += ch;
-    i++;
-  }
-  if (field.length || row.length) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows;
-}
-
-// column header (any reasonable spelling/casing) -> dial field name. Each
-// dial field only ever gets matched to the FIRST header that matches one of
-// its aliases, so a CSV with both "Phone" and "Mobile" columns doesn't have
-// the second one silently overwrite the first. "contact_status" is special —
-// its raw cell values aren't dial field text, they're CSV export statuses
-// that need translating through CSV_STATUS_VALUE_MAP (see rowsToDials).
-const DIAL_FIELD_ALIASES = {
-  // A single "Full Name" column maps straight to the dial's own full_name
-  // column; separate "First Name"/"Last Name" columns (still real, still
-  // seen in some sheets) get joined into one at the end of the row-building
-  // loop instead — see the special-casing in rowsToDials below, same
-  // pattern as contact_status's own translation step.
-  full_name: ["full name", "fullname", "name", "client name", "contact name"],
-  first_name: ["first name", "firstname", "first"],
-  last_name: ["last name", "lastname", "last"],
-  company_name: ["company name", "company", "business name", "business"],
-  email: ["email", "email address", "e mail"],
-  // "Phone - Mobile" (some CRM exports' own naming for the personal cell
-  // number, distinct from "Phone - Website" below) normalizes to "phone
-  // mobile". "Mobie number" is a real, observed header typo (missing the
-  // "l" in "Mobile") from an actual imported sheet — kept as its own
-  // literal alias since it's a genuine header text some spreadsheet out
-  // there uses, not something a smarter normalizer would catch.
-  mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number", "phone mobile", "mobile number", "mobie number"],
-  // "Phone - Website" is that same export's naming for the general/company
-  // line (associated with the business's own website/HQ, not a person's
-  // cell) — normalizes to "phone website". "Company number" is another
-  // real observed header for this same field.
-  company_phone: ["company phone", "office phone", "business phone", "work phone", "phone website", "company number"],
-  linkedin: ["linkedin", "linkedin url", "linkedin profile"],
-  city: ["city"],
-  state: ["state"],
-  website: ["website", "url", "web site", "web address", "business url"],
-  // "Mandate" alone (no "- Industry sector" suffix) is the real header seen
-  // on the Austin Price sheet — the same field, just named more tersely.
-  industry: ["industry", "industry sector", "sector", "mandate industry sector", "mandate"],
-  summary: ["summary", "notes", "description"],
-  // Exact-match only (see headerMatchesField below), so this never collides
-  // with summary's own bare "notes" alias above — a "Call notes" column
-  // saves into the dial's Call notes box (call_notes), completely separate
-  // from the Summary field.
-  call_notes: ["call notes", "callnotes", "call note"],
-  contact_status: ["status"],
-  // AI-written cold-outreach emails (one pair per company), stored on the dial
-  // but never shown in the regular dial view — used by Advanced settings'
-  // Recommended first/second email (see resolveRecommendedEmail in
-  // js/advancedSettings.js) and by Select mode's Mass email. Each email comes
-  // in as separate parts that rowsToDials compiles into the dial's single
-  // email_1/email_2 text (one blank line between parts): Email 1 =
-  // greeting + pitch + CTA, Email 2 = greeting + body. One "Subject" column
-  // serves both: it's Email 1's subject, and Email 2 is sent as a follow-up
-  // threaded onto Email 1 ("Re: <subject>").
-  email_1_greeting: ["email 1 greeting"],
-  email_1_pitch: ["email 1 pitch"],
-  email_1_cta: ["email 1 cta", "email 1 call to action"],
-  email_subject: ["subject", "email subject", "subject line", "email 1 subject", "first email subject", "subject 1", "email subject line"],
-  // Whole-email columns (copy written offline, uploaded with the list). Used as-is;
-  // the greeting/pitch/CTA part columns above still win when a CSV has those instead.
-  email_1: ["email 1", "email1", "email 1 body", "first email", "first email body", "email body", "email one"],
-  email_2: ["email 2", "email2", "follow up", "followup", "follow up email", "followup email", "follow up body", "second email", "email two"],
-  email_2_greeting: ["email 2 greeting"],
-  email_2_body: ["email 2 body"],
-};
-
-// A "Status" column's cell values (as seen in real CSV exports) -> this
-// app's internal contact_status enum (see CONTACT_STATUSES above). Keys are
-// normalized the same way as everything else (trimmed, lowercased) but
-// punctuation like "/" and "-" is kept since it's part of the label itself —
-// see normalizeStatusValue. An empty cell maps to "uncontacted" explicitly
-// (rather than just being skipped), matching "Empty box = Uncontacted".
-// Any value with no match here is simply left alone (falls back to whatever
-// the dials table's own default is, currently also "uncontacted").
-const CSV_STATUS_VALUE_MAP = {
-  "": "uncontacted",
-  "passed/dead": "not_interested",
-  "scheduling intro": "intro_call_scheduled",
-  "call unanswered": "no_response",
-  "not a fit": "not_interested",
-  "completed outreach": "unable_to_contact",
-  "busy, call back": "busy_callback",
-  "busy call back": "busy_callback",
-  "busy": "busy_callback",
-  "follow-up": "no_response",
-  "follow up": "no_response",
-};
-
-function normalizeStatusValue(v) {
-  return String(v || "").trim().toLowerCase();
-}
-
-function normalizeHeader(h) {
-  return String(h || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// contact_status is matched more loosely than every other field: real CSV
-// exports/spreadsheets label this column all sorts of things ("Status",
-// "Call Status", "Contact Status", "Lead Status", "Current Status", ...), so
-// requiring an exact match against a fixed alias list (like every other
-// field below) kept missing real headers that simply weren't the bare word
-// "status" — which meant NO column ever got mapped to contact_status for
-// that CSV, every imported row was built with contact_status left
-// completely unset, and the insert failed with "null value in column
-// contact_status violates not-null constraint" (see rowsToDials's own
-// baseline default for the second, belt-and-suspenders layer of this fix).
-// "contains" is safe here specifically because it only runs for the one
-// field where we WANT breadth — every other field still requires an exact
-// alias match, so e.g. a "Sub status" or "Status notes" column won't get
-// misrouted into some unrelated field.
-function headerMatchesField(field, aliases, norm) {
-  if (field === "contact_status") return norm.includes("status");
-  return aliases.some((a) => normalizeHeader(a) === norm);
-}
-
-// Maps each column index in the header row to a dial field key, wherever a
-// match is found — unmatched columns are simply ignored on import.
-function buildHeaderFieldMap(headerRow) {
-  const map = {};
-  const usedFields = new Set();
-  headerRow.forEach((rawHeader, colIndex) => {
-    const norm = normalizeHeader(rawHeader);
-    if (!norm) return;
-    for (const [field, aliases] of Object.entries(DIAL_FIELD_ALIASES)) {
-      if (usedFields.has(field)) continue;
-      if (headerMatchesField(field, aliases, norm)) {
-        map[colIndex] = field;
-        usedFields.add(field);
-        break;
-      }
-    }
-  });
-  return map;
-}
-
-// The edit form's State field is a dropdown of full state names (STATES in
-// clientForm.js), so a stored value that isn't exactly one of those shows as
-// blank there — which is what happened to most imported dials, since CSVs
-// almost always carry the 2-letter postal abbreviation ("TX"), not "Texas".
-const STATE_ABBREVIATIONS = {
-  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado",
-  CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho",
-  IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana",
-  ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota",
-  MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada",
-  NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
-  ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
-  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas",
-  UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia",
-  WI: "Wisconsin", WY: "Wyoming",
-};
-
-// Converts a CSV's State cell to the exact dropdown value: a 2-letter
-// abbreviation in any casing ("TX", "tx"), or a full name in any casing
-// ("texas"), both come out as the canonical STATES entry. Anything else
-// (a foreign province, "DC", free text) is left exactly as written rather
-// than guessed at, so no data is lost.
-function normalizeStateValue(raw) {
-  const v = String(raw || "").trim();
-  if (!v) return v;
-  const byAbbreviation = STATE_ABBREVIATIONS[v.toUpperCase()];
-  if (byAbbreviation) return byAbbreviation;
-  const byName = STATES.find((s) => s.toLowerCase() === v.toLowerCase());
-  return byName || v;
-}
-
-// Turns parsed CSV rows (including the header row at index 0) into an array
-// of dials-table-ready insert objects for `listId`. Blank rows (every cell
-// empty) are skipped.
-function rowsToDials(rows, listId) {
-  if (rows.length < 2) return [];
-  const fieldMap = buildHeaderFieldMap(rows[0]);
-  return rows
-    .slice(1)
-    .filter((r) => r.some((cell) => (cell || "").trim() !== ""))
-    .map((r) => {
-      // contact_status always starts with a valid fallback value baked in —
-      // even if this CSV has no recognizable Status column at all (see
-      // headerMatchesField above), every row built here still has SOME
-      // explicit, valid value for it. Gets overwritten below if a Status
-      // column was actually found and mapped.
-      const d = { list_id: listId, contact_status: "uncontacted" };
-      Object.entries(fieldMap).forEach(([colIndex, field]) => {
-        const v = (r[Number(colIndex)] || "").trim();
-        // A "Status" column's cell isn't plain text to copy over — it's a CSV
-        // export label that needs translating through CSV_STATUS_VALUE_MAP
-        // into this app's own contact_status enum (see the map's comment
-        // above). Whenever a Status column is present at all, EVERY row must
-        // come out with some valid contact_status value (never just left
-        // unset) — falling back to "uncontacted" for anything not in the map
-        // (per spec: "if the box does not match anything in the list, mark
-        // it as uncontacted"). This also happens to be required for
-        // correctness, not just intent: supabase-js's bulk insert() sends one
-        // shared column list for the whole batch, so a handful of rows in the
-        // same import quietly having NO contact_status key (while others do)
-        // gets those rows' contact_status sent as an explicit NULL rather
-        // than falling back to the column's DEFAULT — which is exactly what
-        // was tripping the "null value in column contact_status violates
-        // not-null constraint" error.
-        if (field === "contact_status") {
-          const norm = normalizeStatusValue(v);
-          if (CSV_STATUS_VALUE_MAP[norm]) {
-            d.contact_status = CSV_STATUS_VALUE_MAP[norm];
-          } else if (norm.includes("nda") || norm.includes("loi")) {
-            // NDA/LOI-stage statuses (e.g. "NDA Signed", "LOI Signed" — real
-            // deal-stage values seen in actual CSV exports that aren't in
-            // CSV_STATUS_VALUE_MAP above, since they're specific to certain
-            // sheets rather than universal) count as real, live engagement —
-            // grouped under "Accepted intro call" rather than falling all
-            // the way back to "Uncontacted" like every other unrecognized
-            // value.
-            d.contact_status = "intro_call_scheduled";
-          } else {
-            d.contact_status = "uncontacted";
-          }
-          return;
-        }
-        if (v) d[field] = v;
-      });
-      // dials no longer has separate first_name/last_name columns (see the
-      // full_name migration) — a CSV with those (instead of, or alongside, a
-      // "Full Name" column) gets them joined into one full_name value here.
-      // An explicit Full Name column (set directly above, same as any other
-      // field) always wins if this same CSV happened to have both; first_name/
-      // last_name are just temporary holders, deleted below either way.
-      if (!d.full_name) {
-        const combined = `${d.first_name || ""} ${d.last_name || ""}`.trim();
-        if (combined) d.full_name = combined;
-      }
-      delete d.first_name;
-      delete d.last_name;
-      // Compile each email's parts into its one stored text, a blank line
-      // between parts (empty parts are skipped, so a missing CTA leaves no
-      // stray gap). Sets nothing at all if a CSV has none of the parts.
-      const compile = (...parts) => parts.filter(Boolean).join("\n\n");
-      const email1 = compile(d.email_1_greeting, d.email_1_pitch, d.email_1_cta);
-      const email2 = compile(d.email_2_greeting, d.email_2_body);
-      if (email1) d.email_1 = email1;
-      if (email2) d.email_2 = email2;
-      delete d.email_1_greeting;
-      delete d.email_1_pitch;
-      delete d.email_1_cta;
-      delete d.email_2_greeting;
-      delete d.email_2_body;
-      if (d.state) d.state = normalizeStateValue(d.state);
-      // A sheet that lists the same number under both mobile and company
-      // can't tell us which one it really is, so it's saved once, under
-      // mobile only, and flagged so the detail view labels it "(Unsure)"
-      // instead of "(Mobile)" — see mobile_phone_unsure and
-      // buildPhoneNumbersHTML. Compared by digits only, so "(801) 555-1234"
-      // and "801-555-1234" count as the same number. Set explicitly on
-      // EVERY row (true or false), never left off: supabase-js's bulk
-      // insert() sends one shared column list for the whole batch, so a row
-      // missing the key would go in as an explicit NULL and trip the
-      // column's NOT NULL constraint (same reason contact_status is always
-      // set above).
-      const mobileDigits = (d.mobile_phone || "").replace(/\D/g, "");
-      const companyDigits = (d.company_phone || "").replace(/\D/g, "");
-      d.mobile_phone_unsure = Boolean(mobileDigits) && mobileDigits === companyDigits;
-      if (d.mobile_phone_unsure) delete d.company_phone;
-      return d;
-    });
-}
+// The parser, column auto-mapping and row building live in js/csvImport.js; the preview/mapping/duplicate screen
+// and the chunked import in js/importWizard.js.
 
 // Local calendar date (not UTC) as YYYY-MM-DD — used for the "Did call
 // today" toggle, which just compares against this rather than needing a
@@ -1922,14 +1598,24 @@ els.menuAddNewBtn.addEventListener("click", () => {
 // dragged in from the Finder/desktop onto #importDialsDropzone.
 // ---------------------------------------------------------------------------
 const MAX_IMPORT_FILES = 10;
-let selectedImportFiles = [];
+
+const importWizard = createImportWizard({
+  container: document.getElementById("importDialsPreview"),
+  profile, isTeamLead, teamIdsOf,
+  listNames: () => new Set(allLists.filter((l) => l.dial_type === currentType && !l.deleted_at).map((l) => (l.name || "").trim().toLowerCase())),
+  onChange: (s) => {
+    els.importDialsImportBtn.disabled = !s.readyFiles || s.loading || !s.rows;
+    els.importDialsImportBtn.textContent = s.rows ? `Import ${s.rows.toLocaleString("en-US")} lead${s.rows === 1 ? "" : "s"}` : "Import";
+  },
+});
 
 function openImportDialsModal() {
   els.importDialsError.classList.add("hidden");
   els.importDialsFileName.textContent = "";
   els.importDialsImportBtn.disabled = true;
+  els.importDialsImportBtn.textContent = "Import";
   els.importDialsFileInput.value = "";
-  selectedImportFiles = [];
+  importWizard.clear();
   els.importDialsModal.classList.remove("hidden");
   resetImportResult();
   importMandate = mountMandatePicker(els.importDialsImportBtn.parentNode);
@@ -1939,6 +1625,7 @@ function openImportDialsModal() {
   els.importDialsBuyerRow.classList.toggle("hidden", isBuyerTab);
   if (isBuyerTab) importMandate.hide();
   else populateBuyerSelect(els.importDialsBuyerSelect);
+  importWizard.loadAssignees();
 }
 
 // ---- email-sequence additions to the import flow (see js/copyReview.js) ----
@@ -1947,18 +1634,6 @@ function resetImportResult() {
   document.getElementById("importDialsResult")?.remove();
   els.importDialsImportBtn.classList.remove("hidden");
   els.importDialsCancelBtn.textContent = "Cancel";
-}
-function showImportResult(items, failures) {
-  resetImportResult();
-  const box = document.createElement("div");
-  box.id = "importDialsResult";
-  box.className = "cr-import-result";
-  box.innerHTML = items
-    .map((it) => `<div class="f"><b>${escapeHtml(it.name)}</b><br>${it.error ? `<span class="bad">Sequence setup failed: ${escapeHtml(it.error)}. Use "Run sequence setup" in the list menu.</span>` : escapeHtml(describePrepare(it.result))}</div>`)
-    .join("");
-  els.importDialsImportBtn.parentNode.parentNode.insertBefore(box, els.importDialsImportBtn.parentNode);
-  els.importDialsImportBtn.classList.add("hidden");
-  els.importDialsCancelBtn.textContent = "Done";
 }
 
 els.importDialsBuyerSelect.addEventListener("change", () => {
@@ -1970,18 +1645,18 @@ els.menuImportBtn.addEventListener("click", () => {
   closePageHeaderMenu();
   openImportDialsModal();
 });
-els.importDialsCancelBtn.addEventListener("click", () => els.importDialsModal.classList.add("hidden"));
+els.importDialsCancelBtn.addEventListener("click", () => {
+  if (importWizard.isBusy()) return; // an import is running: let it finish
+  els.importDialsModal.classList.add("hidden");
+});
 // The visible "Choose CSV files" button just proxies to the real (hidden)
-// file input — clicking a styled button instead of the native input
-// directly gives a consistent look on both desktop (Finder) and mobile
-// (Files/Photos picker), both of which open from input[type=file] the same
-// way. Shared by both that input's change event AND a drag-and-drop onto
-// #importDialsDropzone (see wireImportDropzone below) — either path ends up
-// here with a plain array of File objects.
+// file input (consistent look on desktop and mobile pickers). Shared by the
+// input's change event AND a drag-and-drop onto #importDialsDropzone.
 function setSelectedImportFiles(files) {
-  const csvFiles = files.filter((f) => /\.csv$/i.test(f.name) || f.type === "text/csv");
+  const csvFiles = files.filter((f) => /\.(csv|tsv|txt)$/i.test(f.name) || f.type === "text/csv");
+  resetImportResult();
   if (csvFiles.length > MAX_IMPORT_FILES) {
-    selectedImportFiles = [];
+    importWizard.clear();
     els.importDialsFileName.textContent = "";
     els.importDialsImportBtn.disabled = true;
     els.importDialsError.textContent = `Select ${MAX_IMPORT_FILES} CSV files or fewer at a time (${csvFiles.length} selected).`;
@@ -1989,21 +1664,17 @@ function setSelectedImportFiles(files) {
     return;
   }
   els.importDialsError.classList.add("hidden");
-  selectedImportFiles = csvFiles;
   els.importDialsFileName.textContent = csvFiles.length
     ? `${csvFiles.length} file${csvFiles.length === 1 ? "" : "s"} selected: ${csvFiles.map((f) => f.name).join(", ")}`
-    : "";
-  els.importDialsImportBtn.disabled = !csvFiles.length;
+    : files.length ? "Those files are not CSVs. Export the sheet as CSV (File > Download > .csv) and choose that." : "";
+  importWizard.setFiles(csvFiles);
 }
 els.importDialsChooseBtn.addEventListener("click", () => els.importDialsFileInput.click());
 els.importDialsFileInput.addEventListener("change", () => {
   setSelectedImportFiles([...(els.importDialsFileInput.files || [])]);
 });
 
-// Drag-and-drop onto the dropzone — wired unconditionally (harmless on
-// touch devices, which never fire drag events at all; the drop-hint text
-// itself is what's actually hidden on mobile, see css/style.css). dragover
-// must call preventDefault() or the browser refuses the drop entirely.
+// Drag-and-drop onto the dropzone (harmless on touch devices; the hint text is desktop-only, see css/style.css).
 function wireImportDropzone() {
   const zone = els.importDialsDropzone;
   ["dragenter", "dragover"].forEach((evt) =>
@@ -2022,7 +1693,7 @@ function wireImportDropzone() {
 wireImportDropzone();
 
 els.importDialsImportBtn.addEventListener("click", async () => {
-  if (!selectedImportFiles.length) return;
+  if (!importWizard.summary().rows || importWizard.isBusy()) return;
   els.importDialsError.classList.add("hidden");
   const mandate = currentType === "buyer" ? null : importMandate.get();
   if (currentType !== "buyer" && !mandate) {
@@ -2032,97 +1703,51 @@ els.importDialsImportBtn.addEventListener("click", async () => {
     return;
   }
   els.importDialsImportBtn.disabled = true;
-  const seqResults = [];
-
-  // sort_order is computed once up front and incremented locally (rather
-  // than re-reading allLists.length each iteration, which stays stale until
-  // the final loadLists() below) so multiple new tabs land in file order
-  // instead of every one of them competing for the same slot.
-  let sortOrder = allLists.filter((l) => l.dial_type === currentType && l.status === "current").length;
-  let lastNewListId = null;
-  const failures = [];
-  const totalAttempted = selectedImportFiles.length;
-
-  for (const file of selectedImportFiles) {
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text).filter((r) => r.some((c) => (c || "").trim() !== ""));
-      if (rows.length < 2) {
-        throw new Error("no data rows to import");
-      }
-      // Each file's tab name is its own filename (minus .csv), always
-      // created under Current — regardless of whether Current or Archived
-      // happens to be selected right now — per spec.
-      const tabName = file.name.replace(/\.csv$/i, "").trim() || "Imported";
-      const { data: newList, error: listErr } = await supabase
-        .from("dial_lists")
-        .insert({
-          name: tabName,
-          dial_type: currentType,
-          status: "current",
-          sort_order: sortOrder,
-          // Same reasoning as createNewList's own buyer_id — see there.
-          buyer_id: currentType === "seller" ? els.importDialsBuyerSelect.value || null : null,
-          ...(mandate ? { mandate } : {}),
-        })
-        .select()
-        .single();
-      if (listErr) throw listErr;
-      sortOrder++;
-
-      const dialRows = rowsToDials(rows, newList.id);
-      if (!dialRows.length) {
-        throw new Error("no data rows found");
-      }
-      const { error: insertErr } = await supabase.from("dials").insert(dialRows);
-      if (insertErr) throw insertErr;
-
-      lastNewListId = newList.id;
-      // Classify rows into email vs call sequences (seq_prepare_list). A failure here
-      // must not fail the import itself: rows are in, setup can be re-run from the list menu.
-      if (mandate) {
-        try { seqResults.push({ name: tabName, result: await prepareList(newList.id) }); }
-        catch (e) { seqResults.push({ name: tabName, error: e.message || String(e) }); }
-      }
-    } catch (err) {
-      failures.push(`${file.name} (${err.message || "could not import"})`);
-    }
+  els.importDialsCancelBtn.disabled = true;
+  els.importDialsImportBtn.textContent = "Importing...";
+  let out;
+  try {
+    out = await importWizard.run({
+      type: currentType, mandate, buyerId: els.importDialsBuyerSelect.value || null,
+      // sort_order is computed once up front and incremented locally so several new tabs land in file order.
+      sortOrderStart: allLists.filter((l) => l.dial_type === currentType && l.status === "current").length,
+    });
+  } catch (err) {
+    els.importDialsError.textContent = err.message || "Could not import that CSV.";
+    els.importDialsError.classList.remove("hidden");
+    els.importDialsCancelBtn.disabled = false;
+    els.importDialsImportBtn.disabled = false;
+    els.importDialsImportBtn.textContent = "Import";
+    return;
   }
+  els.importDialsCancelBtn.disabled = false;
 
-  // Land the user on the LAST tab that was actually created, switching to
-  // Current first if Archived was selected so it's actually visible — even
-  // a partial run (some files failed) still lands on whatever did succeed
-  // rather than leaving the view on wherever it happened to be before.
-  if (lastNewListId) {
+  // Land on the last tab that is still mine (a list sent to someone else is no longer in this account).
+  if (out.lastOwnId) {
     if (currentStatus !== "current") {
       currentStatus = "current";
       els.menuStatusBtn.querySelector(".menu-item-label").textContent = "Current";
       els.menuStatusBtn.dataset.status = "current";
       persistStatus();
     }
-    currentListId = lastNewListId;
+    currentListId = out.lastOwnId;
     persistCurrentListId();
-    await loadLists();
   }
+  if (out.lastId) await loadLists();
 
-  // The selection is always cleared after an attempt, success or not —
-  // re-clicking Import with the same file list would re-import whatever
-  // already succeeded a second time, creating duplicate tabs.
-  selectedImportFiles = [];
+  const failed = out.results.filter((r) => r.error);
+  if (failed.length) {
+    els.importDialsError.textContent = `${failed.length} of ${out.results.length} file(s) not imported: ${failed.map((r) => `${r.file} (${r.error})`).join("; ")}. Re-select just those to try again.`;
+    els.importDialsError.classList.remove("hidden");
+  }
+  // Show what happened (counts, who got it, how long) and let the person close it.
+  importWizard.clear();
+  resetImportResult();
+  els.importDialsImportBtn.parentNode.parentNode.insertBefore(importWizard.renderResult(out), els.importDialsImportBtn.parentNode);
+  els.importDialsImportBtn.classList.add("hidden");
+  els.importDialsCancelBtn.textContent = "Done";
   els.importDialsFileInput.value = "";
   els.importDialsFileName.textContent = "";
-  els.importDialsImportBtn.disabled = true;
-
-  if (failures.length) {
-    els.importDialsError.textContent = `${failures.length} of ${totalAttempted} file(s) failed — ${failures.join("; ")}. Re-select just those to try again.`;
-    els.importDialsError.classList.remove("hidden");
-    els.importDialsImportBtn.disabled = false;
-    if (seqResults.length) showImportResult(seqResults, failures);
-  } else if (seqResults.length) {
-    showImportResult(seqResults, failures);
-  } else {
-    els.importDialsModal.classList.add("hidden");
-  }
 });
 
 // ---------------------------------------------------------------------------
