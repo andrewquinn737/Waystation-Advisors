@@ -28,11 +28,11 @@ async function loadHeld(listId, all) {
 }
 
 export async function openCopyReview(list, { onChanged, all = false } = {}) {
-  const title = all ? `Review emails${list.name ? " · " + list.name : ""}` : "Fix emails";
+  const title = all ? "Review emails" : "Fix emails";
   lockPageScroll();
   let changed = false;
   const panel = $(`<div class="cr-panel" role="dialog" data-list-id="${escapeHtml(String(list.id))}" aria-label="${escapeHtml(title)}">
-    <div class="cr-head"><div class="cr-head-row"><h2>${escapeHtml(title)}</h2><button type="button" class="fs-close cr-close" aria-label="Close">&times;</button></div></div>
+    <div class="cr-head"><div class="cr-head-row"><div class="cr-head-t"><h2>${escapeHtml(title)}</h2>${list.name ? `<div class="cr-head-sub">${escapeHtml(list.name)}</div>` : ""}</div><button type="button" class="fs-close cr-close" aria-label="Close">&times;</button></div></div>
     <!-- Mount point for the in-app Claude chat panel (js/aiChat.js, added by another builder). Leave empty. -->
     <div id="aiChatMount"></div>
     <div class="cr-body"><div class="help-text">Loading...</div></div></div>`);

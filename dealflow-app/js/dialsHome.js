@@ -138,11 +138,13 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   // One clear button per follow-up: what to do, in words. Calls open the company card too, so the outcome is right there.
   function actionHtml(t, d) {
     const first = esc(String(d.full_name || "").trim().split(/\s+/)[0] || "");
-    const tel = (n) => "tel:" + String(n).replace(/[^\d+]/g, "");
     if (t.kind === "call" || t.kind === "call_company") {
       const num = t.kind === "call" ? (d.mobile_phone || d.company_phone) : (d.company_phone || d.mobile_phone);
       const label = t.kind === "call" ? (first ? `Call ${first}` : "Call") : "Call office";
-      return num ? `<a class="btn small dh-act dh-go" href="${esc(tel(num))}" data-call="${esc(d.id)}">${label}</a>`
+      // Same call path as the company card's phone icon (.contact-action-call, handled in dials.js): in-app call or the phone's
+      // dialer, and the contact is recorded for today either way.
+      const method = num === d.mobile_phone ? "mobile" : "company";
+      return num ? `<button type="button" class="btn small dh-act dh-go contact-action-call" data-dial-id="${esc(d.id)}" data-tel="${esc(num)}" data-method="${method}">${label}</button>`
                  : `<button type="button" class="btn small dh-act dh-go" data-open="${esc(d.id)}">Open</button>`;
     }
     const doneBtn = `<button type="button" class="btn secondary small dh-act" data-done="${esc(t.id)}">Done</button>`;
@@ -191,12 +193,9 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     if (head) { const g = groups.find((x) => x.n === +head.parentElement.dataset.g); openState.set(g.n, !isOpen(g)); return redrawGroup(g.n); }
     const done = e.target.closest("[data-done]");
     if (done) return finishTask(done);
-    const call = e.target.closest("[data-call], [data-open]");
-    if (call) { // let the tel: link dial, and open the card so the outcome can be logged straight after
-      const id = call.dataset.call || call.dataset.open, set = visibleDials();
-      setTimeout(() => openCard(set, set.findIndex((x) => x.id === id)), call.dataset.call ? 400 : 0);
-      return;
-    }
+    const call = e.target.closest("[data-open]");
+    if (call) return api.openCall(call.dataset.open);
+    if (e.target.closest(".contact-action-call")) return; // dials.js places the call, then asks us to open the card
     const row = e.target.closest("[data-d]");
     if (row) { const set = visibleDials(); openCard(set, set.findIndex((d) => d.id === row.dataset.d)); }
   };
@@ -232,6 +231,10 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
 
   // ---- public ---------------------------------------------------------------------------------------------------
   const api = {
+    // Open the company card (so the outcome can be logged straight after a call) in the order shown on screen.
+    // A company on the sheet may be one whose task was loaded separately (not in the list's own dials array).
+    dialById: (id) => taskDials.find((d) => d.id === id) || null,
+    openCall(id) { const set = visibleDials(); openCard(set, set.findIndex((x) => x.id === id)); },
     refreshFollowups: loadFollowups,
     refreshEmails: renderEmails,
     renderSheet,

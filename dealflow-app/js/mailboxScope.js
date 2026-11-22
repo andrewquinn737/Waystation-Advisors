@@ -70,7 +70,7 @@ export function selectedMailboxIds(accounts) {
 export async function loadUnreadCounts(accountIds) {
   const counts = new Map();
   if (!accountIds.length) return counts;
-  const { data } = await supabase.from("email_messages").select("account_id").eq("direction", "inbound").eq("is_read", false).in("account_id", accountIds).limit(5000);
+  const { data } = await supabase.from("email_messages").select("account_id").eq("direction", "inbound").eq("is_read", false).eq("is_system", false).in("account_id", accountIds).limit(5000);
   for (const r of data || []) counts.set(r.account_id, (counts.get(r.account_id) || 0) + 1);
   return counts;
 }

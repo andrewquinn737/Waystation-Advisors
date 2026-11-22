@@ -259,8 +259,14 @@ def _run():
     code, r = call(tbig, "tools/call", {"name": "list_campaigns", "arguments": {}}); check("expired token can't call tools either", code == 401, (code, r))
 
     # ---------------------------------------------------------------- onboarding flag
+    q(f"update claude_connector_tokens set revoked_at = now() where profile_id='{uid(ADMIN)}' and revoked_at is null")
     rpc(ADMIN, "onboarding_complete", p_done=False)
-    code, r = rpc(ADMIN, "onboarding_status"); check("onboarding starts undone", code == 200 and r is None, (code, r))
+    code, r = rpc(ADMIN, "onboarding_status"); check("onboarding starts undone", code == 200 and r is None, (code, r)); 
+    rpc(ADMIN, "create_claude_connector_token", p_label="onb")
+    code, r = rpc(ADMIN, "onboarding_status"); check("an active connector token counts as onboarded (and stamps done_at)", code == 200 and r and q(f"select onboarding_done_at from profiles where id='{uid(ADMIN)}'")[0]["onboarding_done_at"], (code, r))
+    q(f"update claude_connector_tokens set revoked_at = now() where profile_id='{uid(ADMIN)}' and revoked_at is null")
+    rpc(ADMIN, "onboarding_complete", p_done=False)
+    code, r = rpc(ADMIN, "onboarding_status"); check("onboarding undone again once the token is revoked", code == 200 and r is None, (code, r))
     code, _ = rpc(ADMIN, "onboarding_complete"); code2, r = rpc(ADMIN, "onboarding_status")
     check("onboarding_complete stamps profiles.onboarding_done_at", code == 200 and r, (code, r))
     rpc(ADMIN, "onboarding_complete", p_done=False)

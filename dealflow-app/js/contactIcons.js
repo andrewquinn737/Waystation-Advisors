@@ -183,7 +183,7 @@ export function wireQuickSendButtons(container) {
 // (there's no RFC for sms: the way mailto: has RFC 6068). Same hand-rolled
 // encodeURIComponent as buildEmailHref, not URLSearchParams — the same "+"-
 // for-space bug would otherwise apply here too.
-function buildSmsHref(phone, body) {
+export function buildSmsHref(phone, body) {
   const bodyParam = body ? `?body=${encodeURIComponent(body)}` : "";
   return `sms:${phone}${bodyParam}`;
 }

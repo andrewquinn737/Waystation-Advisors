@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
-import { rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
+import { buildSmsHref, rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import {
   wireAdvancedSettingsPopup,
   resolvePersonalizedEmailBody,
@@ -983,8 +983,9 @@ document.addEventListener(
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    const dial = dials.find((d) => d.id === btn.dataset.dialId) || (currentDial?.id === btn.dataset.dialId ? currentDial : null);
+    const dial = dials.find((d) => d.id === btn.dataset.dialId) || (currentDial?.id === btn.dataset.dialId ? currentDial : null) || home?.dialById?.(btn.dataset.dialId);
     if (dial) placeCall(dial, btn.dataset.tel, btn.dataset.method || "mobile");
+    if (btn.closest(".dh-row") && home?.openCall) setTimeout(() => home.openCall(btn.dataset.dialId), 400); // call sheet: open the card to log the outcome
   },
   true
 );
@@ -2189,6 +2190,7 @@ function exitSearchMode() {
   renderDialsTable();
 }
 
+document.getElementById("headerSearchBtn")?.addEventListener("click", (e) => { e.stopPropagation(); enterSearchMode(); });
 els.menuSearchBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   closePageHeaderMenu();
@@ -2987,8 +2989,10 @@ const OUTCOMES = [
   { status: "unable_to_contact", label: "Wrong / dead number" },
 ];
 function dialCallButtonsHTML(dial) {
+  // Each number: the big in-app Call button plus a Text button (sms: link, with the personalized text if that setting is on).
   const btn = (num, method, label) =>
-    `<button type="button" class="btn dial-call-btn contact-action-call" data-dial-id="${escapeHtml(dial.id)}" data-tel="${escapeHtml(num)}" data-method="${method}"><b>${label}</b><span>${escapeHtml(num)}</span></button>`;
+    `<div class="dial-call-line"><button type="button" class="btn dial-call-btn contact-action-call" data-dial-id="${escapeHtml(dial.id)}" data-tel="${escapeHtml(num)}" data-method="${method}"><b>${label}</b><span>${escapeHtml(num)}</span></button>` +
+    `<a class="btn secondary dial-text-btn" href="${escapeHtml(buildSmsHref(num, resolvePersonalizedTextingBody(profile, dial)))}" title="Text ${escapeHtml(num)}">Text</a></div>`;
   const rows = [];
   if (dial.mobile_phone) rows.push(btn(dial.mobile_phone, "mobile", dial.mobile_phone_unsure ? "Call (may not be a mobile)" : "Call mobile"));
   if (dial.company_phone) rows.push(btn(dial.company_phone, "company", "Call office"));
@@ -3393,7 +3397,17 @@ async function updateDialStatus(newStatus) {
       .select("id", { count: "exact", head: true })
       .eq("dial_id", currentDial.id);
     if (historyError) return showError(els.dialModalError, historyError);
-    if (!count) {
+    // Live counts a contact only when the company has no call history at all. A later-day sequence call by the dial's owner
+    // is a new contact too: no row from this user today -> record one (autoMarkContacted writes the row and today's date).
+    let needsContact = !count;
+    if (count && currentDial.created_by === profile.id) {
+      const { startIso, endIso } = localDayBoundsIso(todayDateStr());
+      const { count: todayCount, error: tErr } = await supabase.from("call_status_changes").select("id", { count: "exact", head: true })
+        .eq("dial_id", currentDial.id).eq("user_id", profile.id).gte("changed_at", startIso).lt("changed_at", endIso);
+      if (tErr) return showError(els.dialModalError, tErr);
+      needsContact = !todayCount;
+    }
+    if (needsContact) {
       const method = currentDial.mobile_phone ? "mobile" : currentDial.company_phone ? "company" : currentDial.email ? "email" : "mobile";
       await autoMarkContacted(currentDial, method);
     }
@@ -3413,6 +3427,9 @@ async function updateDialStatus(newStatus) {
     if (taskErr) console.error("complete_sequence_task failed", taskErr); else home.taskDone(pendingTask.id);
   }
   const data = { contact_status: newStatus };
+  // The weekly survey's "Owners talked to" counts dials by called_today_date: stamp it when the outcome means an owner was reached
+  // (also set by the dials_called_today trigger, 20261126b_called_today.sql).
+  if (["not_interested", "callback_interested", "busy_callback", "intro_call_scheduled"].includes(newStatus)) data.called_today_date = todayDateStr();
   const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
   if (error) return showError(els.dialModalError, error);
   Object.assign(currentDial, data);

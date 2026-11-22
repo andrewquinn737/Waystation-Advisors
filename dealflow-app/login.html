@@ -88,7 +88,7 @@
       if (!session || bounceReason) return;
       const { data, error } = await supabase.auth.getUser();
       if (data?.user && !error) {
-        window.location.href = "dials.html";
+        window.location.href = "profile.html";
       } else if (error && error.name !== "AuthRetryableFetchError") {
         await supabase.auth.signOut({ scope: "local" });
       }
@@ -114,7 +114,7 @@
           saved = (await supabase.auth.getSession()).data.session;
         }
         if (!saved) throw new Error("This device can't save your sign-in (its browser storage is full or blocked). Close other tabs, clear this site's data in Settings, and try again.");
-        window.location.href = "dials.html";
+        window.location.href = "profile.html";
       } catch (err) {
         errorBox.classList.remove("hidden");
         errorBox.style.background = "#fdecec";

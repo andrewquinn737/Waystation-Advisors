@@ -15,7 +15,6 @@ import { getMainAdmin } from "./mainAdmin.js";
 import { wireReportsPopup } from "./reports.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
 import { wireDeletedTabsPopup } from "./deletedTabs.js";
-import { mountClaudeConnect } from "./claudeConnect.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -2659,5 +2658,3 @@ showCallsView("outreach");
 loadUpcomingEvents();
 loadCallbacksToday();
 
-// Admins only (interns no longer review or launch emails; the connector backend stays in place).
-if (profile.role === "admin") mountClaudeConnect(document.getElementById("claudeConnectHost"), { profile });

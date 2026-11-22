@@ -132,3 +132,22 @@ admin onboarding/Claude pairing + connector campaign tools, C = intern simplific
 - Drafting: drafts arrive in the CSV (Email Subject / Email 1 / Email 2 columns, made by outreach/sequence_copygen with the .md
   guidelines). Mason wants an IN-APP Claude bot to bulk-edit a campaign's drafts, routed through the Oracle VM on HIS Claude account
   (he accepted the terms risk). Worker: separate OS user, own systemd unit, never touch the live email hub; token set by Mason himself.
+
+## 2026-11-22: call tracking, survey stamp, phone keys on TEST
+- Call sheet "Call <name>" / "Call office" now use the company card's call path (`.contact-action-call`, in-app call or the phone's
+  dialer; `autoMarkContacted` writes today's `contacted_*_date` + a `call_status_changes` row, per method per day, as live does).
+  Saving an outcome records a contact when the company has no history (live behavior) OR, for the dial's owner, no row from them today
+  (a later-day call). First-contact semantics are unchanged. Files: `js/dialsHome.js`, `js/dials.js`.
+- Login/index/sw land on Profile again. Messages: no "Microsoft sign-in pending" banner; only "Couldn't sync <address>: <error>" for a
+  mailbox with `last_sync_error`. Interns get Search (header icon on Calls) and Text buttons on the company card.
+- LIVE BUG: `dials.called_today_date` was never written, so the weekly survey's "Owners talked to" was always 0.
+  Fix = client (`js/dials.js` updateDialStatus stamps it) + DB trigger `dials_called_today` (`20261126b_called_today.sql`: stamps it when
+  `contact_status` becomes not_interested / callback_interested / busy_callback / intro_call_scheduled, in the caller's `profiles.timezone`).
+  **Ships to live: the migration (the trigger fixes every client incl. old cached ones) and the js/dials.js change.**
+- Phone on TEST: app_secrets copied from live (TELNYX_API_KEY / PUBLIC_KEY / SIP_CONNECTION_ID / CALLBACK_APP_ID, DEEPGRAM_API_KEY /
+  PROJECT_ID, CALL_SUMMARY_INTERNAL_KEY), one `caller_numbers` row (+1 801 251 7644, no fallback user), and the reference tables
+  `area_codes` + `state_centroids` (were empty on TEST, so every call came back "native"). `internal_call_secret` is empty on live: not copied.
+  Calendly (CALENDLY_TOKEN / CALENDLY_EVENT_TYPE_URI) are edge-function env secrets: values are not readable, set them on TEST by hand.
+- Telnyx webhook still points at the LIVE function. Outbound test calls: live's handler only updates `calls` rows matched on
+  `telnyx_call_id`, which live does not have, so it writes nothing. Inbound: someone calling a pool number back is screened by LIVE's data
+  (rejected, or rung to a live rep if that number was dialed on live today). Test numbers should be Mason's own cell; don't call back the pool number.

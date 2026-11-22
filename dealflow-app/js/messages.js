@@ -27,7 +27,7 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireNotificationsToggle } from "./notifications.js";
 import { openQuickSend } from "./quickSend.js";
 import { getTeamLeadMailbox } from "./contactIcons.js";
-import { MAILBOX_KEY, loadMailboxes, buildGroups, selectedMailboxIds, loadUnreadCounts, loadSequenceBadges, loadQuotas, wireMailboxPicker, ownerFirstName, isMsMailbox, MS_PENDING_NOTE } from "./mailboxScope.js";
+import { MAILBOX_KEY, loadMailboxes, buildGroups, selectedMailboxIds, loadUnreadCounts, loadSequenceBadges, loadQuotas, wireMailboxPicker, ownerFirstName } from "./mailboxScope.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -109,12 +109,12 @@ const canWriteAccount = (id) => { const a = acctById(id); return !!a && (a.mine 
 let detailThreadId = null; // null = list view
 let pendingCompose = null; // { attachments: [{filename, contentType, base64}] }
 let threadListSelectMode = false;
-// "received" | "sent" | "spam" | "trash" | "scheduled" — team leads/admins only
+// "received" | "sent" | "spam" | "trash" | "scheduled" | "bounces" — team leads/admins only
 // (interns always see the one client-matched feed). Received is the synced
 // inbox (threads, unread state, client links); every other view is read live
 // from the real mailbox / the send queue — see loadLiveFolder below.
 let folderView = "received";
-const FOLDER_LABELS = { received: "Received", sent: "Sent", spam: "Spam", trash: "Trash", scheduled: "Scheduled" };
+const FOLDER_LABELS = { received: "Received", sent: "Sent", spam: "Spam", trash: "Trash", scheduled: "Scheduled", bounces: "Bounces" };
 let selectedThreadIds = new Set();
 let currentThreadRows = []; // the list currently rendered, for Select all / bulk actions
 
@@ -149,14 +149,20 @@ function updateTitle() {
   document.querySelectorAll(".mail-tab").forEach((t) => t.classList.toggle("active", t.dataset.folder === folderView));
 }
 
-// One quiet line (never an error) when some of the selected mailboxes are Microsoft 365 ones we can't read yet.
+// One quiet line only for a selected mailbox whose last sync failed: "Couldn't sync <address>: <short error>".
+function shortSyncError(msg) {
+  const m = String(msg || "");
+  if (/basic authentication is disabled/i.test(m)) return "Microsoft blocked the password sign-in";
+  if (/login failed|AUTHENTICATIONFAILED|invalid credentials|unauthorized|invalid_grant/i.test(m)) return "sign-in was refused";
+  if (/timed? ?out|ECONN|network|connect/i.test(m)) return "the mailbox didn't respond";
+  return m.replace(/\s+/g, " ").slice(0, 80) || "unknown error";
+}
 function updateMailNote() {
-  const pending = (accountIdsForQuery() || []).filter((id) => { const a = acctById(id); return a && isMsMailbox(a); }).length;
-  const total = (accountIdsForQuery() || []).length;
-  // Interns only hear about it when nothing at all can be read, in one line.
-  const show = isIntern ? pending > 0 && pending === total : pending > 0;
-  els.mailNote.textContent = isIntern ? "Your inbox can't be read yet. Ask your team lead." : pending > 1 ? `${pending} mailboxes can't be read yet (Microsoft sign-in pending)` : pending ? `${MS_PENDING_NOTE}` : "";
-  els.mailNote.classList.toggle("hidden", !show);
+  const bad = (accountIdsForQuery() || []).map(acctById).filter((a) => a && a.last_sync_error);
+  const text = !bad.length ? "" : bad.length === 1 ? `Couldn't sync ${bad[0].email_address}: ${shortSyncError(bad[0].last_sync_error)}`
+    : `Couldn't sync ${bad.length} mailboxes: ${bad.slice(0, 2).map((a) => a.email_address).join(", ")}${bad.length > 2 ? "…" : ""}`;
+  els.mailNote.textContent = text;
+  els.mailNote.classList.toggle("hidden", !text);
 }
 
 wirePageHeaderMenu({ toggleBtn: els.pageSettingsBtn, menuEl: els.settingsMenu, extraCloseEl: els.mailboxesPopup });
@@ -263,7 +269,7 @@ function renderViewingPopup() {
 
 function setFolderView(next) {
   folderView = next;
-  els.menuFolderLabel.textContent = folderView === "spam" || folderView === "trash" || folderView === "scheduled" ? `Viewing: ${FOLDER_LABELS[folderView]}` : "Spam, Trash, Scheduled";
+  els.menuFolderLabel.textContent = folderView === "spam" || folderView === "trash" || folderView === "scheduled" || folderView === "bounces" ? `Viewing: ${FOLDER_LABELS[folderView]}` : "Spam, Trash, Scheduled, Bounces";
   // Select mode (mark unread / delete) only means something on the synced inbox.
   els.menuSelectBtn.classList.toggle("hidden", folderView !== "received");
   if (threadListSelectMode) exitThreadSelectMode();
@@ -346,10 +352,7 @@ let listState = null; // { msgs: Map(id -> msg), oldest, hasMore, clientNames, l
 const counterpart = (m) => (m.direction === "outbound" ? (m.to_addresses || [])[0]?.address : m.from_address) || "";
 
 async function loadThreadList(loadMore = false) {
-  // Sent is read live from the mailbox, except when every selected mailbox is a Microsoft one (nothing to read live):
-  // then the copies the app itself saved when sending are shown instead.
-  const liveReadable = (accountIdsForQuery() || []).some((id) => { const a = acctById(id); return !(a && isMsMailbox(a)); });
-  if (canManageMail && folderView !== "received" && !(folderView === "sent" && !liveReadable)) return loadLiveFolder();
+  if (canManageMail && folderView !== "received" && folderView !== "bounces") return loadLiveFolder();
   els.errorBox.classList.add("hidden");
   const ids = accountIdsForQuery();
   if (ids && !ids.length) {
@@ -370,6 +373,8 @@ async function loadThreadList(loadMore = false) {
     .order("sent_at", { ascending: false })
     .limit(PAGE_SIZE);
   if (ids) query = query.in("account_id", ids);
+  // Delivery failures and automated notices (is_system, set by a DB trigger) live under the gear menu > Bounces, not in the Inbox.
+  query = query.eq("is_system", folderView === "bounces");
   if (canManageMail) query = query.eq("direction", folderView === "sent" ? "outbound" : "inbound");
   if (loadMore && state.oldest) query = query.lte("sent_at", state.oldest);
   const { data, error } = await query;
@@ -443,7 +448,7 @@ async function liveCall(body) {
 // One short, plain line for a mailbox failure (never a raw IMAP/stack message).
 function friendlyMailError(msg) {
   const m = String(msg || "");
-  if (/basic authentication is disabled|office ?365|outlook/i.test(m)) return MS_PENDING_NOTE;
+  if (/basic authentication is disabled|office ?365|outlook/i.test(m)) return "Microsoft blocked the mailbox sign-in";
   if (/login failed|AUTHENTICATIONFAILED|invalid credentials/i.test(m)) return "The mailbox sign-in was refused";
   if (/timed? ?out|ECONN|network|connect/i.test(m)) return "The mailbox didn't respond";
   return "Couldn't read this mailbox right now";
@@ -496,13 +501,7 @@ async function loadLiveFolder(loadMore = false) {
     els.wrap.innerHTML = `<div class="empty-state">No email connected yet — go to Profile → Edit to connect one.</div>`;
     return;
   }
-  // Microsoft 365 mailboxes can't be opened over IMAP yet: skip them (the note above the list says so once).
-  const ids = all.filter((id) => { const a = acctById(id); return !(a && isMsMailbox(a)); });
-  if (!ids.length && kind !== "scheduled") {
-    liveState = null;
-    els.wrap.innerHTML = `<div class="empty-state">${MS_PENDING_NOTE}.</div>`;
-    return;
-  }
+  const ids = all;
   if (!loadMore) {
     els.wrap.innerHTML = `<div class="empty-state">Loading from the mailbox…</div>`;
     liveState = { kind, items: [], accountState: new Map(), scheduled: [], failures: [] };
@@ -690,7 +689,7 @@ async function openLiveMessage(item) {
 function renderThreadList() {
   const rows = currentThreadRows;
   if (!rows.length) {
-    els.wrap.innerHTML = `<div class="empty-state">${folderView === "sent" && canManageMail ? "No sent messages yet." : "Your inbox is empty."}</div>`;
+    els.wrap.innerHTML = `<div class="empty-state">${folderView === "bounces" ? "No bounces or system notices." : folderView === "sent" && canManageMail ? "No sent messages yet." : "Your inbox is empty."}</div>`;
     return;
   }
 

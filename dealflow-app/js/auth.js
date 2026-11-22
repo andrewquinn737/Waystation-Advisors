@@ -247,10 +247,11 @@ const NAV_ICONS = {
     '<svg class="nav-mail" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
 };
 
-// Who sees which tabs: Profile first (everyone), then Calls, Inbox, and Admin for admins. Clients is reached from Admin > Settings.
+// Who sees which tabs: Profile, Clients (all roles, as on origin/main), Calls, Inbox, then Admin for admins.
 function navItems(role) {
   const items = [
     { href: "profile.html", label: "Profile", icon: NAV_ICONS.person },
+    { href: "clients.html", label: "Clients", icon: NAV_ICONS.handshake },
     { href: "dials.html", label: "Calls", icon: NAV_ICONS.phone },
     { href: "messages.html", label: "Inbox", icon: NAV_ICONS.mail },
   ];
@@ -274,8 +275,7 @@ export function renderNav(profile) {
   document.body.classList.add("role-" + (role === "admin" || role === "team_lead" ? role : "intern"));
 
   const page = document.body.dataset.page || "";
-  // Clients is reached from Admin > Settings, so the Admin tab stays lit there.
-  const items = navItems(role).map((it) => ({ ...it, active: page === it.href || (it.also || []).includes(page) || (page === "clients.html" && it.href === "admin.html") }));
+  const items = navItems(role).map((it) => ({ ...it, active: page === it.href || (it.also || []).includes(page) }));
   const link = (it) => `<a href="${it.href}" class="${it.active ? "active" : ""}">${it.label}</a>`;
   const tab = (it) => `<a href="${it.href}" class="${it.active ? "active" : ""}" title="${it.label}">${it.icon}<span class="tab-label">${it.label}</span></a>`;
 

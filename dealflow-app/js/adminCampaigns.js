@@ -1,4 +1,4 @@
-// Admin > Campaigns: one card per email list. Design in Claude, Review, Launch / Pause / Resume.
+// Admin > Campaigns: one table row per email list (cards on phones). Design in Claude, Review, Launch / Pause / Resume.
 import { supabase } from "./supabaseClient.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 import { openCopyReview } from "./copyReviewScreen.js";
@@ -29,12 +29,8 @@ async function load() {
   msg(""); camps = data || []; render();
 }
 
-const STATS = [["emails_sent", "Emails sent"], ["contacted", "Companies contacted"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls booked"], ["bounced", "Bounced"]];
-const pct = (n, of) => (of > 0 && n > 0 ? `<small>${Math.round((n / of) * 100)}%</small>` : "");
-const statRow = (n, cls = "") => `<div class="ad-stats ${cls}">${STATS.map(([k, label], i) => {
-  const v = n[k] ?? 0;
-  return `<div class="ad-stat${v ? "" : " zero"}"><b>${v.toLocaleString()}${i > 1 ? pct(v, n.contacted) : ""}</b><span>${label}</span></div>`;
-}).join("")}</div>`;
+const STATS = [["emails_sent", "Emails sent"], ["contacted", "Contacted"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
+const statCells = (n) => STATS.map(([k, label]) => { const v = n[k] ?? 0; return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${label}</span></div>`; }).join("");
 export const designPrompt = (c) => `Use the Waystation CRM connector: design_campaign for list ${c.name} (list_id ${c.list_id})`;
 
 function totals() {
@@ -44,43 +40,57 @@ function totals() {
 }
 function hint(c) {
   const n = c.counts;
-  if (!c.mailboxes) return `<p class="ad-note warn">${esc(c.owner || "The owner")} has no sending mailbox yet. Add one under Email accounts before launching.</p>`;
-  if (c.status === "paused") return `<p class="ad-note warn">Paused${c.paused_reason ? ": " + esc(c.paused_reason) : ""}. Nothing is sent until you resume.</p>`;
-  if (c.status === "draft" && !c.has_spintax) return `<p class="ad-note">No emails yet. Design them in Claude.</p>`;
-  if (c.status === "ready") return `<p class="ad-note">${c.launched_at ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "email is", "emails are")} ready to launch.`}</p>`;
+  if (c.status === "done") return "";
+  if (!c.mailboxes) return `<span class="warn">${esc(c.owner || "The owner")} has no sending mailbox yet. Add one under Email accounts before launching.</span>`;
+  if (c.status === "paused") return `<span class="warn">Paused${c.paused_reason ? ": " + esc(c.paused_reason) : ""}. Nothing is sent until you resume.</span>`;
+  if (c.status === "draft" && !c.has_spintax) return `No emails yet. Design them in Claude.`;
+  if (c.status === "ready") return c.launched_at ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "email is", "emails are")} ready to launch.`;
   return "";
 }
-function card(c) {
+function row(c) {
   const n = c.counts, live = c.status === "live", paused = c.status === "paused", canLaunch = n.ready > 0 && !paused;
-  const sub = [c.owner || "Unknown owner", "Uploaded " + day(c.created_at), MANDATE[c.mandate] || ""].filter(Boolean).join(" · ");
-  const primary = canLaunch ? "launch" : paused ? "resume" : c.status === "draft" ? "design" : "";
-  const btn = (a, label) => `<button type="button" class="btn${primary === a ? "" : " secondary"}" data-a="${a}">${label}</button>`;
-  const acts = [
-    canLaunch ? btn("launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`) : "",
-    paused ? btn("resume", "Resume") : "",
-    c.status !== "done" ? btn("design", "Design in Claude") : "",
-    n.ready + n.need_fix > 0 ? btn("review", "Review emails") : "",
-    live ? btn("pause", "Pause") : "",
+  const sub = [c.owner || "Unknown owner", "Uploaded " + day(c.created_at), MANDATE[c.mandate] || ""].filter(Boolean).join(" \u00b7 ");
+  // One primary action per row; everything else sits in the overflow menu.
+  const all = [
+    canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`] : null,
+    paused ? ["resume", "Resume"] : null,
+    c.status !== "done" ? ["design", "Design in Claude"] : null,
+    n.ready + n.need_fix > 0 ? ["review", "Review emails"] : null,
+    live ? ["pause", "Pause"] : null,
   ].filter(Boolean);
-  const held = n.need_fix > 0 ? `<p class="ad-note warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></p>` : "";
-  return `<article class="ad-card" data-id="${esc(c.list_id)}">
-    <div class="ad-top"><div class="ad-name">${esc(c.name || "(untitled)")}</div><span class="ad-chip ${esc(c.status)}">${CHIP[c.status] || ""}</span></div>
-    <div class="ad-sub">${esc(sub)}</div>
-    ${statRow(n)}
-    ${hint(c)}${held}<div class="ad-actions">${acts.join("")}</div></article>`;
+  const pick = canLaunch ? "launch" : paused ? "resume" : all.find(([a]) => a === "review") && n.need_fix > 0 ? "review" : c.status === "draft" ? "design" : "";
+  const main = all.find(([a]) => a === pick), rest = all.filter(([a]) => a !== pick);
+  const held = n.need_fix > 0 ? `<span class="warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></span>` : "";
+  const note = [hint(c), held].filter(Boolean).join(" ");
+  return `<article class="cp-row" data-id="${esc(c.list_id)}">
+    <div class="cp-name"><b title="${esc(c.name || "")}">${esc(c.name || "(untitled)")}</b><span>${esc(sub)}</span></div>
+    <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span></div>
+    ${statCells(n)}
+    <div class="cp-act">${main ? `<button type="button" class="btn small" data-a="${main[0]}">${main[1]}</button>` : ""}
+      ${rest.length ? `<div class="cp-menu-wrap"><button type="button" class="cp-more" data-menu aria-label="More actions" aria-haspopup="menu" aria-expanded="false">&#8943;</button><div class="cp-menu hidden" role="menu">${rest.map(([a, l]) => `<button type="button" role="menuitem" data-a="${a}">${l}</button>`).join("")}</div></div>` : ""}</div>
+    <div class="cp-note${note ? "" : " hidden"}">${note}</div></article>`;
 }
 function render() {
   const open = camps.filter((c) => c.status !== "done"), done = camps.filter((c) => c.status === "done");
-  $("cpSummary").textContent = camps.length ? `${plural(open.length, "campaign", "campaigns")} in progress${done.length ? `, ${done.length} finished` : ""}.` : "";
-  $("cpTotals").innerHTML = camps.length ? `<div class="ad-totals-h">All campaigns</div>${statRow(totals())}` : "";
+  $("cpSummary").textContent = "";
+  const t = totals();
+  $("cpTotals").innerHTML = camps.length ? `<div class="cp-strip-h">All campaigns<small>${plural(open.length, "in progress", "in progress")}${done.length ? `, ${done.length} finished` : ""}</small></div>${statCells(t)}` : "";
   $("cpTotals").classList.toggle("hidden", !camps.length);
   const shown = showDone ? camps : open;
-  $("cpList").innerHTML = shown.length ? shown.map(card).join("") : `<p class="ad-empty">${camps.length ? "Nothing in progress." : "No campaigns yet. One appears here as soon as a list with email leads is uploaded."}</p>`;
-  const t = $("cpToggleDone"); t.classList.toggle("hidden", !done.length); t.textContent = showDone ? "Hide finished" : `Show finished (${done.length})`;
+  $("cpList").innerHTML = shown.length ? `<div class="cp-head" aria-hidden="true"><div>Campaign</div><div>Status</div>${STATS.map(([, l]) => `<div>${l === "Emails sent" ? "Sent" : l}</div>`).join("")}<div></div></div>${shown.map(row).join("")}` : `<p class="ad-empty">${camps.length ? "Nothing in progress." : "No campaigns yet. One appears here as soon as a list with email leads is uploaded."}</p>`;
+  $("cpList").classList.toggle("cp-table", !!shown.length);
+  const tg = $("cpToggleDone"); tg.classList.toggle("hidden", !done.length); tg.textContent = showDone ? "Hide finished" : `Show finished (${done.length})`;
 }
 
+function closeMenus() { document.querySelectorAll(".cp-menu:not(.hidden)").forEach((m) => { m.classList.add("hidden"); m.previousElementSibling?.setAttribute("aria-expanded", "false"); }); }
+document.addEventListener("click", (e) => { if (!e.target.closest(".cp-menu-wrap")) closeMenus(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+
 async function onClick(e) {
-  const b = e.target.closest("[data-a]"), el = e.target.closest(".ad-card"); if (!b || !el) return;
+  const menuBtn = e.target.closest("[data-menu]");
+  if (menuBtn) { const m = menuBtn.nextElementSibling, was = !m.classList.contains("hidden"); closeMenus(); if (!was) { m.classList.remove("hidden"); menuBtn.setAttribute("aria-expanded", "true"); } return; }
+  const b = e.target.closest("[data-a]"), el = e.target.closest(".cp-row"); if (!b || !el) return;
+  closeMenus();
   const c = camps.find((x) => x.list_id === el.dataset.id); if (!c) return;
   const a = b.dataset.a;
   if (a === "review") return openCopyReview({ id: c.list_id, name: c.name }, { all: true, onChanged: load });
@@ -96,8 +106,9 @@ async function onClick(e) {
 async function designInClaude(c, el) {
   const prompt = designPrompt(c), ok = await copyText(prompt);
   window.open("https://claude.ai/new?q=" + encodeURIComponent(prompt), "_blank", "noopener");
-  el.querySelector(".ad-design-note")?.remove();
-  el.querySelector(".ad-actions").insertAdjacentHTML("beforebegin", `<p class="ad-note ad-design-note">Opened Claude with the request${ok ? " (also copied)" : ""}. If it did not fill in, paste: <span class="ad-prompt">${esc(prompt)}</span> Not connected yet? Admin &gt; Settings.</p>`);
+  const slot = el.querySelector(".cp-note");
+  slot.classList.remove("hidden");
+  slot.innerHTML = `Opened Claude with the request${ok ? " (also copied)" : ""}. If it did not fill in, paste: <span class="ad-prompt">${esc(prompt)}</span> Not connected yet? Admin &gt; Settings.`;
 }
 
 // ---- launch sheet (start-emails edge function checks every address first) ----------------------------------------

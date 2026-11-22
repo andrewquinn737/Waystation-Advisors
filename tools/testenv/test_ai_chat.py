@@ -38,6 +38,13 @@ def msgs(tid): return q(f"select role, content, partial, meta from ai_messages w
 def job(jid): return q(f"select * from ai_jobs where id='{jid}'")[0]
 def status(email=ADMIN): return rpc(email, "ai_chat_status")[1]
 
+# The real worker on the VM ('waystation-vnic') heartbeats to TEST, and ai_chat_status() prefers any online signed-in worker, so the
+# global status can't show the test worker's own state. Assertions about THIS test worker read its own row (same 90 s rule).
+def mine():
+    return (q(f"select id, auth_ok, auth_error, (last_seen > now() - interval '90 seconds') as online from ai_workers where id='{WID}'") or [None])[0]
+def others_signed_in():
+    return int(q(f"select count(*) c from ai_workers where id<>'{WID}' and auth_ok and last_seen > now() - interval '90 seconds'")[0]["c"])
+
 def cleanup():
     q("delete from ai_threads where list_id in (select id from dial_lists where name like 'TEST-AI %')")
     q("delete from dial_lists where name like 'TEST-AI %'")
@@ -141,9 +148,14 @@ def _run(lid):
     stop_worker(w)
     w = start_worker(token="")
     check("no token: heartbeat says not signed in, with the reason", wait(lambda: (worker_row() or {}).get("auth_ok") is False and "empty" in ((worker_row() or {}).get("auth_error") or ""), 40), worker_row())
-    wait(lambda: not status()["worker"]["auth_ok"], 10)
-    st = status()
-    check("status for the UI: online but not signed in (amber)", st["worker"]["online"] and st["worker"]["auth_ok"] is False and st["worker"]["auth_error"], st)
+    if others_signed_in():   # a real worker is signed in, so the global status correctly shows IT; assert on our own worker's row
+        st = mine()
+        check("amber state for this worker id: online but not signed in", st and st["online"] and st["auth_ok"] is False and st["auth_error"], st)
+        check("global status still shows the other (signed-in) worker as healthy", status()["worker"]["auth_ok"] is True, status())
+    else:
+        wait(lambda: not status()["worker"]["auth_ok"], 10)
+        st = status()
+        check("status for the UI: online but not signed in (amber)", st["worker"]["online"] and st["worker"]["auth_ok"] is False and st["worker"]["auth_error"], st)
     n_calls = len(calls())
     c, r = post(ADMIN, lid, "edit while signed out")
     check("message accepted while signed out", c == 200, (c, r))
@@ -162,9 +174,14 @@ def _run(lid):
     w = start_worker(token="bad")
     check("rejected token: worker reports not signed in", wait(lambda: (worker_row() or {}).get("auth_ok") is False and "isn't signed in" in ((worker_row() or {}).get("auth_error") or ""), 40), worker_row())
     stop_worker(w)
+    # Silent worker -> "Offline". Only our own row is aged; the real VM worker is never touched.
+    q(f"update ai_workers set last_seen = now() - interval '1 hour' where id='{WID}'")
+    if others_signed_in():
+        st = mine()
+        check("no heartbeat for 90s: this worker id is offline", st is not None and st["online"] is False, st)
+    else:
+        st = status()
+        check("no heartbeat for 90s: status says offline", st["worker"] is not None and st["worker"]["online"] is False, st)
     q(f"delete from ai_workers where id='{WID}'")
-    q("update ai_workers set last_seen = now() - interval '1 hour'")          # every worker silent -> "Offline" (the real one heartbeats again within 30s)
-    st = status()
-    check("no heartbeat for 90s: status says offline", st["worker"] is not None and st["worker"]["online"] is False, st)
 
 if __name__ == "__main__": run()
