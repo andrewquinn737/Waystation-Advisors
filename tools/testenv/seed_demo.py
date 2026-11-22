@@ -15,6 +15,7 @@ def reset_list(name, owner):
     old = q(f"select id from dial_lists where name = {lit(name)} and created_by = '{uid(owner)}'")
     for r in old:   # own rows only: tasks cascade with the dials
         q(f"delete from email_messages where from_address like 'demo.%@example.com' and account_id in (select id from email_accounts where owner_id = '{uid(owner)}')")
+        q(f"delete from clients where source_list_id = '{r['id']}'")   # demo clients (events cascade)
         q(f"delete from dials where list_id = '{r['id']}'")
         q(f"delete from dial_lists where id = '{r['id']}'")
     lid = str(uuid.uuid4())
@@ -29,13 +30,19 @@ def dial(lid, owner, co, person, city, status="uncontacted", seq=None, state=Non
     slug = "".join(c for c in co.lower() if c.isalnum())[:18]
     email = f"demo.{slug}@example.com"
     d = q(f"""insert into dials (list_id, created_by, company_name, full_name, email, mobile_phone, company_phone, linkedin, city, state, website, industry,
-                summary, contact_status, sequence, seq_state, seq_day0, callback_at, sender_account_id)
+                summary, contact_status, sequence, seq_state, seq_day0, callback_at, callback_user_id, sender_account_id)
               values ('{lid}', '{uid(owner)}', {lit(co)}, {lit(person)}, {lit(email)}, {lit(phone())}, {lit(phone())},
                 {lit('https://www.linkedin.com/in/' + person.lower().replace(' ', '-') + '-demo')}, {lit(city)}, 'UT', {lit('https://' + slug + '.example.com')}, {lit(ind)},
                 {lit(f'Family-run {ind.lower()} business serving {city} since the 1990s. Owner is hands-on; about 20 employees. Demo record.')},
                 {lit(status)}, {lit(seq)}, {lit(state)}, {f"person_today('{uid(owner)}') - {day0}" if day0 is not None else 'null'},
-                {f"now() + interval '{callback}'" if callback else 'null'}, {lit(acct) if state else 'null'})
+                {f"now() + interval '{callback}'" if callback else 'null'}, {f"'{uid(owner)}'" if callback else 'null'}, {lit(acct) if state else 'null'})
               returning id""")[0]["id"]
+    if status == "intro_call_scheduled":   # the original flow creates the client + a future intro_call event (Profile > Upcoming events)
+        c = q(f"""insert into clients (client_type, company_name, full_name, email, mobile_phone, company_phone, city, state, industry, website, created_by, assigned_to, source_dial_id, source_list_id, pipeline_status)
+                  values ('seller', {lit(co)}, {lit(person)}, {lit(email)}, {lit(phone())}, {lit(phone())}, {lit(city)}, 'UT', {lit(ind)}, {lit('https://' + slug + '.example.com')}, '{uid(owner)}', '{uid(owner)}', '{d}', '{lid}', 'not_in_contact') returning id""")[0]["id"]
+        q(f"""insert into client_events (client_id, event_type, event_date, details, created_by) values ('{c}', 'intro_call',
+              date_trunc('day', now() at time zone 'America/Denver' + interval '1 day') at time zone 'America/Denver' + interval '10 hours',
+              '{{"via":"calendly","time":"10:00","timezone":"America/Denver"}}'::jsonb, '{uid(owner)}')""")
     for step, day, kind, off, st in tasks:
         q(f"""insert into sequence_tasks (dial_id, list_id, owner_id, step, seq_day, kind, due_on, status, completed_at)
               values ('{d}', '{lid}', '{uid(owner)}', {step}, {day}, '{kind}', person_today('{uid(owner)}') + ({off}), '{st}', {"now()" if st == "done" else "null"})""")
