@@ -160,3 +160,13 @@ admin onboarding/Claude pairing + connector campaign tools, C = intern simplific
 9 copy ALL live data into TEST (live read-only), test logins per real user. 10 BEFORE import: call lock on TEST (only +15024196436),
 email redirect stays, auto-send paused. 11 full regression with real data, every role, incl. previously untested items.
 Mason: "Do NOT send out any live emails/calls."
+
+## NEXT (queued by Mason, after items 1-11 land)
+Step 1 (running): docs/LIVE_USAGE_MAP.md from read-only live data (who does what, order, frequency, pain points, per-stage replay scripts).
+Step 2: one agent per stage replays real behavior on TEST with real data and fixes until right: Importing (any CSV headers,
+preview, mapping, duplicates, copy check, assign), Email sending (launch->schedule->thread->reply stop->per-mailbox report),
+Calling (one tap->call->outcome->next), Transcripts (every recorded call -> transcript + summary on card), Tracking (each
+call/email/reply counted once), Reporting (Profile/team/PDF numbers == DB), Intro call scheduling (event + client + notify +
+Upcoming; Calendly API needs Mason's token).
+Step 3: page-by-page review loops (design / function / bugs agents) until a pass finds nothing; tests green each pass.
+Optional: privacy-safe click tracker on live (needs Mason's go-ahead).
