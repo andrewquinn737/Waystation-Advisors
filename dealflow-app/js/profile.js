@@ -2137,7 +2137,8 @@ async function loadCallbacksToday() {
   }
   els.callbacksTodayBox.innerHTML = rows
     .map((r) => {
-      const time = new Date(r.callback_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      const time = new Date(r.callback_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+        + (r.overdue ? " (overdue, " + new Date(r.callback_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + ")" : "");
       const past = new Date(r.callback_at).getTime() < Date.now() - 30 * 60 * 1000;
       return `
       <button type="button" class="upcoming-event-row callback-row${past ? " is-past" : ""}" data-dial-id="${r.id}">
@@ -2192,7 +2193,16 @@ async function loadUpcomingEvents() {
   // Skip the auto-inserted "Client created" entry (never a real event to
   // follow up on) and anything already checked off as happened on the
   // client's own Timeline — once confirmed there, it's done, not upcoming.
-  const rows = eventRows.filter((r) => r.event_type !== "created" && !r.confirmed);
+  // Intro calls whose date has passed without being confirmed (last 30 days, time known): shown first as "Did it happen?".
+  const monthAgo = new Date(startOfToday); monthAgo.setDate(monthAgo.getDate() - 30);
+  const { data: lateData } = await supabase
+    .from("client_events")
+    .select("id, event_type, event_date, details, confirmed, client_id, clients!client_events_client_id_fkey!inner(id, full_name, created_by)")
+    .eq("event_type", "intro_call").eq("confirmed", false)
+    .gte("event_date", monthAgo.toISOString()).lt("event_date", startOfToday.toISOString())
+    .in("clients.created_by", [...ids, ...extraIds]).order("event_date", { ascending: false });
+  const lateRows = (lateData || []).filter((r) => !r.details?.time_pending).map((r) => ({ ...r, needsConfirm: true }));
+  const rows = [...lateRows, ...eventRows.filter((r) => r.event_type !== "created" && !r.confirmed)];
   if (!rows.length) {
     els.upcomingEventsBox.innerHTML = `<div class="empty-state">No upcoming events.</div>`;
     return;
@@ -2204,10 +2214,12 @@ async function loadUpcomingEvents() {
       const name = c.full_name || "";
       const typeLabel = UPCOMING_EVENT_TYPE_LABELS[r.event_type] || r.event_type;
       const hasTime = !!r.details?.time;
+      const pending = !!r.details?.time_pending;
+      const when = pending ? "time to be set" : fmtEventDateTime(r.event_date, hasTime);
       return `
-      <button type="button" class="upcoming-event-row" data-client-id="${r.client_id}">
+      <button type="button" class="upcoming-event-row${r.needsConfirm ? " is-past" : ""}" data-client-id="${r.client_id}">
         <div class="upcoming-event-name">${escapeHtml(name)}</div>
-        <div class="upcoming-event-meta">${escapeHtml(typeLabel)} · ${fmtEventDateTime(r.event_date, hasTime)}</div>
+        <div class="upcoming-event-meta">${escapeHtml(typeLabel)} · ${escapeHtml(when)}${r.needsConfirm ? " · Did it happen? Tap to confirm" : ""}</div>
       </button>`;
     })
     .join("");

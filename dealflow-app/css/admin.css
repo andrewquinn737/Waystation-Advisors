@@ -159,3 +159,6 @@ a.btn#adOpen { text-decoration: none; }
 .ad-ok { color: var(--success); font-weight: 700; font-size: 16px; }
 .ad-wait { color: var(--text-muted-strong); font-size: 14px; }
 .ad-wiz-foot { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; } .ad-wiz-foot .btn { flex: 1 1 140px; min-height: 48px; font-size: 16px; }
+.ad-pill { display: inline-block; margin-left: 8px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; border: 1px solid var(--border); color: var(--text-muted); vertical-align: middle; }
+.ad-pill.ok { border-color: var(--success); color: var(--success); }
+.ad-panel input[type="password"], .ad-panel input[type="text"] { width: 100%; box-sizing: border-box; }

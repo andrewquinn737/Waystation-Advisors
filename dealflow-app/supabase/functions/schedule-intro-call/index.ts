@@ -28,6 +28,8 @@
 // { error: string } on failure (still returned with a 200/4xx as appropriate
 // so the frontend can show a friendly message).
 
+import { createClient } from "npm:@supabase/supabase-js@2";
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -103,12 +105,24 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  const CALENDLY_TOKEN = Deno.env.get("CALENDLY_TOKEN");
-  const CALENDLY_EVENT_TYPE_URI = Deno.env.get("CALENDLY_EVENT_TYPE_URI");
+  // Credentials: edge-function env secrets first, else the ones an admin saved under Admin > Settings > Connect Calendly
+  // (app_secrets via the calendly_connect RPC). Automatic booking is simply "off" until one of them exists.
+  let CALENDLY_TOKEN = Deno.env.get("CALENDLY_TOKEN");
+  let CALENDLY_EVENT_TYPE_URI = Deno.env.get("CALENDLY_EVENT_TYPE_URI");
+  if (!CALENDLY_TOKEN || !CALENDLY_EVENT_TYPE_URI) {
+    try {
+      const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data } = await admin.from("app_secrets").select("key, value").in("key", ["CALENDLY_TOKEN", "CALENDLY_EVENT_TYPE_URI"]);
+      for (const r of data || []) {
+        if (r.key === "CALENDLY_TOKEN" && !CALENDLY_TOKEN) CALENDLY_TOKEN = r.value;
+        if (r.key === "CALENDLY_EVENT_TYPE_URI" && !CALENDLY_EVENT_TYPE_URI) CALENDLY_EVENT_TYPE_URI = r.value;
+      }
+    } catch { /* fall through to the "not connected" answer */ }
+  }
   if (!CALENDLY_TOKEN || !CALENDLY_EVENT_TYPE_URI) {
     return jsonResponse(
-      { error: "Calendly integration isn't configured yet (missing server secrets)." },
-      500
+      { error: "Calendly isn't connected yet. An admin can connect it under Admin > Settings > Connect Calendly; until then enter the time by hand.", not_connected: true },
+      200
     );
   }
 

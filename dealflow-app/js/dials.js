@@ -2666,6 +2666,7 @@ function wireOutcomeButtons() {
 // shows under "Callbacks for today" on Profile, as a banner at the top of the app, and as a push reminder 5 minutes
 // before (server-side run_callback_reminders()). Tapping any of those opens this dial.
 // ---------------------------------------------------------------------------
+const CALLBACK_STATUSES = ["busy_callback", "callback_interested"];
 function callbackLabel(iso) {
   const d = new Date(iso);
   const day = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -2679,8 +2680,9 @@ function buildCallbackHTML(dial) {
       <div class="rf-label">Callback</div>
       <div class="callback-field">
         ${set ? `<span class="callback-field-time">${escapeHtml(callbackLabel(dial.callback_at))}</span>` : ""}
+        ${set && dial.callback_defaulted ? `<span class="help-text">(default time)</span>` : ""}
         <button type="button" class="btn secondary" id="callbackSetBtn">${set ? "Change" : "Pick a callback time"}</button>
-        ${set ? `<button type="button" class="btn secondary" id="callbackClearBtn">Clear</button>` : ""}
+        ${set && !CALLBACK_STATUSES.includes(dial.contact_status) ? `<button type="button" class="btn secondary" id="callbackClearBtn">Clear</button>` : ""}
       </div>
     </div>`;
 }
@@ -2688,6 +2690,7 @@ async function saveCallback(dial, iso) {
   const patch = iso ? { callback_at: iso, callback_user_id: profile.id, callback_reminded_at: null } : { callback_at: null, callback_user_id: null, callback_reminded_at: null };
   const { error } = await supabase.from("dials").update(patch).eq("id", dial.id);
   if (error) throw error;
+  patch.callback_defaulted = false; // a time chosen by hand (the trigger records the same)
   Object.assign(dial, patch);
   if (currentDial?.id === dial.id) Object.assign(currentDial, patch);
   const idx = dials.findIndex((d) => d.id === dial.id);
@@ -2700,6 +2703,10 @@ function openCallbackModal(dial, { after } = {}) {
   els.callbackDateInput.value = `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`;
   els.callbackTimeInput.value = `${pad(base.getHours())}:${pad(Math.round(base.getMinutes() / 5) * 5 % 60)}`;
   els.callbackTimeError.classList.add("hidden");
+  const help = document.getElementById("callbackTimeHelp");
+  if (help) help.textContent = dial.callback_defaulted
+    ? "A reminder is already set for this time (the next business morning). Change it if they asked for a different time, or just press Save. Your own local time."
+    : "Pick when to call them back. It shows on your call sheet, and you get a reminder 5 minutes before. Your own local time.";
   els.callbackTimeModal.classList.remove("hidden");
   const close = () => {
     els.callbackTimeModal.classList.add("hidden");
@@ -3062,8 +3069,11 @@ async function updateDialStatus(newStatus) {
   // The weekly survey's "Owners talked to" counts dials by called_today_date: stamp it when the outcome means an owner was reached
   // (also set by the dials_called_today trigger, 20261126b_called_today.sql).
   if (["not_interested", "callback_interested", "busy_callback", "intro_call_scheduled"].includes(newStatus)) data.called_today_date = todayDateStr();
-  const { error } = await supabase.from("dials").update(data).eq("id", currentDial.id);
+  // The DB trigger dials_default_callback gives a callback status a default time (next business morning) and clears it when the
+  // status leaves the callback categories; read the result back so the card and the time picker show what is saved.
+  const { data: savedRows, error } = await supabase.from("dials").update(data).eq("id", currentDial.id).select("callback_at, callback_user_id, callback_defaulted");
   if (error) return showError(els.dialModalError, error);
+  if (savedRows?.[0]) Object.assign(data, savedRows[0]);
   Object.assign(currentDial, data);
   const updatedDialId = currentDial.id;
   if (newStatus === "intro_call_scheduled" && !wasAlreadyIntroScheduled) {
@@ -3378,7 +3388,7 @@ async function handleScheduleIntroCallFromDial(dial) {
   // the outreach call itself, so there's nothing to book (see
   // openCompletedIntroReportModal below).
   const canReportDuringOutreach = profile.role === "team_lead" || profile.role === "admin" || profile.role === "independent_lead";
-  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowCompletedDuringOutreach: canReportDuringOutreach });
+  els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowCompletedDuringOutreach: canReportDuringOutreach, allowManual: true });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     profile,
@@ -3386,6 +3396,11 @@ async function handleScheduleIntroCallFromDial(dial) {
     onCalendlyClosed: async () => {
       els.introCallPopup.classList.add("hidden");
       openIntroCallTimeConfirmModal(dial);
+    },
+    // Calendly not set up, or the time was agreed on the phone: enter it by hand (same confirm step, same records).
+    onManual: () => {
+      els.introCallPopup.classList.add("hidden");
+      openIntroCallTimeConfirmModal(dial, { manualIntro: true });
     },
     onCompletedDuringOutreach: () => {
       els.introCallPopup.classList.add("hidden");
@@ -3524,7 +3539,7 @@ async function createClientRecordFromDial(dial) {
 // its own client + intro_call event for what was really only one booking.
 let introCallTimeConfirmCleanup = null;
 
-function openIntroCallTimeConfirmModal(dial, { onConfirmed } = {}) {
+function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false } = {}) {
   introCallTimeConfirmCleanup?.();
   introCallTimeConfirmCleanup = null;
 
@@ -3535,9 +3550,14 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed } = {}) {
   const errEl = els.introCallTimeError;
   const confirmBtn = els.introCallTimeConfirmBtn;
 
+  // No date is pre-filled (a default of "today" is how calls ended up backdated): the rep must pick the real day. Past days are
+  // refused unless "This call already happened" is ticked.
   const today = new Date();
   today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
-  dateInput.value = today.toISOString().slice(0, 10);
+  dateInput.min = today.toISOString().slice(0, 10);
+  dateInput.value = "";
+  const pastOk = document.getElementById("introCallPastOk");
+  if (pastOk) { pastOk.checked = false; pastOk.onchange = () => { dateInput.min = pastOk.checked ? "" : today.toISOString().slice(0, 10); }; }
   timeSelect.innerHTML = timeOptionsHTML("", { includeNoTime: false });
   tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
   errEl.classList.add("hidden");
@@ -3560,10 +3580,17 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed } = {}) {
       errEl.classList.remove("hidden");
       return;
     }
+    const eventDateIso = zonedTimeToUtcIso(val, time, timezone);
+    const allowPast = !!pastOk?.checked;
+    if (!allowPast && new Date(eventDateIso).getTime() < Date.now() - 5 * 60 * 1000) {
+      errEl.textContent = "That time has already passed. If the call already happened, tick \"This call already happened\".";
+      errEl.classList.remove("hidden");
+      return;
+    }
     // Questionnaire flow (see openQuestionnaireIntroPopup): just hand the
     // chosen time back — the client is created later, from that popup.
     if (onConfirmed) {
-      onConfirmed({ val, time, timezone, eventDate: zonedTimeToUtcIso(val, time, timezone) });
+      onConfirmed({ val, time, timezone, eventDate: eventDateIso, pastOk: allowPast });
       cleanup();
       return;
     }
@@ -3573,13 +3600,11 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed } = {}) {
       if (!createdClient) {
         createdClient = await createClientFromDial(dial);
       }
-      const eventDate = zonedTimeToUtcIso(val, time, timezone);
-      const { error } = await supabase.from("client_events").insert({
-        client_id: createdClient.id,
-        event_type: "intro_call",
-        event_date: eventDate,
-        details: { via: "calendly", time, timezone },
-        created_by: profile.id,
+      // Updates the pending intro event the status change already created (or adds one); the database writes the Profile
+      // "Intro calls" credit and notifies the team. One event per client, never a second.
+      const { error } = await supabase.rpc("set_intro_call_time", {
+        p_client_id: createdClient.id, p_dial_id: dial.id, p_event_date: eventDateIso, p_time: time, p_timezone: timezone,
+        p_via: manualIntro ? "manual" : "calendly", p_past_ok: allowPast,
       });
       if (error) throw error;
     } catch (err) {
@@ -3665,17 +3690,11 @@ function openQuestionnaireIntroPopup(dial) {
         const delivery = await sendLeadToSheetAndSlack(client.id, values);
         const problem = describeDelivery(delivery);
         if (problem) showNotice(`The client was created, but the lead wasn't fully sent: ${problem}`, { title: "Lead not fully sent" });
-        const { data: existing, error: exErr } = await supabase
-          .from("client_events").select("id").eq("client_id", client.id).eq("event_type", "intro_call");
-        if (exErr) throw exErr;
-        if (!existing?.length) {
-          const { error } = await supabase.from("client_events").insert({
-            client_id: client.id, event_type: "intro_call", created_by: profile.id,
-            event_date: sched.eventDate, details: { via: "calendly", time: sched.time, timezone: sched.timezone },
-          });
-          if (error) throw error;
-          await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
-        }
+        const { error: introErr } = await supabase.rpc("set_intro_call_time", {
+          p_client_id: client.id, p_dial_id: dial.id, p_event_date: sched.eventDate, p_time: sched.time, p_timezone: sched.timezone,
+          p_via: "calendly", p_past_ok: true, // the time modal already refused a past time unless "already happened" was ticked
+        });
+        if (introErr) throw introErr;
         // The form passed, so the client's Questionnaire step is done as of now (the Intro call step above is the
         // booked call, which stays open until it happens).
         const { data: haveQ } = await supabase.from("client_events").select("id").eq("client_id", client.id).eq("event_type", "questionnaire");
@@ -3745,7 +3764,6 @@ function openCompletedIntroReportModal(dial) {
   // off instead of creating a second client/event for the same dial.
   let createdClient = null;
   let createdEventId = null;
-  let credited = false;
 
   const onSaveClick = async () => {
     const val = dateInput.value;
@@ -3761,19 +3779,12 @@ function openCompletedIntroReportModal(dial) {
     try {
       if (!createdClient) createdClient = await createClientFromDial(dial);
       if (!createdEventId) {
-        const { data: ev, error } = await supabase
-          .from("client_events")
-          .insert({
-            client_id: createdClient.id,
-            event_type: "intro_call",
-            event_date: zonedTimeToUtcIso(val, time, timezone),
-            details: { via: "outreach", time, timezone },
-            created_by: profile.id,
-          })
-          .select("id")
-          .single();
+        const { data: evId, error } = await supabase.rpc("set_intro_call_time", {
+          p_client_id: createdClient.id, p_dial_id: dial.id, p_event_date: zonedTimeToUtcIso(val, time, timezone), p_time: time, p_timezone: timezone,
+          p_via: "outreach", p_past_ok: true, // it already happened, so a past time is expected here
+        });
         if (error) throw error;
-        createdEventId = ev.id;
+        createdEventId = evId;
       }
       const { error: confirmErr } = await supabase.rpc("set_client_event_confirmed", {
         p_event_id: createdEventId,
@@ -3781,10 +3792,6 @@ function openCompletedIntroReportModal(dial) {
         p_report: reportInput.value.trim(),
       });
       if (confirmErr) throw confirmErr;
-      if (!credited) {
-        await supabase.from("intro_call_log").insert({ user_id: profile.id, client_type: currentType });
-        credited = true;
-      }
     } catch (err) {
       errEl.textContent = err.message || String(err);
       errEl.classList.remove("hidden");

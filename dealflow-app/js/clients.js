@@ -2373,20 +2373,14 @@ function openTimelineIntroCall(eventDate, time, timezone) {
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
     profile,
-    // The Profile page's "Intro calls" graph should only count calls actually
-    // scheduled from the Dials page (see handleScheduleIntroCallFromDial in
-    // js/dials.js, which leaves logToGraph at its default true) — logging an
-    // Intro call here, via a Client's own Timeline "+" menu, must NOT also
-    // credit the graph a second time, so this explicitly opts out.
-    logToGraph: false,
     onScheduled: async (client) => {
-      await supabase.from("client_events").insert({
-        client_id: client.id,
-        event_type: "intro_call",
-        event_date: eventDate || new Date().toISOString(),
-        details: { via: "calendly_link", time: time || null, timezone: time ? timezone : null },
-        created_by: profile.id,
+      // Same single entry point as Dials: updates the client's pending intro event instead of adding a second one, and the
+      // database writes the one-per-client "Intro calls" credit and notifies the team.
+      const { error: introErr } = await supabase.rpc("set_intro_call_time", {
+        p_client_id: client.id, p_dial_id: null, p_event_date: eventDate || new Date().toISOString(), p_time: time || null, p_timezone: time ? timezone : null,
+        p_via: "calendly_link", p_past_ok: true,
       });
+      if (introErr) { showError(els.errorBox || document.body, introErr); return; }
       setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
       await loadClientEvents();
       renderModalBody();

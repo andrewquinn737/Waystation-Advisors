@@ -593,7 +593,7 @@
   <div class="modal-backdrop hidden" id="callbackTimeModal" style="z-index:150">
     <div class="modal">
       <h2>Callback time</h2>
-      <p class="help-text">Pick when to call them back. It shows on your call sheet, and you get a reminder 5 minutes before. Your own local time.</p>
+      <p class="help-text" id="callbackTimeHelp">Pick when to call them back. It shows on your call sheet, and you get a reminder 5 minutes before. Your own local time.</p>
       <label for="callbackDateInput">Date</label>
       <input type="date" id="callbackDateInput" />
       <label for="callbackTimeInput">Time</label>
@@ -609,13 +609,14 @@
   <div class="modal-backdrop hidden" id="introCallTimeModal">
     <div class="modal">
       <h2>Confirm the scheduled time</h2>
-      <p class="help-text">Enter the date/time you and the client just picked in Calendly. Record the event in the app to finish creating your client.</p>
+      <p class="help-text">Enter the date and time you and the client agreed on (from Calendly, or by phone). It goes on the client's Timeline and in Upcoming events.</p>
       <label for="introCallTimeDateInput">Date</label>
       <input type="date" id="introCallTimeDateInput" />
       <label for="introCallTimeSelect">Time</label>
       <select id="introCallTimeSelect"></select>
       <label for="introCallTimeZoneSelect">Time zone</label>
       <select id="introCallTimeZoneSelect"></select>
+      <label class="check-row" style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px"><input type="checkbox" id="introCallPastOk" style="width:auto;margin:0" /> This call already happened (log it after the fact)</label>
       <div id="introCallTimeError" class="error-msg hidden"></div>
       <div class="form-actions">
         <button type="button" class="btn" id="introCallTimeConfirmBtn">Save</button>

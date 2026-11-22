@@ -59,3 +59,16 @@ export function wireNotificationsToggle(toggleBtn, labelEl, profile) {
     }
   });
 }
+
+// Marks notifications as read when their target is opened: a banner/push/reminder link that lands on this page (same file name and
+// query) clears its notification. Runs once per page load from the shared callback-banner init. Failures are silent.
+export async function markOpenedNotificationsRead(userId) {
+  try {
+    const here = location.pathname.split("/").pop() + location.search;
+    const { data } = await supabase.from("notifications").select("id, link").eq("user_id", userId).eq("read", false).not("link", "is", null).limit(100);
+    const ids = (data || []).filter((n) => {
+      try { const u = new URL(n.link, location.origin); return u.pathname.split("/").pop() + u.search === here; } catch { return false; }
+    }).map((n) => n.id);
+    if (ids.length) await supabase.from("notifications").update({ read: true }).in("id", ids);
+  } catch { /* best effort */ }
+}

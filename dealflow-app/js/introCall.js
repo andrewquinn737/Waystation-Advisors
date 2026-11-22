@@ -58,7 +58,7 @@ function loadCalendlyWidget() {
 // already happened live during the outreach call itself, so there's nothing
 // to book: it skips Calendly entirely and lets them report the call
 // straight away (see onCompletedDuringOutreach in wireIntroCallForm).
-export function buildIntroCallFormHTML({ allowSkip = false, allowCompletedDuringOutreach = false } = {}) {
+export function buildIntroCallFormHTML({ allowSkip = false, allowCompletedDuringOutreach = false, allowManual = false } = {}) {
   return `
     <div class="intro-call-form">
       <p class="help-text">This opens Calendly right here, pre-filled with the client's name and email, so you can pick a time together.</p>
@@ -67,6 +67,7 @@ export function buildIntroCallFormHTML({ allowSkip = false, allowCompletedDuring
       <div class="form-actions">
         <button type="button" class="btn yellow" id="scheduleCallBtn">Open Calendly</button>
         ${allowSkip ? `<button type="button" class="btn secondary" id="skipCalendlyBtn">Skip Calendly, just log it</button>` : ""}
+        ${allowManual ? `<button type="button" class="btn secondary" id="manualIntroBtn">Enter the time myself</button>` : ""}
       </div>
       ${
         allowCompletedDuringOutreach
@@ -117,8 +118,7 @@ export function buildIntroCallFormHTML({ allowSkip = false, allowCompletedDuring
 //     has the dial in its own closure).
 //   - onScheduled(client): fired after onCalendlyClosed, same as before.
 export function wireIntroCallForm(container, opts) {
-  const { client: initialClient, prefill, profile, logToGraph = true, onCalendlyClosed, onScheduled, onCompletedDuringOutreach } = opts;
-  const userId = profile?.id;
+  const { client: initialClient, prefill, profile, onCalendlyClosed, onScheduled, onCompletedDuringOutreach, onManual } = opts;
   const btn = container.querySelector("#scheduleCallBtn");
   const skipBtn = container.querySelector("#skipCalendlyBtn");
   const errEl = container.querySelector("#introCallError");
@@ -197,14 +197,8 @@ export function wireIntroCallForm(container, opts) {
       successEl.textContent = "Intro call scheduled.";
       successEl.classList.remove("hidden");
 
-      // Counts toward the Profile page's "Intro calls" weekly tracker — see
-      // loadIntroCallsChart() in js/profile.js. clientType lets that tracker
-      // filter to just the currently-active Sellers/Buyers side, resolved
-      // above from whichever of client/prefill was passed (falls back to
-      // "seller" so this never violates the column's NOT NULL constraint).
-      if (userId && logToGraph) {
-        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: clientType });
-      }
+      // The Profile "Intro calls" credit is written by the database when the intro event is saved (client_event_intro_created),
+      // exactly once per client. Booking in Calendly alone credits nothing until the time is confirmed in the app.
 
       if (onCalendlyClosed) await onCalendlyClosed(initialClient);
       if (onScheduled) await onScheduled(initialClient);
@@ -212,6 +206,9 @@ export function wireIntroCallForm(container, opts) {
     activeOnMessage = onMessage;
     window.addEventListener("message", onMessage);
   });
+
+  const manualBtn = container.querySelector("#manualIntroBtn");
+  if (manualBtn && onManual) manualBtn.addEventListener("click", () => { errEl.classList.add("hidden"); successEl.classList.add("hidden"); onManual(); });
 
   // "Intro completed during outreach" — only exists when the form was built
   // with allowCompletedDuringOutreach. Nothing is booked or credited here;
@@ -244,10 +241,6 @@ export function wireIntroCallForm(container, opts) {
 
       successEl.textContent = "Logged the intro call.";
       successEl.classList.remove("hidden");
-
-      if (userId && logToGraph) {
-        await supabase.from("intro_call_log").insert({ user_id: userId, client_type: clientType });
-      }
 
       if (onScheduled) await onScheduled(initialClient);
     });
