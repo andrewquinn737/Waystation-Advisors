@@ -47,3 +47,6 @@
   .iw-cols { grid-template-columns: 1fr; }
   #importDialsModal .modal { padding: 14px; }
 }
+
+.iw-skiprow td { color: var(--text-muted); }
+.iw-skiprow .iw-tag { margin-top: 0; }

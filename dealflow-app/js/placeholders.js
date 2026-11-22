@@ -166,12 +166,18 @@ function skeletonTabsHtml() {
     .join("")}</div>`;
 }
 
+// Calls is a priority-grouped sheet (group header + rows), so its loading skeleton is shaped the same way (list cards, no table).
+export function skeletonSheetHtml(groups = 2, rows = 3) {
+  const grp = (g) => `<div class="skeleton-grp"><span class="skeleton-bar" style="width:${g ? 120 : 90}px; height:14px; margin:15px 4px;"></span><div class="mobile-list" style="display:block">${Array.from({ length: rows }, (_, i) => skeletonMobileCard(i + g)).join("")}</div></div>`;
+  return Array.from({ length: groups }, (_, g) => grp(g)).join("");
+}
+
 export function skeletonDialsPage() {
   return `
     ${skeletonPageHeaderHtml()}
     ${skeletonTabsHtml()}
     <div style="margin-top:16px;">
-      ${skeletonListHtml({ rows: 5, columnWidths: ["55%", "65%", "45%", "50%", "70%"] })}
+      ${skeletonSheetHtml()}
     </div>
   `;
 }

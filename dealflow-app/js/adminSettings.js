@@ -7,7 +7,7 @@ import { mountCalendlyConnect } from "./adminCalendly.js";
 export function initSettings(profile) {
   const host = document.getElementById("adSettings");
   host.innerHTML = `<section class="ad-panel"><h3>Claude setup guide</h3>
-      <p class="ad-muted">Campaigns are designed in your own Claude app with the Waystation CRM connector. The CRM never stores your Claude login. A chat inside this page comes later.</p>
+      <p class="ad-muted">Campaigns are designed in your own Claude app with the Waystation CRM connector. The CRM never stores your Claude login. Once the Claude server below is connected, a campaign's review screen also has an \"Edit with Claude\" chat.</p>
       <div class="ad-row"><button type="button" class="btn secondary" id="adWizard">Open setup guide</button></div></section>
     <div id="adConnectHost"></div>
     <div id="adAiHost"></div>

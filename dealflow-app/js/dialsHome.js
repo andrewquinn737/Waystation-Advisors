@@ -112,10 +112,9 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   const isOpen = (g) => (openState.has(g.n) ? openState.get(g.n) : g.n <= 3);
   function rowHtml(g, it) {
     const { d, t } = it, who = [d.full_name, [d.city, d.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
-    const bits = [g.label];
+    const bits = []; // the group header already says which group this is
     if (t) {
       // follow-up: say what to do, plainly, first
-      bits.length = 0;
       if (t.kind === "reply") {
         // completes itself when an email goes out to them; overdue after 2 business days
         bits.push(`<b class="dh-do">Waiting for your reply</b>`);
@@ -137,7 +136,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     const icons = done || !rowIcons ? "" : rowIcons(d);
     return `<div class="mobile-card clickable-row dh-row dh-g${g.n}" role="button" tabindex="0" data-d="${esc(d.id)}">
       <div class="mc-main"><div class="mc-name">${esc(d.company_name || d.full_name || "(no name)")}</div>
-        <div class="dh-meta${t && t.kind === "reply" ? " dh-wrap" : ""}">${bits.join(" · ")}</div>
+        ${bits.length ? `<div class="dh-meta${t && t.kind === "reply" ? " dh-wrap" : ""}">${bits.join(" · ")}</div>` : ""}
         <div class="mc-sub">${esc(who || "—")}</div></div>
       <div class="dh-side">${done}${icons}</div></div>`;
   }

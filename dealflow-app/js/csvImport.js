@@ -301,6 +301,8 @@ function rowToDial(r, mapping, listId) {
   if (email2) d.email_2 = email2;
   delete d.email_1_greeting; delete d.email_1_pitch; delete d.email_1_cta; delete d.email_2_greeting; delete d.email_2_body;
   if (d.state) d.state = normalizeStateValue(d.state);
+  // An email that is not an address ("n/a", "bad@") is never saved into the lead; it is counted as invalid in the preview.
+  if (d.email && !isValidEmail(d.email)) { d.__bad_email = d.email; delete d.email; }
   // Same number under mobile and company: saved once, flagged "(Unsure)". Always set (bulk insert sends one column list).
   const md = (d.mobile_phone || "").replace(/\D/g, "");
   const cd = (d.company_phone || "").replace(/\D/g, "");
@@ -315,7 +317,7 @@ export function rowsToDials(rows, listId) {
   const { map } = autoMapColumns(rows[0], rows.slice(1));
   return buildDials(rows, map, listId).map(stripInternal);
 }
-export function stripInternal(d) { const { __row, ...rest } = d; return rest; }
+export function stripInternal(d) { const rest = {}; for (const k of Object.keys(d)) if (!k.startsWith("__")) rest[k] = d[k]; return rest; }
 
 // ---------------------------------------------------------------------------
 // Validation + duplicate detection
@@ -331,7 +333,7 @@ export function validateDials(dials) {
   const seenCols = { email_1: false, email_subject: false };
   for (const d of dials) {
     const hasEmail = !!d.email;
-    if (hasEmail && !isValidEmail(d.email)) s.bad_email++;
+    if (d.__bad_email) s.bad_email++;
     else if (hasEmail && !isPersonalEmail(d.email)) s.role_email++;
     if (isPersonalEmail(d.email)) {
       s.with_personal_email++;

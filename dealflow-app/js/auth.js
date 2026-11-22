@@ -178,9 +178,10 @@ export async function requireSession() {
   setOwnRole(resolvedProfile.role);
   if (resolvedProfile.role === "intern" && resolvedProfile.team_id) {
     try {
-      const teamLead = await findTeamLead(resolvedProfile.team_id, "id, email");
+      // Capped at 4 s: this only picks what the Email icon does, so a slow database must not hold up the first render.
+      const teamLead = await withTimeout(findTeamLead(resolvedProfile.team_id, "id, email"), 4000);
       if (teamLead) {
-        const { data: mailboxes } = await supabase.from("email_accounts").select("id, email_address").eq("owner_id", teamLead.id);
+        const { data: mailboxes } = await withTimeout(supabase.from("email_accounts").select("id, email_address").eq("owner_id", teamLead.id), 4000);
         const primary = (mailboxes || []).find((m) => m.email_address?.toLowerCase() === (teamLead.email || "").toLowerCase()) || (mailboxes || [])[0];
         if (primary) setTeamLeadMailbox({ accountId: primary.id, email: primary.email_address });
       }
@@ -193,7 +194,7 @@ export async function requireSession() {
   // mailboxes (Profile -> Edit) — tell the Email icon so it can say so.
   if (resolvedProfile.role === "team_lead" || resolvedProfile.role === "admin") {
     try {
-      const { data: own } = await supabase.from("email_accounts").select("id").eq("owner_id", resolvedProfile.id).limit(1);
+      const { data: own } = await withTimeout(supabase.from("email_accounts").select("id").eq("owner_id", resolvedProfile.id).limit(1), 4000);
       setOwnHasMailbox(!!(own && own.length));
     } catch (e) {
       console.error("Could not check connected mailboxes", e);
@@ -263,7 +264,7 @@ function navItems(role) {
 function ensureSimpleCss() {
   if (document.getElementById("simpleCss")) return;
   const l = document.createElement("link");
-  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=4";
+  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=5";
   document.head.appendChild(l);
 }
 

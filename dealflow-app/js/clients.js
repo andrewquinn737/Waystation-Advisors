@@ -590,9 +590,9 @@ async function loadClients() {
     // error message, since falling back to stale data would hide an actual
     // bug (bad RLS, bad query, etc). Only a network-shaped failure (see
     // js/offlineCache.js) falls back to the last successfully loaded list.
-    if (!isNetworkError(error)) return showError(els.errorBox, error);
+    if (!isNetworkError(error)) { els.tableWrap.innerHTML = ""; return showError(els.errorBox, error); }
     const cached = cacheGet(cacheKey);
-    if (!cached) return showOfflineNotice(false);
+    if (!cached) { els.tableWrap.innerHTML = ""; return showOfflineNotice(false); }
     clients = cached;
     showOfflineNotice(true);
     await loadClientProgressStages();
@@ -724,10 +724,14 @@ function renderTable() {
       // any choice — same as the feature's own description.
       (!visibleBuyerIds || getClientSide() !== "seller" || (c.intended_buyer_id && visibleBuyerIds.has(c.intended_buyer_id)))
   );
-  els.countBadge.textContent = `${rows.length} client${rows.length === 1 ? "" : "s"}`;
+  // Header line says what is in view: how many of which side, and (admin / team lead) whose accounts.
+  const sideWord = { seller: "seller", buyer: "buyer", broker: "broker" }[getClientSide()] || "client";
+  const acctWord = !(isAdmin || isTeamLead) ? "" : !visibleAccountIds ? "all accounts" : visibleAccountIds.size === 1 && visibleAccountIds.has(profile.id) ? "my account" : `${visibleAccountIds.size} account${visibleAccountIds.size === 1 ? "" : "s"}`;
+  els.countBadge.textContent = `${rows.length} ${sideWord}${rows.length === 1 ? "" : "s"}${acctWord ? ` \u00b7 ${acctWord}` : ""}`;
 
   if (rows.length === 0) {
-    els.tableWrap.innerHTML = `<div class="empty-state">No clients yet.</div>`;
+    const hint = q ? `No ${sideWord}s match "${escapeHtml(els.search.value.trim())}".` : `No ${sideWord}s yet${acctWord && visibleAccountIds ? " in the accounts you're viewing. Change them under the gear, Accounts visible" : ""}.`;
+    els.tableWrap.innerHTML = `<div class="empty-state">${hint}</div>`;
     return;
   }
 
@@ -837,11 +841,14 @@ function positionCategoriesSubmenu() {
   const rect = els.menuCategoriesBtn.getBoundingClientRect();
   const submenuWidth = els.categoriesSubmenu.offsetWidth || 190;
   let left = rect.right + 8;
+  let top = rect.top;
   if (left + submenuWidth > window.innerWidth) {
     left = rect.left - submenuWidth - 8;
+    // No room on either side (a phone-width menu): drop it just under the button instead of covering the labels
+    if (left < 8) { left = 8; top = rect.bottom + 4; }
   }
   els.categoriesSubmenu.style.left = `${Math.max(8, left)}px`;
-  els.categoriesSubmenu.style.top = `${rect.top}px`;
+  els.categoriesSubmenu.style.top = `${top}px`;
 }
 
 els.menuCategoriesBtn.addEventListener("click", (e) => {
@@ -1389,7 +1396,7 @@ function eventCategory(e) {
 // and the resulting triangle/report box on the Timeline (see
 // wireTimelineTab's confirm-button handler and buildTimelineHTML below).
 function eventIsMeeting(e) {
-  return eventCategory(e) !== "contract_advancement";
+  return eventCategory(e) !== "contract_advancement" && e.event_type !== "task" && eventCategory(e) !== "task";
 }
 
 function buildTimelineHTML(events) {
@@ -2367,6 +2374,24 @@ function openEditEventModal(eventId) {
 // (Dials instead passes `prefill`, since its client doesn't exist yet — see
 // handleScheduleIntroCallFromDial in js/dials.js). eventDate/time are
 // whatever was chosen in openEventDetailsModal.
+// Inline choice inside the intro-call popup. Resolves "move", "add", or null (cancel).
+function askMoveOrAddIntro(pending) {
+  return new Promise((resolve) => {
+    const when = new Date(pending.event_date).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const box = document.createElement("div");
+    box.className = "intro-choice";
+    box.innerHTML = `<p class="help-text" style="font-size:14px;color:var(--text)">There is already an intro call (${escapeHtml(when)}). Move it to this time, or add a new one?</p>
+      <div class="form-actions"><button type="button" class="btn" data-c="move">Move the existing one</button><button type="button" class="btn secondary" data-c="add">Add a new one</button><button type="button" class="btn secondary" data-c="cancel">Cancel</button></div>`;
+    els.introCallPopupBody.appendChild(box);
+    box.addEventListener("click", (e) => {
+      const c = e.target.closest("[data-c]")?.dataset.c;
+      if (!c) return;
+      box.remove();
+      resolve(c === "cancel" ? null : c);
+    });
+  });
+}
+
 function openTimelineIntroCall(eventDate, time, timezone) {
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowSkip: true });
   els.introCallPopup.classList.remove("hidden");
@@ -2374,16 +2399,23 @@ function openTimelineIntroCall(eventDate, time, timezone) {
     client: currentClient,
     profile,
     onScheduled: async (client) => {
-      // Same single entry point as Dials: updates the client's pending intro event instead of adding a second one, and the
-      // database writes the one-per-client "Intro calls" credit and notifies the team.
-      const { error: introErr } = await supabase.rpc("set_intro_call_time", {
-        p_client_id: client.id, p_dial_id: null, p_event_date: eventDate || new Date().toISOString(), p_time: time || null, p_timezone: time ? timezone : null,
-        p_via: "calendly_link", p_past_ok: true,
-      });
-      if (introErr) { showError(els.errorBox || document.body, introErr); return; }
-      setTimeout(() => els.introCallPopup.classList.add("hidden"), 1200);
+      // A pending intro call already exists: never overwrite it silently. Ask: move it to this time, or add a second one.
+      const { data: pend } = await supabase.from("client_events").select("id, event_date").eq("client_id", client.id)
+        .eq("event_type", "intro_call").eq("confirmed", false).order("created_at", { ascending: false }).limit(1);
+      let mode = "move";
+      if (pend?.length) {
+        mode = await askMoveOrAddIntro(pend[0]);
+        if (!mode) return { cancelled: true };
+      }
+      // "move" = the same single entry point as Dials (updates the pending event); "add" = a second, separate intro call.
+      // The database writes the one-per-client "Intro calls" credit and notifies the team. The popup shows success only if this worked.
+      const { error: introErr } = await supabase.rpc(mode === "add" ? "add_intro_call" : "set_intro_call_time", mode === "add"
+        ? { p_client_id: client.id, p_event_date: eventDate || new Date().toISOString(), p_time: time || null, p_timezone: time ? timezone : null, p_via: "calendly_link", p_past_ok: true }
+        : { p_client_id: client.id, p_dial_id: null, p_event_date: eventDate || new Date().toISOString(), p_time: time || null, p_timezone: time ? timezone : null, p_via: "calendly_link", p_past_ok: true });
+      if (introErr) return { error: introErr };
       await loadClientEvents();
       renderModalBody();
+      setTimeout(() => els.introCallPopup.classList.add("hidden"), 1500); // success text shows first (see wireIntroCallForm)
     },
   });
 }

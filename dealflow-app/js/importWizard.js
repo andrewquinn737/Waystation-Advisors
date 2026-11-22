@@ -132,22 +132,24 @@ export function createImportWizard(ctx) {
     const cnt = (k) => [...it.skip.values()].filter((v) => v === k).length;
     const chips = [
       chip(`${num(rows)} to import`, "ok"),
-      chip(`${num(s.with_personal_email)} with a personal email`, ""),
-      chip(`${num(s.backup)} without (call list)`, ""),
+      skipped ? chip(`${num(skipped)} skipped`, "warn") : "",
+      chip(`Of ${num(s.total)} rows: ${num(s.with_personal_email)} with a personal email`, ""),
+      chip(`${num(s.backup)} call list only`, ""),
       s.with_mobile ? chip(`${num(s.with_mobile)} mobile`, "") : "",
       s.no_phone ? chip(`${num(s.no_phone)} no phone`, s.no_phone > s.total * 0.3 ? "warn" : "") : "",
-      s.copy_columns && s.email_missing_copy ? chip(`${num(s.email_missing_copy)} email rows missing copy (held)`, "warn") : "",
+      s.copy_columns && s.email_missing_copy ? chip(`${num(s.email_missing_copy)} of those have no email copy yet (held for edits)`, "warn") : "",
       !s.copy_columns && s.with_personal_email ? chip("no email copy in this file (add it on the review screen)", "") : "",
-      s.copy_columns && s.email_has_copy ? chip(`${num(s.email_has_copy)} with copy`, "") : "",
-      s.bad_email ? chip(`${num(s.bad_email)} invalid emails`, "warn") : "",
+      s.copy_columns && s.email_has_copy ? chip(`${num(s.email_has_copy)} of those have email copy`, "") : "",
+      s.bad_email ? chip(`${num(s.bad_email)} invalid emails (left blank)`, "warn") : "",
       s.role_email ? chip(`${num(s.role_email)} generic emails (info@, sales@)`, "") : "",
       s.bad_phone ? chip(`${num(s.bad_phone)} odd phone numbers`, "warn") : "",
-      skipped ? chip(`${num(skipped)} skipped`, "warn") : "",
     ].join("");
     const dupFile = it.fileDups.size, dupDb = it.serverDups.size;
     let dupHTML = "";
     if (dupFile || dupDb || it.serverState === "checking" || it.serverState === "failed") {
-      const first = [...it.serverDups.entries()].slice(0, 3).map(([i, h]) => `${escapeHtml(it.dials[i].company_name || it.dials[i].full_name || it.dials[i].email || "row " + it.dials[i].__row)} is already in "${escapeHtml(h.list_name)}"${h.owner_name ? ` (${escapeHtml(h.owner_name)})` : ""}`);
+      // Name the lead that already exists (and its tab); the incoming row is only named when the server did not say who it matched.
+      const first = [...it.serverDups.entries()].slice(0, 3).map(([i, h]) => { const inc = it.dials[i].company_name || it.dials[i].full_name || it.dials[i].email || "row " + it.dials[i].__row;
+        return h.lead_name ? `${escapeHtml(inc)} matches ${escapeHtml(h.lead_name)}, already in "${escapeHtml(h.list_name)}"${h.owner_name ? ` (${escapeHtml(h.owner_name)})` : ""}` : `${escapeHtml(inc)} is already in "${escapeHtml(h.list_name)}"${h.owner_name ? ` (${escapeHtml(h.owner_name)})` : ""}`; });
       dupHTML = `<div class="iw-dups"><div class="iw-dup-line">${
         [dupFile ? `<b>${plural(dupFile, "row repeats", "rows repeat")}</b> an earlier row in this file` : "",
          dupDb ? `<b>${plural(dupDb, "lead is", "leads are")}</b> already in the system` : "",
@@ -175,7 +177,8 @@ export function createImportWizard(ctx) {
     }).join("");
     const mappedFields = Object.entries(it.map).filter(([, f]) => f).map(([, f]) => f);
     const previewCols = [...new Set(["full_name", "company_name", "email", "mobile_phone", "company_phone", "city", "state"].filter((f) => mappedFields.includes(f) || (f === "full_name" && mappedFields.includes("first_name"))))];
-    const prev = it.dials.slice(0, 5).map((d) => `<tr>${previewCols.map((f) => `<td>${escapeHtml(d[f] || "")}</td>`).join("")}</tr>`).join("");
+    const mark = (i) => (it.skip.get(i) === "dup_file" ? "repeat in file" : it.skip.get(i) === "dup_existing" ? "already in system" : it.skip.get(i) === "no_contact" ? "no contact info" : "");
+    const prev = it.dials.slice(0, 5).map((d, i) => `<tr${mark(i) ? ` class="iw-skiprow"` : ""}>${previewCols.map((f) => `<td>${escapeHtml(d[f] || "")}</td>`).join("")}${mark(i) ? `<td><span class="iw-tag">${mark(i)} (skipped)</span></td>` : "<td></td>"}</tr>`).join("");
     return `<div class="iw-item ${it.open ? "iw-open" : ""}">
       <button type="button" class="iw-head iw-toggle" data-act="toggle" data-i="${idx}" aria-expanded="${it.open}"><span class="iw-caret">${it.open ? "▾" : "▸"}</span> <b>${escapeHtml(it.name)}</b> <span class="iw-muted">${plural(s.total, "row", "rows")}${skipped ? `, ${num(rows)} to import` : ""}</span></button>
       ${it.open ? `<div class="iw-body">
@@ -184,8 +187,8 @@ export function createImportWizard(ctx) {
         <div class="iw-chips">${chips}</div>
         ${probs}${dupHTML}${noContact}
         <div class="iw-sub">Preview</div>
-        <div class="iw-tablewrap"><table class="iw-table"><thead><tr>${previewCols.map((f) => `<th>${escapeHtml(FIELD_LABELS[f] || f)}</th>`).join("")}</tr></thead><tbody>${prev || ""}</tbody></table></div>
-        <button type="button" class="iw-link" data-act="togglemap" data-i="${idx}">${it.showMap ? "Hide columns" : `Columns (${mappedFields.length} of ${it.a.headers.length} matched). Fix a column`}</button>
+        <div class="iw-tablewrap"><table class="iw-table"><thead><tr>${previewCols.map((f) => `<th>${escapeHtml(FIELD_LABELS[f] || f)}</th>`).join("")}<th></th></tr></thead><tbody>${prev || ""}</tbody></table></div>
+        <button type="button" class="iw-link" data-act="togglemap" data-i="${idx}">${it.showMap ? "Hide columns" : mappedFields.length === it.a.headers.length ? `All ${it.a.headers.length} columns matched. Check them` : `${mappedFields.length} of ${it.a.headers.length} columns matched. Fix the rest`}</button>
         ${it.showMap ? `<div class="iw-cols">${cols}</div>` : ""}
       </div>` : ""}
     </div>`;
@@ -319,7 +322,6 @@ export function createImportWizard(ctx) {
              lastId: [...results].reverse().find((r) => r.id)?.id || null };
   }
 
-  const secs = (ms) => (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + "s";
   function renderResult(out) {
     const box = document.createElement("div");
     box.id = "importDialsResult";
@@ -329,7 +331,7 @@ export function createImportWizard(ctx) {
       const sk = r.skipped, skipTxt = [sk.dup_file && `${num(sk.dup_file)} repeated`, sk.dup_existing && `${num(sk.dup_existing)} already in the system`, sk.no_contact && `${num(sk.no_contact)} with no contact info`].filter(Boolean).join(", ");
       const lines = [
         `<b>${escapeHtml(r.name)}</b>`,
-        `${plural(r.inserted, "lead", "leads")} added${skipTxt ? ` (skipped ${skipTxt})` : ""}${r.assignedTo ? `, sent to ${escapeHtml(r.assignedTo)}` : ""}. Ready to call ${secs(r.ms.callable)} after you pressed Import.`,
+        `${plural(r.inserted, "lead", "leads")} added${skipTxt ? ` (skipped ${skipTxt})` : ""}${r.assignedTo ? `, sent to ${escapeHtml(r.assignedTo)}` : ""}. Ready to call now.`,
         r.assignError ? `<span class="bad">Could not assign: ${escapeHtml(r.assignError)}. The list is in your account; use Transfer.</span>` : "",
         r.seq ? escapeHtml(describePrepare(r.seq)) : "",
         r.seqError ? `<span class="bad">Sequence setup failed: ${escapeHtml(r.seqError)}. Use "Run sequence setup" in the list menu.</span>` : "",

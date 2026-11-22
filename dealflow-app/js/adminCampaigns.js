@@ -22,20 +22,26 @@ export function initCampaigns() {
   $("cpList").addEventListener("click", onClick);
   load();
 }
+// Read the cached stats first (fast), then ask the server to refresh them in the background and redraw only if something changed.
 async function load() {
   $("cpList").innerHTML = `<p class="ad-empty">Loading...</p>`;
-  const { data, error } = await supabase.rpc("admin_campaigns");
-  if (error) { $("cpList").innerHTML = ""; msg("Couldn't load campaigns: " + error.message); return; }
+  const { data, error } = await supabase.rpc("admin_campaigns", { p_fresh: false });
+  if (error) { $("cpList").innerHTML = ""; msg("Couldn't load campaigns: " + error.message + " "); return retryLink(); }
   msg(""); camps = data || []; render();
+  supabase.rpc("admin_campaigns", { p_fresh: true }).then(({ data: fresh, error: e2 }) => {
+    if (e2 || !fresh || !$("cpList") || JSON.stringify(fresh) === JSON.stringify(camps)) return;
+    camps = fresh; if (!menuEl) render();
+  });
 }
+function retryLink() { const el = $("cpMsg"), b = document.createElement("button"); b.type = "button"; b.className = "ad-link"; b.textContent = "Retry"; b.onclick = load; el.appendChild(b); }
 
 const STATS = [["emails_sent", "Emails sent"], ["contacted", "Contacted"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
 const statCells = (n) => STATS.map(([k, label]) => { const v = n[k] ?? 0; return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${label}</span></div>`; }).join("");
 export const designPrompt = (c) => `Use the Waystation CRM connector: design_campaign for list ${c.name} (list_id ${c.list_id})`;
 
-function totals() {
+function totals(list) {
   const t = {};
-  for (const [k] of STATS) t[k] = camps.reduce((s, c) => s + (c.counts?.[k] ?? 0), 0);
+  for (const [k] of STATS) t[k] = list.reduce((s, c) => s + (c.counts?.[k] ?? 0), 0);
   return t;
 }
 function hint(c) {
@@ -48,10 +54,10 @@ function hint(c) {
   return "";
 }
 function row(c) {
-  const n = c.counts, paused = c.status === "paused", canLaunch = n.ready > 0 && !paused;
+  const n = c.counts, paused = c.status === "paused", canLaunch = n.ready > 0 && !paused, noMailbox = !c.mailboxes;
   const sub = [c.owner || "Unknown owner", "Uploaded " + day(c.created_at), MANDATE[c.mandate] || ""].filter(Boolean).join(" \u00b7 ");
   // One primary action per row; the "..." menu holds the rest (see menuItems).
-  const pick = canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`] : paused ? ["resume", "Resume"]
+  const pick = canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`, noMailbox] : paused ? ["resume", "Resume"]
     : n.need_fix > 0 ? ["review", "Review emails"] : c.status === "draft" ? ["design", "Design in Claude"] : null;
   const held = n.need_fix > 0 ? `<span class="warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></span>` : "";
   const note = [hint(c), held].filter(Boolean).join(" ");
@@ -59,11 +65,12 @@ function row(c) {
     <div class="cp-name"><b title="${esc(c.name || "")}">${esc(c.name || "(untitled)")}</b><span>${esc(sub)}</span></div>
     <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span></div>
     ${statCells(n)}
-    <div class="cp-act">${pick ? `<button type="button" class="btn small" data-a="${pick[0]}">${pick[1]}</button>` : "<span></span>"}
+    <div class="cp-act${pick ? "" : " cp-act-solo"}">${pick ? `<button type="button" class="btn small" data-a="${pick[0]}"${pick[2] ? ` disabled title="Add a sending mailbox under Email accounts first"` : ""}>${pick[1]}</button>` : "<span></span>"}
       <button type="button" class="cp-more" data-menu aria-label="More actions" aria-haspopup="menu" aria-expanded="false">&#8943;</button></div>
     <div class="cp-note${note ? "" : " hidden"}">${note}</div></article>`;
 }
 // Menu items for a campaign: details first, then what can be done now.
+// Launch is never here: the primary button on the row is Launch whenever launching is possible.
 function menuItems(c) {
   const n = c.counts, paused = c.status === "paused", live = c.status === "live";
   return [
@@ -71,16 +78,15 @@ function menuItems(c) {
     n.ready + n.need_fix > 0 ? ["review", "Review emails"] : null,
     paused ? ["resume", "Resume"] : null,
     live ? ["pause", "Pause"] : null,
-    n.ready > 0 && !paused ? ["launch", c.launched_at ? "Launch more" : "Launch"] : null,
     c.status !== "done" ? ["design", "Design in Claude"] : null,
   ].filter(Boolean);
 }
 function render() {
   const open = camps.filter((c) => c.status !== "done"), done = camps.filter((c) => c.status === "done");
   $("cpSummary").textContent = "";
-  const t = totals();
-  const total = `<div class="cp-row cp-total"><div class="cp-name"><b>All campaigns</b><span>${open.length} in progress${done.length ? `, ${done.length} finished` : ""}</span></div><div class="cp-status"></div>${statCells(t)}<div class="cp-act"></div></div>`;
   const shown = showDone ? camps : open;
+  const t = totals(shown); // the totals row adds up exactly the rows on screen
+  const total = `<div class="cp-row cp-total"><div class="cp-name"><b>${showDone ? "All campaigns" : "In progress"}</b><span>${plural(shown.length, "campaign", "campaigns")} shown${!showDone && done.length ? `, ${done.length} finished hidden` : ""}</span></div><div class="cp-status"></div>${statCells(t)}<div class="cp-act"></div></div>`;
   $("cpList").innerHTML = shown.length ? `<div class="cp-head" aria-hidden="true"><div>Campaign</div><div>Status</div>${STATS.map(([, l]) => `<div class="num">${l === "Emails sent" ? "Sent" : l}</div>`).join("")}<div></div></div>${total}${shown.map(row).join("")}` : `<p class="ad-empty">${camps.length ? "Nothing in progress." : "No campaigns yet. One appears here as soon as a list with email leads is uploaded."}</p>`;
   $("cpList").classList.toggle("cp-table", !!shown.length);
   const tg = $("cpToggleDone"); tg.classList.toggle("hidden", !done.length); tg.textContent = showDone ? "Hide finished" : `Show finished (${done.length})`;
@@ -160,7 +166,7 @@ async function openDetails(c) {
   const n = c.counts, dl = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
   sheet.querySelector("#adDet").innerHTML = `<dl class="cp-det">
       ${dl("Owner", esc(c.owner || "Unknown"))}${dl("Mandate", esc(MANDATE[c.mandate] || "Not set"))}${dl("Buyer", esc(buyer || "None"))}${dl("Uploaded", esc(day(c.created_at)))}
-      ${dl("Leads", n.leads?.toLocaleString?.() ?? n.leads)}${dl("With email", withEmail.toLocaleString())}${dl("Backup (no email)", (n.backup ?? 0).toLocaleString())}${dl("Held for edits", held.toLocaleString())}
+      ${dl("Leads", n.leads?.toLocaleString?.() ?? n.leads)}${dl("With email", withEmail.toLocaleString())}${dl("Backup (calls only)", (n.backup ?? 0).toLocaleString())}${dl("Held for edits", held.toLocaleString())}
     </dl><h3 class="cp-det-h">Sending mailboxes${queue ? ` \u00b7 ${queue.remaining_today ?? 0} of ${queue.capacity_today ?? 0} sends left today` : ""}</h3><ul class="cp-det-boxes">${boxHtml}</ul>`;
 }
 

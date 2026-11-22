@@ -1963,7 +1963,12 @@ async function loadCallsChart() {
   })();
   let finalCounts, finalToday;
   if (failed) {
-    if (!isNetworkError(failed)) return showError(els.errorBox, failed);
+    if (!isNetworkError(failed)) {
+      // say so where the number would be (the red box at the top is easy to miss), with a retry
+      els.callsThisWeekText.innerHTML = `Couldn't load this week's count. <button type="button" id="callsRetryBtn" style="background:none;border:0;padding:0 4px;min-height:44px;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer">Retry</button>`;
+      document.getElementById("callsRetryBtn")?.addEventListener("click", () => { els.callsThisWeekText.textContent = "Loading…"; loadCallsChart(); });
+      return;
+    }
     const cached = cacheGet(cacheKey);
     if (!cached) return showOfflineNotice(false);
     finalCounts = cached.counts;

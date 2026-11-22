@@ -35,12 +35,12 @@
 .dh-act { box-sizing: border-box; height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0; border: 0; border-radius: 10px;
   font: inherit; font-size: 13px; font-weight: 600; line-height: 1; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 /* primary: tonal (tinted, not solid), one fixed width so every row's action lines up on the right edge */
-.dh-go { width: 104px; padding: 0 8px; white-space: nowrap; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
+.dh-go { width: 104px; padding: 0 8px; white-space: nowrap; color: var(--tone); background: color-mix(in srgb, var(--tone) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent); }
 .dh-go span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .dh-go svg, .dh-done-btn svg { flex: none; }
 /* tertiary: icon-only check, no fill until hover */
 .dh-done-btn { width: 44px; background: none; color: var(--text-muted); }
-@media (hover: hover) { .dh-go:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); } .dh-done-btn:hover { background: color-mix(in srgb, var(--success, #2e7d32) 14%, transparent); color: var(--success, #2e7d32); } }
+@media (hover: hover) { .dh-go:hover { background: color-mix(in srgb, var(--tone) 18%, transparent); } .dh-done-btn:hover { background: color-mix(in srgb, var(--success, #2e7d32) 14%, transparent); color: var(--success, #2e7d32); } }
 .dh-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dh-act:disabled { opacity: .5; cursor: default; }
 .dh-more { display: block; width: 100%; min-height: 44px; margin-top: 6px; border: 1px dashed var(--border); border-radius: var(--radius); background: none; color: var(--accent); font: inherit; font-size: 14px; cursor: pointer; }
@@ -55,3 +55,20 @@
 
 /* reply rows say "Waiting for your reply · overdue N days": let it wrap instead of cutting the word "overdue" */
 .dh-row .dh-meta.dh-wrap { white-space: normal; }
+
+/* Narrow desktop windows (not real phones, which get html.is-mobile-device): search results use the card list too, never a sideways-scrolling table */
+@media (max-width: 720px) {
+  #dialsTableWrap .list-table { display: none; }
+  #dialsTableWrap .mobile-list { display: block; }
+}
+/* Names: two lines instead of a cut-off ellipsis on narrow rows (a Done check + a 104px button leave little room) */
+@media (max-width: 480px) {
+  .dh-row .mc-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
+
+/* Touch: 44px hit areas without changing how things look (icons get an invisible vertical halo; header icons and tab pills grow). */
+@media (pointer: coarse), (max-width: 720px) {
+  .dh .contact-action-btn, #dialsTableWrap .contact-action-btn { position: relative; }
+  .dh .contact-action-btn::after, #dialsTableWrap .contact-action-btn::after { content: ""; position: absolute; inset: -8px -3px; }
+  .dial-tab { min-height: 44px; }
+}

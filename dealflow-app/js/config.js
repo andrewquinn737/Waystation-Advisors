@@ -24,3 +24,12 @@ export const SUPABASE_ANON_KEY = IS_PROD
 export const VAPID_PUBLIC_KEY = IS_PROD
   ? "BKmi1-1Ytinb51D-iqCLXs7jbB4KaG4NDKiiCuXVGkIGZuvqHK88tUb3UC9Ugsp50z9ZDanL9Q64QjFDp3DS82w"
   : "BF0sSAqn2OxZDtGty5Xf49DUSHJavThiYFTf2u-X_ni6kSgge90fFmHfV44HAJQpOON2PpIg1iYXkl5SkFnnZ2E";
+
+// Warm the connection to whichever project this page really uses (static <link>s used to hard-code the LIVE host).
+try {
+  if (typeof document !== "undefined") {
+    const l = document.createElement("link");
+    l.rel = "preconnect"; l.href = SUPABASE_URL; l.crossOrigin = "";
+    document.head.appendChild(l);
+  }
+} catch { /* not a browser page */ }

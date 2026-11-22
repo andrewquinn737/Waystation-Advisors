@@ -1,6 +1,6 @@
 // Run: node tools/testenv/import_unit.test.mjs   (pure engine: parser, auto-mapping, validation, duplicates)
 import assert from "node:assert/strict";
-import { parseCSV, autoMapColumns, buildDials, rowsToDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates, mappingProblems, cleanEmailCell, normEmail } from "../../dealflow-app/js/csvImport.js";
+import { parseCSV, autoMapColumns, buildDials, rowsToDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates, mappingProblems, cleanEmailCell, normEmail, stripInternal } from "../../dealflow-app/js/csvImport.js";
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; } catch (e) { fail++; console.log("FAIL", n, "\n  ", e.message); } };
 
@@ -67,6 +67,13 @@ t("validation: email vs backup, role mailboxes, held copy", () => {
   assert.equal(s.total, 5); assert.equal(s.with_personal_email, 2); assert.equal(s.backup, 3);
   assert.equal(s.email_has_copy, 1); assert.equal(s.email_missing_copy, 1); assert.equal(s.role_email, 1); assert.equal(s.bad_email, 1);
   assert.equal(s.no_contact, 1); assert.equal(s.copy_columns, true);
+});
+t("invalid email is left blank (never saved), still counted as invalid", () => {
+  const rows = [["Company", "Email", "Mobile"], ["A", "bad@", "8015552222"], ["B", "n/a", ""], ["C", "ok@c.com", ""]];
+  const ds = buildDials(rows, autoMapColumns(rows[0]).map, "x");
+  assert.equal(ds[0].email, undefined); assert.equal(ds[1].email, undefined); assert.equal(ds[2].email, "ok@c.com");
+  assert.equal(validateDials(ds).bad_email, 2);
+  assert.ok(!("__bad_email" in stripInternal(ds[0])) && !("__row" in stripInternal(ds[0])));
 });
 t("file duplicates: email (gmail dots/plus), mobile, company+city", () => {
   const rows = [["Company", "City", "Email", "Mobile"],

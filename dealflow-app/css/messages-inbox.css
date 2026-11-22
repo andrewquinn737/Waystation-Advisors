@@ -20,3 +20,9 @@
 .mail-mailboxes-btn { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 40px; }
 .mail-note { margin: 0 0 10px; padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--border); color: var(--text-muted); font-size: 12.5px; }
 .team-member-list .mail-note { margin-bottom: 8px; }
+
+/* Touch-sized rows and buttons in the Mailboxes / Viewing popups */
+.mailbox-group-row, .mailbox-row, .accounts-visible-row.select-all { min-height: 44px; }
+.mailbox-group-toggle { min-height: 44px; }
+.mailbox-row input[type=checkbox], .mailbox-group-row input[type=checkbox], .select-all input[type=checkbox] { width: 20px; height: 20px; flex-shrink: 0; }
+#mailboxesPopupClose, #viewingPopupClose { min-height: 44px; min-width: 88px; }

@@ -16,7 +16,12 @@ export function statusInfo(st) {
   return { k: "ok", text: "Claude connected", detail: "" };
 }
 
-export const TOKEN_CMD = `read -rs T && printf '%s' "$T" | ssh -i ~/Desktop/ssh-key-2026-11-09.key ubuntu@129.146.6.202 "sudo /opt/waystation-ai/set-token.sh"; unset T`;
+// The one-line setup command (server address + key path) is kept in app_secrets and read by admins only (rpc ai_setup_command),
+// so it is never shown on the page or shipped in this file. The copy button fetches it when pressed.
+async function fetchSetupCommand() {
+  const { data, error } = await supabase.rpc("ai_setup_command");
+  return error ? "" : data || "";
+}
 
 export function mountAiStatusCard(host) {
   const card = document.createElement("section");
@@ -27,16 +32,19 @@ export function mountAiStatusCard(host) {
     <details class="ai-setup" id="aiSetup"><summary>One-time setup (the owner does this once)</summary>
       <ol class="ai-steps">
         <li>On your Mac, open Terminal and run <code>claude setup-token</code>. It needs a Claude Pro or Max plan. Sign in in the browser; it prints a long token.</li>
-        <li>Copy the token. Then run this one command, paste the token when nothing seems to happen, and press Return. The token is not shown or saved in your history:
-          <pre id="aiCmd">${esc(TOKEN_CMD)}</pre>
-          <button type="button" class="btn secondary small" id="aiCopy">Copy command</button></li>
+        <li>Copy the token. Then tap the button below, paste the copied command into Terminal, paste the token when nothing seems to happen, and press Return. The token is not shown or saved in your history.
+          <div class="ad-row"><button type="button" class="btn secondary small" id="aiCopy">Copy setup command</button></div><div class="ad-muted" id="aiCopyNote"></div></li>
         <li>Wait about 15 seconds. The line above turns green: "Claude connected".</li>
       </ol>
       <p class="ad-muted">To switch the chat off, set <code>ai_chat_enabled</code> to anything but <code>true</code> in app_secrets. Details: docs/AI_WORKER.md.</p>
     </details>`;
   host.appendChild(card);
   const stat = card.querySelector("#aiCardStat");
-  card.querySelector("#aiCopy").onclick = async (e) => { try { await navigator.clipboard.writeText(TOKEN_CMD); e.target.textContent = "Copied"; } catch { e.target.textContent = "Select the command and copy it"; } };
+  card.querySelector("#aiCopy").onclick = async (e) => {
+    const cmd = await fetchSetupCommand(), note = card.querySelector("#aiCopyNote");
+    if (!cmd) { note.textContent = "The setup command isn't stored yet. Ask whoever set up the server (docs/AI_WORKER.md)."; return; }
+    try { await navigator.clipboard.writeText(cmd); e.target.textContent = "Copied"; note.textContent = ""; } catch { note.textContent = "Couldn't copy. Allow clipboard access and try again."; }
+  };
   async function refresh() {
     if (!card.isConnected) return clearInterval(timer);
     const st = await fetchStatus(), i = statusInfo(st);

@@ -10,14 +10,17 @@
 .dial-call-line { display: flex; gap: 8px; align-items: stretch; }
 .dial-call-line .dial-call-btn { flex: 1; }
 .dial-text-btn { display: flex; align-items: center; justify-content: center; min-width: 64px; font-size: 15px; font-weight: 600; text-decoration: none; }
-.dial-call-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 52px; font-size: 16px; }
+.dial-call-btn { background: var(--tone); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 52px; font-size: 16px; }
+@media (hover: hover) { .dial-call-btn:hover { background: var(--tone-hover); color: #fff; } }
 .dial-call-btn span { font-size: 13px; font-weight: 400; opacity: .9; }
 .dial-outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .dial-outcomes .rf-label { grid-column: 1 / -1; margin: 0; }
 .dial-outcome { min-height: 48px; padding: 8px 6px; font-size: 14px; font-weight: 600; background: var(--surface); color: var(--text); border: 1px solid var(--border); line-height: 1.15; }
-.dial-outcome:first-of-type { grid-column: 1 / -1; background: var(--accent); color: #fff; border-color: var(--accent); }
-.dial-outcome.current { box-shadow: inset 0 0 0 2px var(--accent); }
-.dial-outcome-intro { grid-column: 1 / -1; font-weight: 500; font-size: 13px; min-height: 44px; }
+.dial-outcome:first-of-type { grid-column: 1 / -1; }
+@media (hover: hover) { .btn.secondary:hover, .dial-outcome:hover { background: var(--gold-soft); color: var(--text); } }
+.dial-outcome.current { background: var(--tone-soft); color: var(--tone); border-color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone); }
+.dial-outcome.current::before { content: "\2713\00a0"; }
+.dial-outcome-intro { grid-column: 1 / -1; font-size: 14px; min-height: 44px; }
 .dial-more { padding: 6px 0; }
 .dial-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted-strong); }
 
@@ -32,11 +35,11 @@ body.role-intern[data-page="messages.html"] #pageSettingsBtn,
 body.role-intern[data-page="messages.html"] #menuMailboxesBtn { display: none !important; }
 
 /* ---- One place for each setting ---- */
-/* Sellers/Buyers and Accounts visible live on Profile only */
-body:not([data-page="profile.html"]) #dealSideToggleBtn,
-body:not([data-page="profile.html"]) #menuAccountsVisibleBtn { display: none !important; }
-/* Clients' gear only held those two (and Notifications, which is on Profile) */
-body[data-page="clients.html"] #pageSettingsBtn { display: none !important; }
+/* Sellers/Buyers and Accounts visible live on Profile and Clients (Clients keeps its own gear, as on the original app); not on Calls */
+body[data-page="dials.html"] #dealSideToggleBtn,
+body[data-page="dials.html"] #menuAccountsVisibleBtn,
+body[data-page="messages.html"] #dealSideToggleBtn,
+body[data-page="messages.html"] #menuAccountsVisibleBtn { display: none !important; }
 
 /* ---- Narrow desktop windows (a browser resized to phone width; real phones get the bottom tab bar instead) ----
    The top bar used to run ~200px past the screen: brand + 5 links + name + role + Log out. Wrap it and trim the extras. */
@@ -48,3 +51,15 @@ body[data-page="clients.html"] #pageSettingsBtn { display: none !important; }
   html.is-desktop-device .topnav-bar .who > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
   html.is-desktop-device .topnav-bar .who .role-badge { flex: 0 0 auto; }
 }
+
+/* Touch: header icon buttons (search / gear) get a 44px hit area */
+@media (pointer: coarse), (max-width: 720px) { .page-header-settings { width: 44px; height: 44px; } }
+
+/* Popups that open on top of the company card (callback time, intro call) dim it harder so its buttons don't read as live */
+#callbackTimeModal, #introCallModal { background: rgba(20,22,28,.72); }
+
+/* Floating compose button sits above the tab bar (40) but below popups (50), so it never covers a modal */
+.compose-fab { z-index: 45; }
+
+/* Reports tables scroll sideways inside their box on narrow screens instead of being cut off */
+#reportsTableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }

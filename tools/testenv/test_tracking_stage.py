@@ -91,6 +91,27 @@ def triggers():
     c, r = api("test.gavin.hopkinson@example.com", "POST", "/rpc/set_intro_call_time", dict(p_client_id=cid, p_dial_id=None, p_event_date=fut, p_time="9:00", p_timezone="America/Denver", p_via="manual", p_past_ok=False))
     check("another intern cannot schedule on Caleb's client", c >= 400, (c, r))
 
+    # round 1: a second intro call is added on purpose (add_intro_call); moving with no time keeps "time to be set"; call task undo
+    d5 = mk("pending5")
+    api(CALEB, "PATCH", f"/dials?id=eq.{d5}", {"contact_status": "intro_call_scheduled"})
+    cid5 = q(f"select id from clients where source_dial_id='{d5}'")[0]["id"]
+    c, r = api(CALEB, "POST", "/rpc/set_intro_call_time", dict(p_client_id=cid5, p_dial_id=None, p_event_date=fut, p_time=None, p_timezone=None, p_via="calendly_link", p_past_ok=True))
+    e5 = q(f"select details from client_events where client_id='{cid5}' and event_type='intro_call'")
+    check("moving the pending intro with no time given keeps the 'time to be set' flags", c == 200 and len(e5) == 1 and e5[0]["details"].get("time_pending") is True and e5[0]["details"].get("auto") is True, (c, e5))
+    c, r = api(CALEB, "POST", "/rpc/add_intro_call", dict(p_client_id=cid5, p_event_date=fut, p_time="11:00", p_timezone="America/Denver", p_via="calendly_link", p_past_ok=False))
+    e5 = q(f"select details from client_events where client_id='{cid5}' and event_type='intro_call' order by created_at")
+    check("add_intro_call adds a SECOND intro call (the pending one is left alone)", c == 200 and len(e5) == 2 and e5[0]["details"].get("time_pending") is True and e5[1]["details"].get("time") == "11:00", (c, e5))
+    c, r = api("test.gavin.hopkinson@example.com", "POST", "/rpc/add_intro_call", dict(p_client_id=cid5, p_event_date=fut, p_time="9:00", p_timezone="America/Denver", p_via="manual", p_past_ok=False))
+    check("another intern cannot add an intro call on Caleb's client", c >= 400, (c, r))
+    d6 = mk("undo6")
+    t6 = q(f"insert into sequence_tasks (dial_id, list_id, owner_id, step, seq_day, kind, due_on, status) values ('{d6}','{lid}','{uid(CALEB)}',1,1,'call',current_date,'pending') returning id")[0]["id"]
+    api(CALEB, "POST", "/rpc/complete_sequence_task", dict(p_task_id=t6, p_outcome="no_answer", p_note=None, p_skip=False))
+    check("(setup) call task is done after its outcome is saved", q(f"select status from sequence_tasks where id='{t6}'")[0]["status"] == "done")
+    c, r = api("test.gavin.hopkinson@example.com", "POST", "/rpc/reopen_sequence_task", dict(p_task_id=t6))
+    check("another user cannot reopen Caleb's task", c >= 400 and q(f"select status from sequence_tasks where id='{t6}'")[0]["status"] == "done", (c, r))
+    c, r = api(CALEB, "POST", "/rpc/reopen_sequence_task", dict(p_task_id=t6))
+    check("reopen_sequence_task puts the just-completed call task back (status update failed)", c in (200, 204) and q(f"select status, outcome, completed_at from sequence_tasks where id='{t6}'")[0] == {"status": "pending", "outcome": None, "completed_at": None}, (c, r))
+
     # confirm prompt
     q(f"update client_events set event_date = now() - interval '2 hours', details = coalesce(details,'{{}}'::jsonb) - 'confirm_prompts' - 'confirm_prompted_at' where client_id='{cid}' and event_type='intro_call'")
     q("select public.run_intro_confirm_prompts()")
@@ -252,7 +273,7 @@ def browser(lid):
         p.goto("http://localhost:5173/profile.html"); p.wait_for_timeout(4500)
         txt = p.inner_text("body"); errs_start = list(errs)
         check("Profile lists the overdue callback", "Tracker Probe Overdue" in txt and "overdue" in txt.lower(), txt[-500:])
-        check("Overdue callback banner at the top of the page", p.locator(".callback-banner").count() >= 1 and "Overdue callback" in p.inner_text("#callbackBanners"), p.inner_text("#callbackBanners")[:200])
+        check("Overdue callback banner at the top of the page", p.locator(".callback-banner").count() >= 1 and "overdue callback" in p.inner_text("#callbackBanners").lower() and p.locator(".callback-banner").first.bounding_box()["height"] <= 48, p.inner_text("#callbackBanners")[:200])
         check("Upcoming: past unconfirmed intro call asks 'Did it happen?'", "Tracker Probe Late" in txt and "Did it happen" in txt)
         check("Upcoming: auto-booked intro shows 'time to be set'", "Tracker Probe Pending" in txt and "time to be set" in txt)
         p.screenshot(path="/tmp/track_profile_desktop.png", full_page=True)

@@ -101,9 +101,11 @@ export function describePrepare(r) {
     `${plural(e, "company", "companies")} with a personal email → email sequence (ready to send from Dials)`,
     `${c} without → backup numbers (call whenever)`,
   ];
-  if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`);
-  if (r.gate) parts.push(`server check: ${r.gate.summary?.passed ?? 0} ready, ${r.gate.summary?.held ?? 0} need fixing`);
-  else if (r.gate_error) parts.push("server check will run when you open the review");
+  // One account of the email rows: the server check says how many are ready and how many are held for edits (rows with no copy
+  // yet are among the held ones); without a server check, say how many have no copy.
+  if (r.gate) parts.push(`${r.gate.summary?.passed ?? 0} emails ready, ${r.gate.summary?.held ?? 0} held for edits${m ? ` (${m} of them have no copy yet)` : ""}`);
+  else if (r.gate_error) { if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`); parts.push("server check will run when you open the review"); }
+  else if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`);
   return parts.join(" · ");
 }
 

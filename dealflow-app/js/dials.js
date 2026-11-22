@@ -27,7 +27,7 @@ import { callBlocked } from "./testCallGuard.js";
 import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
 import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotice, withNetworkRetry } from "./offlineCache.js";
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso } from "./eventTime.js";
-import { skeletonListHtml } from "./placeholders.js";
+import { skeletonListHtml, skeletonSheetHtml } from "./placeholders.js";
 import { openSubmissionPopup, sendLeadToSheetAndSlack, describeDelivery } from "./intakeForm.js";
 import { showNotice } from "./notice.js";
 import { keepRecordingForDial, discardRecordingsForDial, signedRecordingUrl } from "./callRecordings.js";
@@ -2367,7 +2367,7 @@ async function loadDials() {
   // leaving the previous list's now-stale rows up, or a blank area, while
   // this one loads — replaced by the real render (or an empty-state
   // message, or the offline-cache fallback below) as soon as it resolves.
-  els.dialsTableWrap.innerHTML = skeletonListHtml({ columnWidths: DIALS_SKELETON_COLUMN_WIDTHS });
+  els.dialsTableWrap.innerHTML = home && sheetMode() ? skeletonSheetHtml() : skeletonListHtml({ columnWidths: DIALS_SKELETON_COLUMN_WIDTHS });
   const cacheKey = "dials_" + currentListId;
   const { data, error } = await supabase.from("dials").select("*").eq("list_id", currentListId);
   if (error) {
@@ -3060,10 +3060,11 @@ async function updateDialStatus(newStatus) {
   // A pending call task for this company is finished by the outcome. Done BEFORE the status update: a final status stops the
   // sequence, which would cancel the task before its outcome was recorded.
   const pendingTask = newStatus !== "uncontacted" ? home?.callTaskFor(currentDial.id) : null;
+  let taskClosed = null;
   if (pendingTask) {
     const outcome = { no_response: "no_answer", unable_to_contact: "no_answer", busy_callback: "busy_callback", callback_interested: "talked_callback", not_interested: "not_interested", intro_call_scheduled: "intro_booked" }[newStatus] || newStatus;
     const { error: taskErr } = await supabase.rpc("complete_sequence_task", { p_task_id: pendingTask.id, p_outcome: outcome, p_note: null, p_skip: false });
-    if (taskErr) console.error("complete_sequence_task failed", taskErr); else home.taskDone(pendingTask.id);
+    if (taskErr) console.error("complete_sequence_task failed", taskErr); else { home.taskDone(pendingTask.id); taskClosed = pendingTask.id; }
   }
   const data = { contact_status: newStatus };
   // The weekly survey's "Owners talked to" counts dials by called_today_date: stamp it when the outcome means an owner was reached
@@ -3072,7 +3073,11 @@ async function updateDialStatus(newStatus) {
   // The DB trigger dials_default_callback gives a callback status a default time (next business morning) and clears it when the
   // status leaves the callback categories; read the result back so the card and the time picker show what is saved.
   const { data: savedRows, error } = await supabase.from("dials").update(data).eq("id", currentDial.id).select("callback_at, callback_user_id, callback_defaulted");
-  if (error) return showError(els.dialModalError, error);
+  if (error) {
+    // The task was closed just before the status update; if the update failed, put the task back so the call isn't lost.
+    if (taskClosed) { await supabase.rpc("reopen_sequence_task", { p_task_id: taskClosed }); home?.refreshFollowups(); }
+    return showError(els.dialModalError, error);
+  }
   if (savedRows?.[0]) Object.assign(data, savedRows[0]);
   Object.assign(currentDial, data);
   const updatedDialId = currentDial.id;

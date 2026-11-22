@@ -135,6 +135,8 @@ async function loadAccounts() {
 async function refreshUnread() {
   if (!canManageMail) return;
   unreadByAccount = await loadUnreadCounts(accounts.map((a) => a.id));
+  const total = [...unreadByAccount.values()].reduce((n, x) => n + x, 0);
+  document.title = `${total ? `(${total > 99 ? "99+" : total}) ` : ""}Inbox \u2014 Waystation Advisors`;
 }
 
 // The label shown for one mailbox: its email address, with the owner's name for someone else's.
@@ -174,7 +176,11 @@ function setupInboxUi() {
   els.mailToolbar.classList.remove("hidden");
   els.composeFabBtn.classList.remove("hidden");
   els.menuMailboxesBtn.classList.toggle("hidden", accounts.length < 2 || isIntern); // one mailbox = nothing to pick
-  document.querySelectorAll(".mail-tab").forEach((t) => t.addEventListener("click", () => t.dataset.folder !== folderView && setFolderView(t.dataset.folder)));
+  document.querySelectorAll(".mail-tab").forEach((t) => t.addEventListener("click", () => {
+    if (t.dataset.folder !== folderView) return setFolderView(t.dataset.folder);
+    exitDetail(); // the same tab again (from inside a conversation, or after a failed jump) goes back to the list
+    loadThreadList();
+  }));
   wireMailboxPicker({
     menuBtn: els.menuMailboxesBtn,
     popupEl: els.mailboxesPopup,
@@ -360,7 +366,7 @@ async function loadThreadList(loadMore = false) {
     return;
   }
   if (!loadMore || !listState) {
-    els.wrap.innerHTML = `<div class="empty-state">Loading…</div>`;
+    els.wrap.innerHTML = loadingHtml("Loading your inbox…");
     listState = { msgs: new Map(), oldest: null, hasMore: false, clientNames: {}, loading: false };
   }
   const state = listState;
@@ -503,7 +509,7 @@ async function loadLiveFolder(loadMore = false) {
   }
   const ids = all;
   if (!loadMore) {
-    els.wrap.innerHTML = `<div class="empty-state">Loading from the mailbox…</div>`;
+    els.wrap.innerHTML = loadingHtml(`Loading from ${all.length > 1 ? `${all.length} mailboxes` : "the mailbox"}… this can take up to half a minute.`);
     liveState = { kind, items: [], accountState: new Map(), scheduled: [], failures: [] };
   }
   const state = liveState;
@@ -718,7 +724,7 @@ function renderThreadList() {
       const seq = seqBadges.get(counterpart(t.latest).toLowerCase());
       t.readOnly = ro;
       return `
-    <div class="mobile-card message-thread-row ${t.unread ? "unread" : ""} ${ro ? "readonly" : ""}" data-thread-id="${escapeHtml(t.latest.thread_id)}">
+    <div class="mobile-card message-thread-row ${t.unread ? "unread" : ""} ${ro ? "readonly" : ""}" role="button" tabindex="0" data-thread-id="${escapeHtml(t.latest.thread_id)}">
       <div class="mc-main">
         <div class="mc-name">
           ${t.unread ? `<span class="message-unread-dot"></span>` : ""}${escapeHtml(participantLabel(t.latest))}
@@ -745,6 +751,7 @@ function renderThreadList() {
     });
 
   els.wrap.querySelectorAll(".message-thread-row").forEach((row) => {
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); } });
     row.addEventListener("click", () => {
       const id = row.dataset.threadId;
       if (threadListSelectMode) {
@@ -763,6 +770,9 @@ function renderThreadList() {
 // ---------------------------------------------------------------------------
 // Thread detail
 // ---------------------------------------------------------------------------
+
+const SPIN = `<svg class="sync-spinner" style="margin:0 8px 0 0;vertical-align:-3px" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
+const loadingHtml = (t) => `<div class="empty-state">${SPIN}${t}</div>`;
 
 function exitDetail() {
   detailThreadId = null;
@@ -790,7 +800,7 @@ async function openParticipantRecord(address) {
 async function openThread(threadId) {
   detailThreadId = threadId;
   els.errorBox.classList.add("hidden");
-  els.wrap.innerHTML = `<div class="empty-state">Loading…</div>`;
+  els.wrap.innerHTML = loadingHtml("Opening conversation…");
 
   const { data: msgs, error } = await supabase
     .from("email_messages")
@@ -819,22 +829,12 @@ async function openThread(threadId) {
   // gone. Messages that still carry a stored body (older ones, and what this
   // app sent itself) render from that as before.
   const liveById = {};
-  if (canManageMail) {
-    await Promise.all(
-      msgs
-        .filter((m) => m.direction === "inbound" && !m.body_html && !m.body_text && m.imap_uid)
-        .map(async (m) => {
-          try {
-            liveById[m.id] = (await liveCall({ action: "get", account_id: m.account_id, kind: "inbox", uid: m.imap_uid })).message;
-          } catch (e) {
-            liveById[m.id] = { error: e.message || String(e) };
-          }
-        })
-    );
-  }
-
+  const needLive = canManageMail ? msgs.filter((m) => m.direction === "inbound" && !m.body_html && !m.body_text && m.imap_uid) : [];
+  // Paint at once from what is stored (snippets), then fill in the full messages as the mailbox answers (can take 3-10 s).
+  needLive.forEach((m) => { liveById[m.id] = { pending: true }; });
   const last = msgs[msgs.length - 1];
   const readOnly = isReadOnlyAccount(last.account_id);
+  const paintDetail = async () => {
   const canReply = canManageMail && canWriteAccount(last.account_id);
   // An intern without a mailbox of their own replies through their team lead's mailbox (the same quick-send as the Email icon).
   const internQuickReply = !canReply && isIntern && !!getTeamLeadMailbox() && last.direction === "inbound";
@@ -960,6 +960,22 @@ async function openThread(threadId) {
     el.addEventListener("click", () => openParticipantRecord(el.dataset.participantAddress));
   });
 
+  };
+  await paintDetail();
+  if (needLive.length) {
+    await Promise.all(
+      needLive.map(async (m) => {
+        try {
+          liveById[m.id] = (await liveCall({ action: "get", account_id: m.account_id, kind: "inbox", uid: m.imap_uid })).message;
+        } catch (e) {
+          liveById[m.id] = { error: e.message || String(e) };
+        }
+      })
+    );
+    if (detailThreadId !== threadId) return; // they went back to the list while the mailbox was answering
+    await paintDetail();
+  }
+
   // Mark inbound unread messages in this thread as read.
   // (Skipped on someone else's mailbox: read-only for a lead, and RLS would reject the update anyway.)
   const unreadIds = readOnly ? [] : msgs.filter((m) => m.direction === "inbound" && !m.is_read).map((m) => m.id);
@@ -1004,7 +1020,7 @@ function threadMessageHTML(m, atts, live) {
       `<iframe class="thread-message-html" sandbox="allow-same-origin" srcdoc="${escapeHtml(html)}"></iframe>`
     : text
       ? `<div class="thread-message-text">${escapeHtml(text).replace(/\n/g, "<br>")}</div>`
-      : `<div class="thread-message-text">${escapeHtml(m.snippet || "")}${live && live.error ? `<div class="help-text">Couldn't load the full message from the mailbox (${escapeHtml(live.error)}).</div>` : ""}</div>`;
+      : `<div class="thread-message-text">${escapeHtml(m.snippet || "")}${live && live.pending ? `<div class="help-text">${SPIN}Loading the full message…</div>` : ""}${live && live.error ? `<div class="help-text">Couldn't load the full message from the mailbox (${escapeHtml(live.error)}).</div>` : ""}</div>`;
   const liveAtts = live && live.attachments ? live.attachments : [];
   const liveAttsHTML = liveAtts.length
     ? `<div class="thread-message-attachments">${liveAtts
@@ -1095,6 +1111,11 @@ function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }
   els.composeCcInput.value = "";
   els.composeSubjectInput.value = subject || "";
   els.composeBody.innerHTML = body ? escapeHtml(body).replace(/\n/g, "<br>") : "";
+  const draft = readDraft(threadId);
+  if (draft && !body) { // something typed here earlier and closed with Cancel/X: bring it back
+    if (mode !== "reply") { els.composeToInput.value = draft.to || ""; els.composeSubjectInput.value = draft.subject || ""; }
+    els.composeBody.innerHTML = draft.html || "";
+  }
   renderComposeAttachments();
 
   // From: only mailboxes you own (an admin may also send from anyone's, listed after their own).
@@ -1160,7 +1181,19 @@ els.composeFromSelect.addEventListener("change", async () => {
   if (!quotaCache.has(id)) (await loadQuotas([id])).forEach((v, k) => quotaCache.set(k, v));
   if (pendingCompose) renderComposeQuota();
 });
+// Unsent text survives Cancel / X (kept for this tab session, per conversation); sending clears it.
+const draftKey = (threadId) => `ws_mail_draft_${threadId || "new"}`;
+function readDraft(threadId) { try { return JSON.parse(sessionStorage.getItem(draftKey(threadId)) || "null"); } catch { return null; } }
+function saveDraft() {
+  if (!pendingCompose) return;
+  const html = els.composeBody.innerHTML.trim(), typed = els.composeBody.innerText.trim();
+  try {
+    if (typed && !pendingCompose.sent) sessionStorage.setItem(draftKey(pendingCompose.threadId), JSON.stringify({ to: els.composeToInput.value, subject: els.composeSubjectInput.value, html }));
+    else sessionStorage.removeItem(draftKey(pendingCompose.threadId));
+  } catch { /* storage blocked */ }
+}
 function closeCompose() {
+  saveDraft();
   els.composeModal.classList.add("hidden");
   unlockPageScroll();
   pendingCompose = null;
@@ -1210,6 +1243,7 @@ els.composeSendBtn.addEventListener("click", async () => {
     return showError(els.composeError, error || new Error(data.error));
   }
   const openThreadId = data.thread_id;
+  pendingCompose.sent = true;
   closeCompose();
   if (openThreadId) await openThread(openThreadId);
   else await loadThreadList();
@@ -1256,11 +1290,9 @@ if (canManageMail && accounts.length) {
   if (from) {
     window.history.replaceState({}, "", "messages.html");
     const { data: hit } = await supabase.from("email_messages").select("thread_id")
-      .eq("direction", "inbound").ilike("from_address", from.trim()).order("sent_at", { ascending: false }).limit(1);
+      .eq("direction", "inbound").ilike("from_address", from.trim().replace(/[\\%_]/g, "\\$&")).order("sent_at", { ascending: false }).limit(1);
     if (hit && hit[0]?.thread_id) { replyThreadId = hit[0].thread_id; await openThread(replyThreadId); }
-    else {
-      els.wrap.innerHTML = `<div class="empty-state">That reply isn't in the inbox yet.</div>`;
-    }
+    else showError(els.errorBox, new Error("That reply isn't in the inbox yet. Your inbox is still below.")); // keep the list, don't wipe it
   }
 }
 if (canManageMail) {

@@ -19,7 +19,7 @@ export async function maybeShowOnboarding(profile) {
 
 function ensureCss() {   // the wizard can open on any page, so it brings its own styles
   if (document.getElementById("adminCss")) return;
-  const l = document.createElement("link"); l.id = "adminCss"; l.rel = "stylesheet"; l.href = "css/admin.css?v=5"; document.head.appendChild(l);
+  const l = document.createElement("link"); l.id = "adminCss"; l.rel = "stylesheet"; l.href = "css/admin.css?v=6"; document.head.appendChild(l);
 }
 
 export function openOnboarding(profile, { manual = false } = {}) {
@@ -29,7 +29,9 @@ export function openOnboarding(profile, { manual = false } = {}) {
   const wrap = document.createElement("div");
   wrap.className = "ad-wiz";
   document.body.appendChild(wrap);
-  const close = () => { clearInterval(timer); wrap.remove(); open = false; };
+  const onKey = (e) => { if (e.key === "Escape") { if (!manual) { try { sessionStorage.setItem(SKIP_KEY, "1"); } catch { /* ignore */ } } close(); } };
+  const close = () => { clearInterval(timer); document.removeEventListener("keydown", onKey); wrap.remove(); open = false; };
+  document.addEventListener("keydown", onKey);
   const dots = () => `<div class="ad-dots">${[1, 2, 3].map((i) => `<i class="${i <= step ? "on" : ""}"></i>`).join("")}</div>`;
 
   function view() {
@@ -39,7 +41,7 @@ export function openOnboarding(profile, { manual = false } = {}) {
         <p class="ad-muted">Claude writes the campaign emails for you. The CRM checks every one before it can send.</p>
         ${link ? `<p class="ad-note warn">Treat this link like a password. It is shown once.</p><input type="text" class="ad-url" id="wizUrl" readonly value="${esc(link)}" aria-label="Your connector link" />
           <div class="ad-row"><button type="button" class="btn" id="wizCopy">Copy link</button></div>`
-          : `<div class="ad-row"><button type="button" class="btn" id="wizMake">Create my connector link</button></div>`}
+          : `<div class="ad-row"><button type="button" class="btn" id="wizMake">Create my Claude link</button></div>`}
         <ol><li>Open <b>Claude</b> &gt; <b>Settings</b> &gt; <b>Connectors</b>.</li><li>Choose <b>Add custom connector</b> and name it <b>Waystation CRM</b>.</li><li>Paste the link and save.</li></ol>
         <div class="ad-err" id="wizErr"></div>
         <div class="ad-wiz-foot"><button type="button" class="btn secondary" id="wizSkip">${manual ? "Close" : "Not now"}</button><button type="button" class="btn" id="wizNext" ${link ? "" : "disabled"}>Next</button></div></div>`;
@@ -47,7 +49,7 @@ export function openOnboarding(profile, { manual = false } = {}) {
       if (make) make.onclick = async () => {
         make.disabled = true; make.textContent = "Working...";
         const { data, error } = await supabase.rpc("create_claude_connector_token", { p_label: "Claude" });
-        if (error) { wrap.querySelector("#wizErr").textContent = "Could not make the link: " + error.message; make.disabled = false; make.textContent = "Create my connector link"; return; }
+        if (error) { wrap.querySelector("#wizErr").textContent = "Could not make the link: " + error.message; make.disabled = false; make.textContent = "Create my Claude link"; return; }
         link = `${SUPABASE_URL}/functions/v1/claude-connector/mcp/${data}`; startedAt = new Date(); view();
       };
       const cp = wrap.querySelector("#wizCopy"); if (cp) cp.onclick = async () => { cp.textContent = (await copyText(link)) ? "Copied" : "Select the link and copy it"; };
@@ -70,7 +72,7 @@ export function openOnboarding(profile, { manual = false } = {}) {
         <ol><li>An intern uploads a list. It shows up in <b>Admin &gt; Campaigns</b> by itself.</li>
           <li>Tap <b>Design in Claude</b>. Claude writes the emails; the CRM checks every one against the house rules.</li>
           <li>You read the result, tap <b>Launch</b>, and can <b>Pause</b> any time.</li></ol>
-        <p class="ad-muted">Chatting with Claude inside this page comes later. For now the design chat happens in your Claude app.</p>
+        <p class="ad-muted">You design in your own Claude app. A campaign's review screen also has an "Edit with Claude" chat once the Claude server is connected (Admin &gt; Settings).</p>
         <div class="ad-wiz-foot"><button type="button" class="btn secondary" id="wizBack">Back</button><button type="button" class="btn" id="wizGo">Go to Campaigns</button></div></div>`;
       wrap.querySelector("#wizBack").onclick = () => { step = 2; view(); };
       wrap.querySelector("#wizGo").onclick = async () => {

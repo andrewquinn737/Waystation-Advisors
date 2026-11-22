@@ -130,6 +130,22 @@ export function wireIntroCallForm(container, opts) {
   const email = initialClient?.email || prefill?.email || "";
   const clientType = initialClient?.client_type || prefill?.client_type || "seller";
 
+  // Runs the caller's onScheduled and shows the success line ONLY if it worked. onScheduled may throw or resolve to
+  // { error } / { cancelled }; the message is shown here, inside the popup (never behind it).
+  async function finish(okText, fn) {
+    if (!fn) return;
+    let res;
+    try { res = await fn(initialClient); } catch (e) { res = { error: e }; }
+    if (res?.cancelled) return;
+    if (res?.error) {
+      errEl.textContent = res.error.message || String(res.error);
+      errEl.classList.remove("hidden");
+      return;
+    }
+    successEl.textContent = okText;
+    successEl.classList.remove("hidden");
+  }
+
   // Tracks whichever "message" listener the MOST RECENT "Open Calendly"
   // click registered — see below for why this has to be cleaned up on every
   // new click, not just on a completed booking.
@@ -194,14 +210,11 @@ export function wireIntroCallForm(container, opts) {
       activeOnMessage = null;
       window.Calendly.closePopupWidget();
 
-      successEl.textContent = "Intro call scheduled.";
-      successEl.classList.remove("hidden");
-
       // The Profile "Intro calls" credit is written by the database when the intro event is saved (client_event_intro_created),
       // exactly once per client. Booking in Calendly alone credits nothing until the time is confirmed in the app.
 
       if (onCalendlyClosed) await onCalendlyClosed(initialClient);
-      if (onScheduled) await onScheduled(initialClient);
+      await finish("Intro call scheduled.", onScheduled);
     };
     activeOnMessage = onMessage;
     window.addEventListener("message", onMessage);
@@ -239,10 +252,7 @@ export function wireIntroCallForm(container, opts) {
 
       if (!initialClient) return;
 
-      successEl.textContent = "Logged the intro call.";
-      successEl.classList.remove("hidden");
-
-      if (onScheduled) await onScheduled(initialClient);
+      await finish("Logged the intro call.", onScheduled);
     });
   }
 }

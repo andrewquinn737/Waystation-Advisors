@@ -55,66 +55,56 @@ export function initCallbackBanners(profile) {
   let callbacks = [];
   let firstOpen = false;
   try { firstOpen = localStorage.getItem(DAY_KEY(profile.id)) !== todayStr(); } catch { /* storage blocked */ }
-  const shown = new Set(); // banners already put on screen this page load
-  let loadedAt = 0;
+  const shown = new Map(); // key -> callback put on screen this page load (listed in the one summary line)
+  let loadedAt = 0, expanded = false;
 
   const key = (c) => `${c.id}|${c.callback_at}`;
   const timeLabel = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   const who = (c) => esc([c.full_name, c.company_name].filter(Boolean).join(" · ") || "a prospect");
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-  function addBanner(c, soon) {
-    const k = key(c);
-    if (shown.has(k)) return;
-    shown.add(k);
-    const mins = Math.max(0, Math.ceil((new Date(c.callback_at) - Date.now()) / 60000));
+  // ONE compact line ("3 overdue callbacks · 2 today · View"); tapping it lists them, each opens its dial. The x dismisses all listed.
+  function render() {
+    const rows = [...shown.values()].filter((c) => callbacks.some((x) => key(x) === key(c)));
+    box.innerHTML = "";
+    if (!rows.length) return;
+    const overdue = rows.filter((c) => c.overdue), today = rows.filter((c) => !c.overdue);
+    const soon = today.find((c) => { const d = new Date(c.callback_at) - Date.now(); return d <= SOON_MS && d > -30 * 60 * 1000; });
+    const bits = [];
+    if (soon) { const m = Math.max(0, Math.ceil((new Date(soon.callback_at) - Date.now()) / 60000)); bits.push(m <= 0 ? "Callback now" : `Callback in ${m} min`); }
+    if (overdue.length) bits.push(`${plural(overdue.length, "overdue callback")}`);
+    const rest = today.length - (soon ? 1 : 0);
+    if (rest > 0) bits.push(`${rest} today`);
     const el = document.createElement("div");
     el.className = `callback-banner${soon ? " soon" : ""}`;
-    el.dataset.key = k;
-    el.innerHTML = `<button type="button" class="callback-banner-main">
-        <span class="callback-banner-title">${c.overdue ? `Overdue callback (${esc(new Date(c.callback_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }))})` : soon ? (mins <= 0 ? "Callback now" : `Callback in ${mins} min`) : `Callback today at ${esc(timeLabel(c.callback_at))}`}</span>
-        <span class="callback-banner-who">${who(c)}</span>
-      </button>
-      <button type="button" class="callback-banner-x" aria-label="Dismiss">&times;</button>`;
-    el.querySelector(".callback-banner-main").addEventListener("click", () => {
-      window.location.href = `dials.html?dial=${encodeURIComponent(c.id)}`;
-    });
+    el.innerHTML = `<button type="button" class="callback-banner-main" aria-expanded="${expanded}"><span class="callback-banner-title">${esc(bits.join(" · "))}</span><span class="callback-banner-view">${expanded ? "Hide" : "View"}</span></button>
+      <button type="button" class="callback-banner-x" aria-label="Dismiss">&times;</button>
+      ${expanded ? `<div class="callback-banner-list">${rows.map((c) => `<button type="button" class="callback-banner-item" data-id="${esc(c.id)}"><span class="callback-banner-when">${c.overdue ? esc(new Date(c.callback_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })) : esc(timeLabel(c.callback_at))}</span><span class="callback-banner-who">${who(c)}</span></button>`).join("")}</div>` : ""}`;
+    el.querySelector(".callback-banner-main").addEventListener("click", () => { expanded = !expanded; render(); });
     el.querySelector(".callback-banner-x").addEventListener("click", (e) => {
       e.stopPropagation();
       const d = readDismissed(profile.id);
-      d.add(k);
+      rows.forEach((c) => { d.add(key(c)); shown.delete(key(c)); });
       writeDismissed(profile.id, d);
-      el.remove();
+      render();
     });
+    el.querySelectorAll(".callback-banner-item").forEach((b) => b.addEventListener("click", () => { window.location.href = `dials.html?dial=${encodeURIComponent(b.dataset.id)}`; }));
     box.appendChild(el);
   }
 
   function evaluate() {
     const dismissed = readDismissed(profile.id);
     const now = Date.now();
-    // drop banners whose callback was changed or cleared
-    box.querySelectorAll(".callback-banner").forEach((el) => { if (el.dataset.key !== "overdue-more" && !callbacks.some((c) => key(c) === el.dataset.key)) { shown.delete(el.dataset.key); el.remove(); } });
-    let overdueShown = 0, overdueExtra = 0;
+    for (const k of [...shown.keys()]) if (!callbacks.some((c) => key(c) === k)) shown.delete(k); // callback changed or cleared
     for (const c of callbacks) {
       const at = new Date(c.callback_at).getTime();
       const k = key(c);
       if (dismissed.has(k) || shown.has(k)) continue;
       const soon = at - now <= SOON_MS && at - now > -30 * 60 * 1000;
-      if (c.overdue) { // listed once per day, never re-raised; at most 3 shown, the rest summarized in one banner
-        if (firstOpen) { if (++overdueShown <= 3) addBanner(c, false); else overdueExtra++; }
-        continue;
-      }
-      if (firstOpen && at > now - 30 * 60 * 1000) addBanner(c, soon);
-      else if (soon) addBanner(c, true);
+      if (c.overdue) { if (firstOpen) shown.set(k, c); continue; } // listed once per day, never re-raised
+      if ((firstOpen && at > now - 30 * 60 * 1000) || soon) shown.set(k, c);
     }
-    if (overdueExtra && !shown.has("overdue-more") && !dismissed.has("overdue-more")) {
-      shown.add("overdue-more");
-      const el = document.createElement("div");
-      el.className = "callback-banner"; el.dataset.key = "overdue-more";
-      el.innerHTML = `<button type="button" class="callback-banner-main"><span class="callback-banner-title">${overdueExtra} more overdue callback${overdueExtra === 1 ? "" : "s"}</span><span class="callback-banner-who">Open Profile to see them all</span></button><button type="button" class="callback-banner-x" aria-label="Dismiss">&times;</button>`;
-      el.querySelector(".callback-banner-main").addEventListener("click", () => { window.location.href = "profile.html"; });
-      el.querySelector(".callback-banner-x").addEventListener("click", (e) => { e.stopPropagation(); el.remove(); });
-      box.appendChild(el);
-    }
+    render();
   }
 
   async function refresh() {

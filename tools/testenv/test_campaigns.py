@@ -156,6 +156,14 @@ def _run():
     mine = [x for x in r if x["list_id"] == lid]
     check("admin_campaigns: counts + status + owner + spintax flag", code == 200 and mine and mine[0]["status"] == "ready" and mine[0]["counts"]["ready"] == 50 and mine[0]["counts"]["need_fix"] == 1
           and mine[0]["owner"] == "Caleb Hong" and mine[0]["has_spintax"] and mine[0]["mailboxes"] >= 1, mine)
+    # round 1: the page reads cached stats (p_fresh=false: no refresh pass, so a status change made behind its back is not applied yet)
+    q(f"update campaigns set status = 'draft' where list_id = '{lid}'")
+    code, r = rpc(ADMIN, "admin_campaigns", p_fresh=False)
+    check("admin_campaigns(p_fresh=false) returns the CACHED campaign (no refresh pass)", code == 200 and [x["status"] for x in r if x["list_id"] == lid] == ["draft"], (code, [x["status"] for x in r if x["list_id"] == lid]))
+    code, r = rpc(ADMIN, "admin_campaigns", p_fresh=True)
+    check("admin_campaigns(p_fresh=true) refreshes it back to ready", code == 200 and [x["status"] for x in r if x["list_id"] == lid] == ["ready"])
+    code, r = rpc(ADMIN, "ai_setup_command"); check("ai_setup_command: admin gets the stored setup command (never shipped in the page source)", code == 200 and isinstance(r, str) and "set-token" in r, (code, r))
+    code, r = rpc(CALEB, "ai_setup_command"); check("ai_setup_command: an intern gets nothing", code == 200 and not r, (code, r))
     for who, nm in ((CALEB, "owner intern"), (GAVIN, "other intern"), (LEAD_B, "other team lead")):
         code, r = rpc(who, "admin_campaigns"); check(f"{nm}: admin_campaigns denied", code >= 400, (code, r))
         code, r = rpc(who, "campaign_pause", p_list=lid); check(f"{nm}: campaign_pause denied", code >= 400, (code, r))

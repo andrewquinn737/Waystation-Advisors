@@ -12,6 +12,7 @@ run() { printf '%-28s' "$1"; out=$(sh -c "$2" 2>&1); rc=$?; last=$(printf '%s\n'
         [ $bad = 1 ] && { fail=1; printf '%s\n' "$out" | grep -E '^FAIL|Traceback' | head -5; echo "   -> FAILED"; }; }
 run "shared copy rules"   "./check_shared.sh"
 run "copy checks (node)"  "node copyLint.test.mjs"
+run "import engine (node)" "node import_unit.test.mjs"
 run "SQL/JS sentence parity" "python3 test_sentence_parity.py"
 run "sequence engine"     "python3 test_sequences.py"
 run "mailbox admin API"   "python3 test_mailbox_admin.py"

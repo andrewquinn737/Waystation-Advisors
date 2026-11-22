@@ -91,6 +91,9 @@ def run():
         m = re.search(r"([\d,]+) leads? (?:are|is) already in the system", txt)
         check("overlap: existing leads detected, names the other list + owner", m and int(m.group(1).replace(",", "")) >= 32 and "TEST-IMPORT-big" in txt and "Caleb Hong" in txt, txt[:400])
         n_skip = int(m.group(1).replace(",", "")) if m else 0
+        check("overlap: names the EXISTING lead, not just the incoming row", re.search(r"matches TEST-IMPORT Co \d+,? LLC, already in", txt) is not None, txt[:500])
+        check("overlap: preview marks skipped duplicate rows", "already in system (skipped)" in p.inner_text(".iw-table"), p.inner_text(".iw-table")[:200])
+        check("overlap: result chips read as one story (no 'after you pressed Import' timing)", "Of 50 rows" in txt, txt[:300])
         check("overlap: default skips them (to import = new rows only)", p.inner_text("#importDialsImportBtn").strip() == f"Import {50 - n_skip} leads", p.inner_text("#importDialsImportBtn"))
         p.check("input[value=keep]"); p.wait_for_timeout(200)
         check("overlap: 'Import everything' keeps all 50", p.inner_text("#importDialsImportBtn").strip() == "Import 50 leads")
@@ -121,6 +124,15 @@ def run():
         p.click(".cr-mandate-btn[data-m=ma]"); p.click("#importDialsImportBtn"); p.wait_for_selector("#importDialsResult", timeout=60000)
         d = sb.test_sql("select company_name, email, mobile_phone from dials where company_name like 'TEST-IMPORT Zed'")
         check("fixed mapping lands in the right fields", d and d[0]["email"] == "z1@zed.com" and d[0]["mobile_phone"] == "801-555-7100", d)
+        p.click("#importDialsCancelBtn")
+        # ---- an invalid email is saved blank, never verbatim
+        be = w("TEST-IMPORT-bademail.csv", "Company name,Email,Mobile number\nTEST-IMPORT Bad,n/a,801-555-7103\nTEST-IMPORT Good,good@testimportgood.com,801-555-7104\n")
+        open_modal(); pick(be); p.wait_for_selector(".iw-chips"); txt = p.inner_text(".iw")
+        check("invalid email chip says it is left blank", "1 invalid emails (left blank)" in txt, txt[:300])
+        p.click(".cr-mandate-btn[data-m=ma]"); p.click("#importDialsImportBtn"); p.wait_for_selector("#importDialsResult", timeout=60000)
+        bd = sb.test_sql("select company_name, email from dials where company_name like 'TEST-IMPORT Bad' or company_name like 'TEST-IMPORT Good'")
+        check("invalid email ('n/a') is saved blank, the good one kept", {d["company_name"]: d["email"] for d in bd} == {"TEST-IMPORT Bad": None, "TEST-IMPORT Good": "good@testimportgood.com"}, bd)
+        res2 = p.inner_text("#importDialsResult"); check("import result has no odd timing phrase", "after you pressed" not in res2 and "Ready to call now" in res2, res2)
         p.click("#importDialsCancelBtn")
         bad = [e for e in errs if not any(n in e for n in NOISE)]
         check("no console/page errors", not bad, bad[:3])

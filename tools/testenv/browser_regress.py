@@ -3,7 +3,7 @@ Usage: python3 browser_regress.py [role ...]   roles: admin lead intern  (defaul
 Logs in per role, opens every page, records console/page errors and failed requests, and checks menu items exist."""
 import re, sys, json, os
 from playwright.sync_api import sync_playwright
-BASE = "http://localhost:5173/"
+BASE = os.environ.get("WS_BASE", "http://localhost:5173/")
 LOG = os.path.expanduser("~/Projects/First Project/TEST_LOGINS.md")
 USERS = {"admin": "Test Admin", "lead": "Andrew Quinn", "intern": "Caleb Hong"}
 def creds(name):

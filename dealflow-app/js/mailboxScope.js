@@ -55,11 +55,13 @@ export function buildGroups(accounts, { isAdmin }) {
 
 // Selected mailbox ids, always a subset of `accounts`. First visit (or a stale/empty saved selection) defaults to
 // EVERYTHING the person can see, so nothing is hidden until they narrow it in the picker.
-export function selectedMailboxIds(accounts) {
+// `allowEmpty` (the picker only): keep an empty selection as empty so "Select all" can be unticked; the picker blocks Done until
+// something is ticked, and everywhere else an empty selection still means "everything".
+export function selectedMailboxIds(accounts, allowEmpty = false) {
   const valid = new Set(accounts.map((a) => a.id));
   const saved = getVisibleAccountIds(MAILBOX_KEY);
   let ids = saved && isVisibleSelectionInitialized(MAILBOX_KEY) ? [...saved].filter((id) => valid.has(id)) : [];
-  if (!ids.length) {
+  if (!ids.length && !(allowEmpty && saved && isVisibleSelectionInitialized(MAILBOX_KEY))) {
     ids = accounts.map((a) => a.id);
     setVisibleAccountIds(ids, MAILBOX_KEY);
   }
@@ -81,7 +83,10 @@ export async function loadSequenceBadges(addresses) {
   const out = new Map();
   const addrs = [...new Set(addresses.map((a) => String(a || "").toLowerCase()).filter(Boolean))];
   for (let i = 0; i < addrs.length; i += 80) {
-    const { data } = await supabase.from("dials").select("id, email, seq_state").in("email", addrs.slice(i, i + 80)).not("seq_state", "is", null);
+    const q = () => supabase.from("dials").select("id, email, seq_state").in("email", addrs.slice(i, i + 80)).not("seq_state", "is", null);
+    let { data, error } = await q();
+    if (error) { await new Promise((r) => setTimeout(r, 1200)); ({ data, error } = await q()); } // one retry (a timeout used to drop every badge)
+    if (error) throw error;
     const repliedIds = (data || []).filter((d) => d.seq_state === "replied").map((d) => d.id);
     const answered = new Set();
     if (repliedIds.length) {
@@ -118,7 +123,7 @@ export function wireMailboxPicker({ menuBtn, popupEl, bodyEl, closeBtn, closePag
   const open = new Set();
   let filter = "";
   let listEl = null;
-  const selected = () => new Set(selectedMailboxIds(getAccounts()));
+  const selected = () => new Set(selectedMailboxIds(getAccounts(), true));
   const badge = (n) => (n ? `<span class="mailbox-unread-badge">${n > 99 ? "99+" : n}</span>` : "");
 
   function renderList() {
@@ -185,7 +190,7 @@ export function wireMailboxPicker({ menuBtn, popupEl, bodyEl, closeBtn, closePag
       }
       setVisibleAccountIds([...sel], MAILBOX_KEY);
       renderList();
-      onChange();
+      if (sel.size) onChange(); // an empty pick is only a step toward ticking others (Done stays disabled until then)
     });
   }
 

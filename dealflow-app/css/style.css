@@ -16,6 +16,10 @@
   --text-muted-strong: #4b5563;
   --accent: #2f5fed;
   --accent-hover: #2449c4;
+  /* Calm slate tones for Calls chrome (tabs, call buttons, selected outcome): deliberately not the saturated accent. */
+  --tone: #3b4a68;
+  --tone-hover: #2f3c57;
+  --tone-soft: #eceff5;
   --gold: #c8a45a;
   --gold-soft: #f4ead2;
   --danger: #d1453b;
@@ -109,6 +113,9 @@
     --text-muted-strong: #c7cdd6;
     --accent: #6d8dff;
     --accent-hover: #8aa4ff;
+    --tone: #7f90b3;
+    --tone-hover: #95a5c6;
+    --tone-soft: #161a24;
     --gold: #d9b876;
     --gold-soft: #2a2412;
     --danger: #ff6b61;
@@ -1195,7 +1202,7 @@ html.is-desktop-device .contact-action-tel:not(.contact-action-call) { display: 
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-user-drag: none;
 }
 @media (hover: hover) { .dial-tab:hover { background: var(--gold-soft); } }
-.dial-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.dial-tab.active { background: var(--tone-soft); color: var(--tone); border-color: var(--tone); font-weight: 700; }
 .dial-tab-rename-input { padding: 7px 10px; border-radius: 6px; border: 1px solid var(--accent); font-size: 13px; width: 130px; }
 .dial-tab-add {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
@@ -2062,15 +2069,20 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 /* Profile's "Callbacks for today" rows: ones more than 30 minutes ago are dimmed. */
 .callback-row.is-past { opacity: .55; }
 
-/* Top-of-app callback banners (js/callbackBanners.js). */
-.callback-banners { display: flex; flex-direction: column; gap: 6px; padding: 0 12px; }
-.callback-banners:not(:empty) { padding-top: 8px; padding-bottom: 4px; }
-.callback-banner { display: flex; align-items: stretch; border: 1px solid var(--gold); background: var(--gold-soft); border-radius: 12px; overflow: hidden; max-width: 760px; width: 100%; margin: 0 auto; }
+/* Top-of-app callback banner (js/callbackBanners.js): ONE compact line, expands on tap. */
+.callback-banners { padding: 0 12px; }
+.callback-banners:not(:empty) { padding-top: 6px; padding-bottom: 2px; }
+.callback-banner { display: flex; flex-wrap: wrap; align-items: stretch; border: 1px solid var(--border); background: var(--gold-soft); border-radius: 10px; overflow: hidden; max-width: 760px; width: 100%; margin: 0 auto; }
 .callback-banner.soon { border-color: #d1453b; background: #fdecea; }
-.callback-banner-main { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 10px 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
-.callback-banner-title { font-weight: 700; font-size: 13.5px; }
-.callback-banner-who { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.callback-banner-x { border: 0; background: none; font-size: 24px; line-height: 1; padding: 0 14px; cursor: pointer; color: var(--text-muted); }
+.callback-banner-main { flex: 1; min-width: 0; min-height: 40px; text-align: left; border: 0; background: none; padding: 0 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.callback-banner-title { font-weight: 600; font-size: 13.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.callback-banner-view { font-size: 13px; font-weight: 600; color: var(--text-muted); text-decoration: underline; }
+.callback-banner-x { border: 0; background: none; font-size: 22px; line-height: 1; min-width: 44px; cursor: pointer; color: var(--text-muted); }
+.callback-banner-list { flex-basis: 100%; border-top: 1px solid var(--border); max-height: 40vh; overflow-y: auto; }
+.callback-banner-item { display: flex; gap: 10px; width: 100%; min-height: 40px; align-items: center; text-align: left; border: 0; background: none; padding: 0 12px; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; }
+.callback-banner-item + .callback-banner-item { border-top: 1px solid var(--border); }
+.callback-banner-when { flex: 0 0 auto; font-weight: 600; min-width: 64px; }
+.callback-banner-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-color-scheme: dark) { .callback-banner.soon { background: #3a1f1c; } }
 .call-panel-who { min-width: 0; flex: 1 1 auto; }
 .call-panel-meta { flex: 0 0 auto; font-size: 12px; }

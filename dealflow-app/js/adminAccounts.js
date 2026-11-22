@@ -37,7 +37,7 @@ async function load() {
   $("mbxList").innerHTML = `<p class="ad-empty">Loading...</p>`;
   try {
     const r = await api({ action: "list" });
-    boxes = r.mailboxes; people = r.people.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
+    boxes = r.mailboxes; people = r.people.filter((p) => p.full_name !== "AI Assistant").sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
     $("addOwner").innerHTML = `<option value="">Owner: match by name</option>` + people.map((p) => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
     msg(""); render();
   } catch (e) { $("mbxList").innerHTML = ""; msg(e.message); }
@@ -77,6 +77,7 @@ function boxHtml(b) {
       <label>Mandate <select data-act="mandate"><option value="">Any</option><option value="ma" ${b.mandate === "ma" ? "selected" : ""}>M&amp;A</option><option value="data" ${b.mandate === "data" ? "selected" : ""}>Data</option></select></label>
       <label><input type="checkbox" data-act="sync" ${b.sync_enabled ? "checked" : ""} /> Read this inbox</label></div></details></div>`;
 }
+const plural = (n) => `${n} mailbox${n === 1 ? "" : "es"}`;
 function render() {
   const unassigned = boxes.filter((b) => b.needs_assignment).length;
   $("mbxSummary").textContent = `${boxes.length} account${boxes.length === 1 ? "" : "s"}` + (unassigned ? `, ${unassigned} need an owner` : "");
@@ -92,7 +93,7 @@ function render() {
   $("mbxList").innerHTML = ordered.map(([k, g]) => {
     const used = g.items.reduce((s, b) => s + (b.sent_24h ?? 0), 0), cap = g.items.reduce((s, b) => s + (b.effective_daily_limit ?? 0), 0);
     const open = wasOpen.has(String(k)) || k === "__un" || g.items.some((b) => b.send_paused_reason || b.sending_ok === false);
-    return `<details class="ad-group${k === "__un" ? " warn" : ""}" data-k="${esc(k)}" ${open ? "open" : ""}><summary><span>${esc(g.name)}</span><small>${g.items.length} · ${used}/${cap} today</small></summary>${g.items.map(boxHtml).join("")}</details>`;
+    return `<details class="ad-group${k === "__un" ? " warn" : ""}" data-k="${esc(k)}" ${open ? "open" : ""}><summary><span>${esc(g.name)}</span><small>${plural(g.items.length)} · ${used} of ${cap} sent today</small></summary>${g.items.map(boxHtml).join("")}</details>`;
   }).join("");
 }
 
