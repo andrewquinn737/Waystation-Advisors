@@ -53,3 +53,5 @@
 /* follow-up rows: the task in words + one obvious button */
 .dh-do { color: var(--text); font-weight: 600; }
 
+/* reply rows say "Waiting for your reply · overdue N days": let it wrap instead of cutting the word "overdue" */
+.dh-row .dh-meta.dh-wrap { white-space: normal; }

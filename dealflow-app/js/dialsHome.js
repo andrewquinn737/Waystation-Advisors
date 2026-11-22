@@ -116,8 +116,14 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     if (t) {
       // follow-up: say what to do, plainly, first
       bits.length = 0;
-      bits.push(`<b class="dh-do">${esc(DO[t.kind] || KIND[t.kind])}</b>`);
-      bits.push(it.late ? `${it.late} day${it.late === 1 ? "" : "s"} late` : "today");
+      if (t.kind === "reply") {
+        // completes itself when an email goes out to them; overdue after 2 business days
+        bits.push(`<b class="dh-do">Waiting for your reply</b>`);
+        if (it.late) bits.push(`overdue ${it.late} day${it.late === 1 ? "" : "s"}`);
+      } else {
+        bits.push(`<b class="dh-do">${esc(DO[t.kind] || KIND[t.kind])}</b>`);
+        bits.push(it.late ? `${it.late} day${it.late === 1 ? "" : "s"} late` : "today");
+      }
     } else if (g.n === 8) {
       const nx = it.next, NEXT = { email: "Email", followup_email: "Follow-up email", ...KIND };
       if (d.seq_state === "awaiting_copy") bits.push("First email not sent yet");
@@ -131,7 +137,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     const icons = done || !rowIcons ? "" : rowIcons(d);
     return `<div class="mobile-card clickable-row dh-row dh-g${g.n}" role="button" tabindex="0" data-d="${esc(d.id)}">
       <div class="mc-main"><div class="mc-name">${esc(d.company_name || d.full_name || "(no name)")}</div>
-        <div class="dh-meta">${bits.join(" · ")}</div>
+        <div class="dh-meta${t && t.kind === "reply" ? " dh-wrap" : ""}">${bits.join(" · ")}</div>
         <div class="mc-sub">${esc(who || "—")}</div></div>
       <div class="dh-side">${done}${icons}</div></div>`;
   }
@@ -162,7 +168,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       return `${doneBtn}<a class="dh-act dh-go" href="${esc(url)}" target="_blank" rel="noopener" data-stop>${goLabel("link", "LinkedIn")}</a>`;
     }
     if (t.kind === "reply") {
-      return `${doneBtn}<a class="dh-act dh-go" href="messages.html?from=${encodeURIComponent(d.email || "")}" data-stop>${goLabel("mail", "Reply")}</a>`;
+      return `<a class="dh-act dh-go" href="messages.html?from=${encodeURIComponent(d.email || "")}" data-stop>${goLabel("mail", "Reply")}</a>`;
     }
     return doneBtn;
   }

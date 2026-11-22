@@ -48,27 +48,32 @@ function hint(c) {
   return "";
 }
 function row(c) {
-  const n = c.counts, live = c.status === "live", paused = c.status === "paused", canLaunch = n.ready > 0 && !paused;
+  const n = c.counts, paused = c.status === "paused", canLaunch = n.ready > 0 && !paused;
   const sub = [c.owner || "Unknown owner", "Uploaded " + day(c.created_at), MANDATE[c.mandate] || ""].filter(Boolean).join(" \u00b7 ");
-  // One primary action per row; everything else sits in the overflow menu.
-  const all = [
-    canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`] : null,
-    paused ? ["resume", "Resume"] : null,
-    c.status !== "done" ? ["design", "Design in Claude"] : null,
-    n.ready + n.need_fix > 0 ? ["review", "Review emails"] : null,
-    live ? ["pause", "Pause"] : null,
-  ].filter(Boolean);
-  const pick = canLaunch ? "launch" : paused ? "resume" : all.find(([a]) => a === "review") && n.need_fix > 0 ? "review" : c.status === "draft" ? "design" : "";
-  const main = all.find(([a]) => a === pick), rest = all.filter(([a]) => a !== pick);
+  // One primary action per row; the "..." menu holds the rest (see menuItems).
+  const pick = canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`] : paused ? ["resume", "Resume"]
+    : n.need_fix > 0 ? ["review", "Review emails"] : c.status === "draft" ? ["design", "Design in Claude"] : null;
   const held = n.need_fix > 0 ? `<span class="warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></span>` : "";
   const note = [hint(c), held].filter(Boolean).join(" ");
   return `<article class="cp-row" data-id="${esc(c.list_id)}">
     <div class="cp-name"><b title="${esc(c.name || "")}">${esc(c.name || "(untitled)")}</b><span>${esc(sub)}</span></div>
     <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span></div>
     ${statCells(n)}
-    <div class="cp-act">${main ? `<button type="button" class="btn small" data-a="${main[0]}">${main[1]}</button>` : ""}
-      ${rest.length ? `<div class="cp-menu-wrap"><button type="button" class="cp-more" data-menu aria-label="More actions" aria-haspopup="menu" aria-expanded="false">&#8943;</button><div class="cp-menu hidden" role="menu">${rest.map(([a, l]) => `<button type="button" role="menuitem" data-a="${a}">${l}</button>`).join("")}</div></div>` : ""}</div>
+    <div class="cp-act">${pick ? `<button type="button" class="btn small" data-a="${pick[0]}">${pick[1]}</button>` : "<span></span>"}
+      <button type="button" class="cp-more" data-menu aria-label="More actions" aria-haspopup="menu" aria-expanded="false">&#8943;</button></div>
     <div class="cp-note${note ? "" : " hidden"}">${note}</div></article>`;
+}
+// Menu items for a campaign: details first, then what can be done now.
+function menuItems(c) {
+  const n = c.counts, paused = c.status === "paused", live = c.status === "live";
+  return [
+    ["details", "List details"],
+    n.ready + n.need_fix > 0 ? ["review", "Review emails"] : null,
+    paused ? ["resume", "Resume"] : null,
+    live ? ["pause", "Pause"] : null,
+    n.ready > 0 && !paused ? ["launch", c.launched_at ? "Launch more" : "Launch"] : null,
+    c.status !== "done" ? ["design", "Design in Claude"] : null,
+  ].filter(Boolean);
 }
 function render() {
   const open = camps.filter((c) => c.status !== "done"), done = camps.filter((c) => c.status === "done");
@@ -81,17 +86,46 @@ function render() {
   const tg = $("cpToggleDone"); tg.classList.toggle("hidden", !done.length); tg.textContent = showDone ? "Hide finished" : `Show finished (${done.length})`;
 }
 
-function closeMenus() { document.querySelectorAll(".cp-menu:not(.hidden)").forEach((m) => { m.classList.add("hidden"); m.previousElementSibling?.setAttribute("aria-expanded", "false"); }); }
-document.addEventListener("click", (e) => { if (!e.target.closest(".cp-menu-wrap")) closeMenus(); });
+// One floating menu on <body>, positioned from the button (fixed), so no table / card overflow can clip it.
+let menuEl = null, menuBtn = null;
+function closeMenus() { menuEl?.remove(); menuEl = null; menuBtn?.setAttribute("aria-expanded", "false"); menuBtn = null; }
+function openMenu(btn, c) {
+  closeMenus();
+  menuBtn = btn; btn.setAttribute("aria-expanded", "true");
+  menuEl = document.createElement("div");
+  menuEl.className = "cp-menu"; menuEl.setAttribute("role", "menu"); menuEl.dataset.id = c.list_id;
+  menuEl.innerHTML = menuItems(c).map(([a, l]) => `<button type="button" role="menuitem" data-a="${a}">${l}</button>`).join("");
+  document.body.appendChild(menuEl);
+  const r = btn.getBoundingClientRect(), mw = menuEl.offsetWidth, mh = menuEl.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  menuEl.style.left = Math.max(8, Math.min(r.right - mw, vw - mw - 8)) + "px";
+  menuEl.style.top = (r.bottom + 4 + mh > vh - 8 ? Math.max(8, r.top - 4 - mh) : r.bottom + 4) + "px";
+  menuEl.querySelector("button")?.focus();
+}
+document.addEventListener("click", (e) => { if (menuEl && !e.target.closest(".cp-menu, [data-menu]")) closeMenus(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+window.addEventListener("resize", closeMenus);
+window.addEventListener("scroll", closeMenus, true);
 
 async function onClick(e) {
-  const menuBtn = e.target.closest("[data-menu]");
-  if (menuBtn) { const m = menuBtn.nextElementSibling, was = !m.classList.contains("hidden"); closeMenus(); if (!was) { m.classList.remove("hidden"); menuBtn.setAttribute("aria-expanded", "true"); } return; }
+  const menuBtnEl = e.target.closest("[data-menu]");
+  if (menuBtnEl) {
+    const c = camps.find((x) => x.list_id === menuBtnEl.closest(".cp-row")?.dataset.id);
+    if (c) { if (menuBtn === menuBtnEl) closeMenus(); else openMenu(menuBtnEl, c); }
+    return;
+  }
   const b = e.target.closest("[data-a]"), el = e.target.closest(".cp-row"); if (!b || !el) return;
+  runAction(b, el.dataset.id, el);
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".cp-menu [data-a]"); if (!b) return;
+  const id = b.closest(".cp-menu").dataset.id; closeMenus();
+  runAction(b, id, document.querySelector(`.cp-row[data-id="${id}"]`));
+});
+async function runAction(b, listId, el) {
   closeMenus();
-  const c = camps.find((x) => x.list_id === el.dataset.id); if (!c) return;
+  const c = camps.find((x) => x.list_id === listId); if (!c) return;
   const a = b.dataset.a;
+  if (a === "details") return openDetails(c);
   if (a === "review") return openCopyReview({ id: c.list_id, name: c.name }, { all: true, onChanged: load });
   if (a === "launch") return openLaunch(c);
   if (a === "design") return designInClaude(c, el);
@@ -100,6 +134,34 @@ async function onClick(e) {
   const { error } = a === "pause" ? await supabase.rpc("campaign_pause", { p_list: c.list_id, p_reason: "Paused by admin" }) : await supabase.rpc("campaign_resume", { p_list: c.list_id });
   if (error) msg(error.message); else msg("");
   load();
+}
+
+// ---- list details sheet ---------------------------------------------------------------------------------------------
+async function openDetails(c) {
+  const sheet = document.createElement("div");
+  sheet.className = "ad-sheet-bd";
+  sheet.innerHTML = `<div class="ad-sheet" role="dialog" aria-label="List details"><div class="ad-sheet-main"><h2>${esc(c.name || "(untitled)")}</h2><div id="adDet"><p class="ad-muted">Loading...</p></div></div>
+    <a class="btn" id="adOpen" href="dials.html?list=${encodeURIComponent(c.list_id)}">Open list on Calls</a><button type="button" class="btn secondary" id="adCancel">Close</button></div>`;
+  document.body.appendChild(sheet);
+  const close = () => sheet.remove();
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });
+  sheet.querySelector("#adCancel").onclick = close;
+  const count = (f) => { let qy = supabase.from("dials").select("id", { count: "exact", head: true }).eq("list_id", c.list_id); return f(qy).then((r) => r.count ?? 0); };
+  const [withEmail, held, queue, lst] = await Promise.all([
+    count((qy) => qy.not("email", "is", null).neq("email", "")),
+    Promise.resolve(c.counts.need_fix ?? 0),
+    c.owner_id ? supabase.rpc("email_queue_status", { p_owner: c.owner_id }).then((r) => (Array.isArray(r.data) ? r.data[0] : r.data)) : Promise.resolve(null),
+    supabase.from("dial_lists").select("buyer_id").eq("id", c.list_id).maybeSingle().then((r) => r.data),
+  ]);
+  let buyer = "";
+  if (lst?.buyer_id) buyer = (await supabase.from("profiles").select("full_name").eq("id", lst.buyer_id).maybeSingle()).data?.full_name || "";
+  const boxes = queue?.mailboxes || [];
+  const boxHtml = boxes.length ? boxes.map((m) => `<li>${esc(m.address)} <span class="ad-muted">${Math.max(0, (m.cap ?? 0) - (m.used ?? 0))} of ${m.cap ?? 0} left today</span></li>`).join("") : `<li class="ad-muted">None yet. Add one under Email accounts.</li>`;
+  const n = c.counts, dl = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+  sheet.querySelector("#adDet").innerHTML = `<dl class="cp-det">
+      ${dl("Owner", esc(c.owner || "Unknown"))}${dl("Mandate", esc(MANDATE[c.mandate] || "Not set"))}${dl("Buyer", esc(buyer || "None"))}${dl("Uploaded", esc(day(c.created_at)))}
+      ${dl("Leads", n.leads?.toLocaleString?.() ?? n.leads)}${dl("With email", withEmail.toLocaleString())}${dl("Backup (no email)", (n.backup ?? 0).toLocaleString())}${dl("Held for edits", held.toLocaleString())}
+    </dl><h3 class="cp-det-h">Sending mailboxes${queue ? ` \u00b7 ${queue.remaining_today ?? 0} of ${queue.capacity_today ?? 0} sends left today` : ""}</h3><ul class="cp-det-boxes">${boxHtml}</ul>`;
 }
 
 async function designInClaude(c, el) {

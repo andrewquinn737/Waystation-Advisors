@@ -76,15 +76,22 @@ export async function loadUnreadCounts(accountIds) {
 }
 
 // Sequence badges for a set of counterpart addresses: Map(lowercase address -> { label, replied }).
+// "They replied - emails stopped" until the user answers (the reply task finishes itself when an email to them is recorded), then "You replied".
 export async function loadSequenceBadges(addresses) {
   const out = new Map();
   const addrs = [...new Set(addresses.map((a) => String(a || "").toLowerCase()).filter(Boolean))];
   for (let i = 0; i < addrs.length; i += 80) {
-    const { data } = await supabase.from("dials").select("email, seq_state").in("email", addrs.slice(i, i + 80)).not("seq_state", "is", null);
+    const { data } = await supabase.from("dials").select("id, email, seq_state").in("email", addrs.slice(i, i + 80)).not("seq_state", "is", null);
+    const repliedIds = (data || []).filter((d) => d.seq_state === "replied").map((d) => d.id);
+    const answered = new Set();
+    if (repliedIds.length) {
+      const { data: ts } = await supabase.from("sequence_tasks").select("dial_id").eq("kind", "reply").eq("status", "done").in("dial_id", repliedIds);
+      for (const t of ts || []) answered.add(t.dial_id);
+    }
     for (const d of data || []) {
       const k = String(d.email || "").toLowerCase();
       const prev = out.get(k);
-      if (d.seq_state === "replied") out.set(k, { label: "Replied – sequence paused", replied: true });
+      if (d.seq_state === "replied") out.set(k, answered.has(d.id) ? { label: "You replied", replied: false } : { label: "They replied \u2013 emails stopped", replied: true });
       else if (d.seq_state === "active" && !prev) out.set(k, { label: "In sequence", replied: false });
     }
   }

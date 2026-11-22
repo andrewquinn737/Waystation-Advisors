@@ -170,3 +170,15 @@ call/email/reply counted once), Reporting (Profile/team/PDF numbers == DB), Intr
 Upcoming; Calendly API needs Mason's token).
 Step 3: page-by-page review loops (design / function / bugs agents) until a pass finds nothing; tests green each pass.
 Optional: privacy-safe click tracker on live (needs Mason's go-ahead).
+
+### 2026-11-28 issue list items 1-6 (done on TEST)
+- `20261128_reply_autocomplete.sql`: no manual Done on reply tasks; trigger `email_outbound_reply_done` finishes the task when an outbound
+  email_messages row goes to the lead's address (or into a thread they wrote in) after the task existed; due = +2 business days (owner tz,
+  `add_business_days`); a later message from the lead re-opens it; `my_followups` lists reply tasks from day 0. Row text "Waiting for your reply".
+- Badges: "They replied - emails stopped" -> "You replied" (js/mailboxScope.js).
+- `20261128b_transfer_repin.sql`: transfer_dial_list / dials_follow_list_owner un-pin leads whose first email is not queued/sent and move their
+  pending tasks (+ calls of emailed leads) to the new owner; emailed leads keep mailbox + follow-up owner; campaigns.sender_account_ids reset.
+- Admin > Campaigns: fixed-width action column, floating "..." menu (List details / Review / Pause-Resume / Launch more / Design), details sheet,
+  `dials.html?list=<id>` deep link. Upload-then-transfer flow checked in browser: same import/transfer code as origin/main, plus mandate + sequence prep.
+- Tests: test_campaigns.py `_transfer_and_reply` (17 checks). Ships to live: both migrations + the JS.
+

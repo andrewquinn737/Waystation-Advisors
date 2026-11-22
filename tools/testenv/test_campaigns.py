@@ -32,6 +32,7 @@ def mk_list(owner, n, name, blank_city=False):
 def cleanup():
     q("delete from scheduled_emails where dial_id in (select d.id from dials d join dial_lists l on l.id = d.list_id where l.name like 'TEST-CAMP %')")
     q("delete from scheduled_emails where send_at >= '2027-03-01' and status = 'pending'")
+    q("delete from email_messages where message_id like '<tcamp-%'")
     q("delete from dial_lists where name like 'TEST-CAMP %'")
     q("delete from clients where company_name like 'TEST-CAMP %'")
     ids = ",".join(f"'{uid(e)}'" for e in (CALEB, GAVIN, LEAD_A, LEAD_B, AUSTIN, ADMIN))
@@ -258,6 +259,8 @@ def _run():
     check("expired token is rejected with a helpful message", code == 401 and "expired" in r["error"]["message"].lower(), (code, r))
     code, r = call(tbig, "tools/call", {"name": "list_campaigns", "arguments": {}}); check("expired token can't call tools either", code == 401, (code, r))
 
+    _transfer_and_reply()
+
     # ---------------------------------------------------------------- onboarding flag
     q(f"update claude_connector_tokens set revoked_at = now() where profile_id='{uid(ADMIN)}' and revoked_at is null")
     rpc(ADMIN, "onboarding_complete", p_done=False)
@@ -271,5 +274,72 @@ def _run():
     check("onboarding_complete stamps profiles.onboarding_done_at", code == 200 and r, (code, r))
     rpc(ADMIN, "onboarding_complete", p_done=False)
     check("onboarding can be reset (Settings > run it again)", rpc(ADMIN, "onboarding_status")[1] is None)
+
+def _transfer_and_reply():
+    """List transfer re-pins unsent leads to the new owner; reply tasks finish themselves when an outbound email is recorded."""
+    cal_box = q(f"select id from email_accounts where owner_id='{uid(CALEB)}' limit 1")[0]["id"]
+    xl = mk_list(CALEB, 4, "TEST-CAMP xfer " + uuid.uuid4().hex[:6])
+    ds = [r["id"] for r in q(f"select id from dials where list_id='{xl}' order by email")]
+    a, b, c, d = ds
+    q(f"update dials set sequence='email5', seq_state='active', sender_account_id='{cal_box}' where id in ('{a}','{b}','{c}','{d}')")
+    q(f"update dials set email_1_message_id='<tcamp-sent-{b[:6]}@example.com>' where id='{b}'")
+    mk = lambda dial, step, kind, status, extra="": q(f"insert into sequence_tasks (dial_id, list_id, owner_id, step, seq_day, kind, due_on, status {extra[0:0]}) values ('{dial}','{xl}','{uid(CALEB)}',{step},1,'{kind}',current_date,'{status}')")
+    mk(a, 1, "email", "pending"); mk(a, 2, "call", "pending")                     # never emailed, still pinned
+    mk(b, 1, "email", "done"); mk(b, 2, "call", "pending"); mk(b, 3, "followup_email", "pending")   # already emailed
+    mk(c, 1, "email", "queued")                                                  # first email queued with Caleb's mailbox
+    q(f"insert into scheduled_emails (created_by, account_id, dial_id, to_address, subject, body_text, send_at, status) values ('{uid(CALEB)}','{cal_box}','{c}','x@example.com','s','b','2027-03-02 18:00+00','pending')")
+    mk(d, 1, "email", "pending")
+    q(f"update campaigns set sender_account_ids = array['{cal_box}']::uuid[] where list_id='{xl}'")
+    code, r = rpc(ADMIN, "transfer_dial_list", p_list_id=xl, p_new_owner=uid(GAVIN))
+    check("admin transfers the list to Gavin", code in (200, 204), (code, r))
+    sa = lambda x: q(f"select sender_account_id s from dials where id='{x}'")[0]["s"]
+    own = lambda x, st: q(f"select owner_id o from sequence_tasks where dial_id='{x}' and step={st}")[0]["o"]
+    check("transfer: unsent leads are un-pinned from the old owner's mailbox", sa(a) is None and sa(d) is None, (sa(a), sa(d)))
+    check("transfer: their pending tasks (first email + call) move to the new owner", own(a, 1) == uid(GAVIN) and own(a, 2) == uid(GAVIN) and own(d, 1) == uid(GAVIN))
+    check("transfer: an already-emailed lead keeps its mailbox and its follow-up email stays with the sending owner", sa(b) == cal_box and own(b, 3) == uid(CALEB))
+    check("transfer: an already-emailed lead's call task goes to the new owner", own(b, 2) == uid(GAVIN))
+    check("transfer: a first email already queued keeps mailbox and task", sa(c) == cal_box and own(c, 1) == uid(CALEB))
+    check("transfer: campaign sender list reset to the new owner's mailboxes", q(f"select sender_account_ids s from campaigns where list_id='{xl}'")[0]["s"] is None)
+    code, r = rpc(ADMIN, "admin_campaigns")
+    check("campaign shows the new owner", [x["owner"] for x in r if x["list_id"] == xl] == ["Gavin Hopkinson"], [x["owner"] for x in r if x["list_id"] == xl])
+    gv_box = q(f"select id from email_accounts where owner_id='{uid(GAVIN)}' and not needs_assignment limit 1")
+    if gv_box:
+        check("new owner has eligible mailboxes for those leads", q(f"select count(*)::int n from owner_eligible_mailboxes('{uid(GAVIN)}', 'data')")[0]["n"] >= 1)
+    # a lead moved into another owner's list follows the owner too
+    xl2 = mk_list(CALEB, 1, "TEST-CAMP xfer2 " + uuid.uuid4().hex[:6])
+    e_ = q(f"select id from dials where list_id='{xl2}'")[0]["id"]
+    q(f"update dials set sequence='email5', seq_state='active', sender_account_id='{cal_box}' where id='{e_}'")
+    q(f"insert into sequence_tasks (dial_id, list_id, owner_id, step, seq_day, kind, due_on, status) values ('{e_}','{xl2}','{uid(CALEB)}',1,1,'email',current_date,'pending')")
+    q(f"update dials set list_id='{xl}' where id='{e_}'")
+    check("a dial moved into the transferred list follows: un-pinned, task reassigned", sa(e_) is None and own(e_, 1) == uid(GAVIN), (sa(e_), own(e_, 1)))
+
+    # ---- reply task completes itself
+    rl = mk_list(CALEB, 3, "TEST-CAMP reply " + uuid.uuid4().hex[:6])
+    r1, r2, r3 = [x for x in q(f"select id, email from dials where list_id='{rl}' order by email")]
+    q(f"update dials set sequence='email5', seq_state='active', sender_account_id='{cal_box}' where list_id='{rl}'")
+    msg = lambda direction, frm, to, thread=None, ago="0 seconds": q(f"""insert into email_messages (account_id, message_id, direction, from_address, subject, body_text, sent_at, to_addresses, thread_id, is_read)
+        values ('{cal_box}', '<tcamp-{uuid.uuid4().hex[:10]}@x>', '{direction}', {lit(frm)}, 'Re: hello', 'ok', now() - interval '{ago}', {lit(json.dumps([{"address": to}]))}::jsonb, {lit(thread) + "::uuid" if thread else "gen_random_uuid()"}, false)""")
+    task = lambda x: (q(f"select status, outcome, due_on::text due, completed_at from sequence_tasks where dial_id='{x}' and kind='reply'") or [None])[0]
+    th = str(uuid.uuid4())
+    msg("inbound", r1["email"], "me@x.com"); msg("inbound", r2["email"], "me@x.com", th)
+    t1, t2 = task(r1["id"]), task(r2["id"])
+    due = q(f"select add_business_days(person_today('{uid(CALEB)}'), 2)::text d")[0]["d"]
+    check("their reply creates a pending reply task due in 2 business days", t1 and t1["status"] == "pending" and t1["due"] == due, t1)
+    msg("outbound", "me@x.com", "someone.else@example.com")
+    check("an outbound email to somebody else does not finish it", task(r1["id"])["status"] == "pending")
+    msg("outbound", "me@x.com", r1["email"], ago="3 hours")
+    check("an outbound email sent BEFORE the task existed does not finish it", task(r1["id"])["status"] == "pending")
+    msg("outbound", "me@x.com", r1["email"].upper())
+    check("an outbound email to the lead finishes it (outcome replied, no check mark needed)", task(r1["id"])["status"] == "done" and task(r1["id"])["outcome"] == "replied" and task(r1["id"])["completed_at"], task(r1["id"]))
+    msg("outbound", "me@x.com", "other.person@example.com", th)
+    check("an outbound email in the same thread finishes it", task(r2["id"])["status"] == "done", task(r2["id"]))
+    check("the done task is not listed on the call sheet any more", not q(f"select 1 from sequence_tasks where dial_id in ('{r1['id']}','{r2['id']}') and kind='reply' and status in ('pending','failed')"))
+    msg("inbound", r1["email"], "me@x.com")
+    check("a new message from the lead brings the reply task back", task(r1["id"])["status"] == "pending" and task(r1["id"])["outcome"] is None, task(r1["id"]))
+    q(f"update sequence_tasks set due_on = current_date - 3 where dial_id='{r1['id']}' and kind='reply'")
+    code, rows = T.api(CALEB, "GET", f"/my_followups?dial_id=in.({r1['id']},{r3['id']})&kind=eq.reply&select=dial_id,due_on")
+    msg("inbound", r3["email"], "me@x.com")
+    code, rows3 = T.api(CALEB, "GET", f"/my_followups?dial_id=eq.{r3['id']}&kind=eq.reply&select=dial_id,due_on")
+    check("the owner's call sheet lists an overdue reply task, and a not-yet-due one from the day it exists", code == 200 and any(x["dial_id"] == r1["id"] for x in rows) and len(rows3) == 1 and rows3[0]["due_on"] > q("select current_date::text d")[0]["d"], (rows, rows3))
 
 if __name__ == "__main__": run()

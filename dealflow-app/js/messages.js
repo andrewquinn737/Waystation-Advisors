@@ -36,7 +36,7 @@ const { profile } = session;
 const isAdmin = profile?.role === "admin";
 const isTeamLead = profile?.role === "team_lead";
 const isIntern = !isAdmin && !isTeamLead;
-// ?from=<address> ("Read reply" on the call sheet): the thread opens with Reply and Done side by side; Done finishes the reply task.
+// ?from=<address> ("Read reply" on the call sheet): the thread opens with Reply. The reply task finishes itself when an email to them is recorded (DB trigger).
 let replyThreadId = null;
 const replyFrom = (new URLSearchParams(window.location.search).get("from") || "").trim();
 // "Inbox mode" = the full mail client (folders, reply, compose, picker). Admins/team leads always; anyone else
@@ -787,26 +787,6 @@ async function openParticipantRecord(address) {
   }
 }
 
-// "Done" on a reply opened from the call sheet: complete that company's pending reply task, then back to Calls.
-async function finishReplyTask(btn) {
-  btn.disabled = true;
-  try {
-    const { data: ds } = await supabase.from("dials").select("id").ilike("email", replyFrom);
-    const ids = (ds || []).map((d) => d.id);
-    if (ids.length) {
-      const { data: ts } = await supabase.from("sequence_tasks").select("id").eq("kind", "reply").in("dial_id", ids).not("status", "in", "(done,skipped)").limit(5);
-      for (const t of ts || []) {
-        const { error } = await supabase.rpc("complete_sequence_task", { p_task_id: t.id, p_outcome: "done", p_note: null, p_skip: false });
-        if (error) throw error;
-      }
-    }
-    window.location.href = "dials.html";
-  } catch (e) {
-    btn.disabled = false;
-    showError(els.errorBox, e);
-  }
-}
-
 async function openThread(threadId) {
   detailThreadId = threadId;
   els.errorBox.classList.add("hidden");
@@ -876,7 +856,6 @@ async function openThread(threadId) {
       <div class="thread-detail-actions">
         <button type="button" class="btn secondary" id="threadBackBtn">Back</button>
         ${canReply || internQuickReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>` : ""}
-        ${replyFrom && threadId === replyThreadId ? `<button type="button" class="btn" id="threadDoneBtn">Done</button>` : ""}
       </div>
     </div>
   `;
@@ -885,8 +864,6 @@ async function openThread(threadId) {
     exitDetail();
     loadThreadList();
   });
-  const doneBtn = document.getElementById("threadDoneBtn");
-  if (doneBtn) doneBtn.addEventListener("click", () => finishReplyTask(doneBtn));
   const replyBtn = document.getElementById("threadReplyBtn");
   if (replyBtn && internQuickReply) {
     replyBtn.addEventListener("click", () => {
@@ -1282,8 +1259,7 @@ if (canManageMail && accounts.length) {
       .eq("direction", "inbound").ilike("from_address", from.trim()).order("sent_at", { ascending: false }).limit(1);
     if (hit && hit[0]?.thread_id) { replyThreadId = hit[0].thread_id; await openThread(replyThreadId); }
     else {
-      els.wrap.innerHTML = `<div class="empty-state">That reply isn't in the inbox yet.<div class="thread-detail-actions"><button type="button" class="btn" id="threadDoneBtn">Done</button></div></div>`;
-      document.getElementById("threadDoneBtn").addEventListener("click", (e) => finishReplyTask(e.currentTarget));
+      els.wrap.innerHTML = `<div class="empty-state">That reply isn't in the inbox yet.</div>`;
     }
   }
 }

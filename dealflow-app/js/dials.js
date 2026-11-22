@@ -19,7 +19,7 @@ import { findPriorOutbound, followUpAlreadySent, stripReplyPrefix } from "./foll
 import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
-import { getVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
+import { getVisibleAccountIds, setVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
 import { createNotification, wireNotificationsToggle } from "./notifications.js";
 import { startCall, isCallActive, primeAudio } from "./callSession.js";
 import { wireAutodialToggle, wireProfileToggle } from "./autodial.js";
@@ -4328,6 +4328,22 @@ if (isAdmin || isTeamLead) {
 
 await loadLists();
 
+// ?list=<id> (Admin > Campaigns > List details): open Calls on that list.
+{
+  const listLinkId = new URLSearchParams(window.location.search).get("list");
+  if (listLinkId) {
+    const { data: linked } = await supabase.from("dial_lists").select("id, dial_type, status, created_by").eq("id", listLinkId).is("deleted_at", null).maybeSingle();
+    if (linked) {
+      currentType = linked.dial_type;
+      currentStatus = linked.status === "archived" ? "archived" : "current";
+      currentListId = linked.id;
+      // an admin's "Accounts visible" filter defaults to themselves: add the list's owner so the tab is shown
+      const vis = getVisibleAccountIds();
+      if (vis && linked.created_by && !vis.has(linked.created_by)) setVisibleAccountIds([...vis, linked.created_by]);
+    }
+    window.history.replaceState({}, "", "dials.html");
+  }
+}
 // ---------------------------------------------------------------------------
 // Deep-link support: ?dial=<id> opens straight into that dial's detail popup
 // — used by Messages' "click a participant's name" feature (see
