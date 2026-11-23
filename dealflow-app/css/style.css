@@ -2014,8 +2014,9 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 .call-outcome-label { font-size: 12px; font-weight: 600; opacity: .8; }
 .call-outcome-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .call-outcome-chip { padding: 6px 10px; font-size: 13px; }
-.call-outcome-chip.active { background: var(--primary, #1f4fd8); color: #fff; border-color: transparent; }
-.call-next { width: 100%; }
+.call-outcome-chip.active { background: var(--tone); color: #fff; border-color: transparent; }
+.call-next { width: 100%; background: var(--tone); border-color: var(--tone); color: #fff; }
+.call-panel .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 /* Muted: unmistakable, so an accidental tap on Mute is noticed straight away. */
 .call-panel.is-muted { border-color: #d1453b; }
 .call-panel-actions .btn.is-muted { background: #d1453b; border-color: #d1453b; color: #fff; }
@@ -2122,3 +2123,29 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
               radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.16), rgba(0,0,0,0)) left center / 10px 100% no-repeat scroll,
               radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.16), rgba(0,0,0,0)) right center / 10px 100% no-repeat scroll; }
 #reportsTableWrap table { min-width: 560px; }
+
+.call-notes-saved.bad { color: var(--danger, #b3261e); }
+.dial-last-call { margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13.5px; line-height: 1.45; color: var(--text-muted-strong, var(--text)); }
+
+@media (max-width: 420px) { .callback-banner-title { white-space: normal; line-height: 1.25; padding: 6px 0; } }
+
+.client-calls { margin: 18px 0 70px; }
+.client-calls-h { font-size: 14px; margin: 0 0 6px; }
+.client-call { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; line-height: 1.45; }
+.client-call-when { color: var(--text-muted); font-size: 12.5px; margin-bottom: 2px; }
+.client-call details { margin-top: 6px; font-size: 13px; }
+.client-call audio { width: 100%; margin-top: 6px; }
+.tl-confirm-label { font-size: 12px; color: var(--text-muted); align-self: center; white-space: nowrap; }
+
+.reports-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+.reports-range-label { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.reports-toolbar-btns { display: flex; gap: 6px; }
+.reports-toolbar-btns .btn { min-height: 44px; }
+/* A narrow window (not only a phone) gets the card list instead of the wide table, so the page never scrolls sideways. */
+@media (max-width: 720px) { #tableWrap .list-table { display: none; } #tableWrap .mobile-list { display: block; } }
+.deleted-tab-row .mc-sub.faint { white-space: normal; overflow: visible; }
+/* muted slate instead of the saturated blue on the remaining primary controls */
+.timeline-add-btn, .compose-fab { background: var(--tone); }
+@media (hover: hover) { .timeline-add-btn:hover, .compose-fab:hover { background: var(--tone-hover); } }
+.timeline-dot { background: var(--tone); }
+#eventReportModal .btn:not(.secondary):not(.danger), #introCallTimeModal .btn:not(.secondary):not(.danger), #requiredPopup .btn:not(.secondary):not(.danger) { background: var(--tone); color: #fff; }

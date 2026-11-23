@@ -19,7 +19,7 @@ export async function maybeShowOnboarding(profile) {
 
 function ensureCss() {   // the wizard can open on any page, so it brings its own styles
   if (document.getElementById("adminCss")) return;
-  const l = document.createElement("link"); l.id = "adminCss"; l.rel = "stylesheet"; l.href = "css/admin.css?v=6"; document.head.appendChild(l);
+  const l = document.createElement("link"); l.id = "adminCss"; l.rel = "stylesheet"; l.href = "css/admin.css?v=7"; document.head.appendChild(l);
 }
 
 export function openOnboarding(profile, { manual = false } = {}) {

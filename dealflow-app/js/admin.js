@@ -1,8 +1,9 @@
-// Admin page: Campaigns, Email accounts, Settings (admin only). Tabs on desktop, stacked sections on phones.
+// Admin page: Campaigns, Email accounts, Do not email, Settings (admin only). Tabs on desktop, stacked sections on phones.
 import { requireSession } from "./auth.js";
 import { initCampaigns } from "./adminCampaigns.js";
 import { initAccounts } from "./adminAccounts.js";
 import { initSettings } from "./adminSettings.js";
+import { initSuppression } from "./adminSuppression.js";
 import "./aiChat.js"; // mounts "Edit with Claude" into #aiChatMount when a campaign review opens
 
 const $ = (id) => document.getElementById(id);
@@ -12,9 +13,9 @@ if (profile.role !== "admin") $("adDenied").classList.remove("hidden");
 else {
   $("adApp").classList.remove("hidden");
   const loaded = {};
-  const inits = { campaigns: initCampaigns, accounts: initAccounts, settings: () => initSettings(profile) };
+  const inits = { campaigns: initCampaigns, accounts: initAccounts, suppression: initSuppression, settings: () => initSettings(profile) };
   const route = () => {
-    const tab = ["campaigns", "accounts", "settings"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "campaigns";
+    const tab = ["campaigns", "accounts", "suppression", "settings"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "campaigns";
     document.getElementById("adApp").classList.add("js-tabs");
     document.querySelectorAll(".ad-sec").forEach((s) => s.classList.toggle("on", s.dataset.sec === tab));
     document.querySelectorAll("#adTabs a[data-tab]").forEach((a) => a.classList.toggle("active", a.dataset.tab === tab));

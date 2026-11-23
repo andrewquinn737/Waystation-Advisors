@@ -14,7 +14,7 @@
 </script>
 <link rel="stylesheet" href="css/style.css" />
 <link rel="stylesheet" href="css/copyReview.css" />
-<link rel="stylesheet" href="css/admin.css?v=6" id="adminCss" />
+<link rel="stylesheet" href="css/admin.css?v=7" id="adminCss" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
@@ -43,6 +43,7 @@
       <nav class="ad-tabs" id="adTabs" aria-label="Admin sections">
         <a href="#campaigns" data-tab="campaigns">Campaigns</a>
         <a href="#accounts" data-tab="accounts">Email accounts</a>
+        <a href="#suppression" data-tab="suppression">Do not email</a>
         <a href="#settings" data-tab="settings">Settings</a>
       </nav>
 
@@ -77,6 +78,11 @@
           <div class="ad-row"><button type="button" class="btn secondary small" id="mbxRotate">Make a new key</button></div>
           <div id="mbxKeyOut"></div>
         </details>
+      </section>
+
+      <section class="ad-sec" id="suppression" data-sec="suppression" aria-labelledby="adSupH">
+        <div class="ad-sec-head"><h2 id="adSupH">Do not email</h2></div>
+        <div id="adSuppression"></div>
       </section>
 
       <section class="ad-sec" id="settings" data-sec="settings" aria-labelledby="adSetH">

@@ -108,24 +108,39 @@ export async function prepareList(listId, onProgress) {
   try { r.gate = await runCopyGate(listId); } catch (e) { r.gate_error = msg(e); }
   return r;
 }
+// Why rows are held, in plain words: one entry per kind of problem (counted once per lead, every kind counted), most common first.
+// The wording shown is a real message from one of the leads (numbers kept), never a template with a # in it.
+export function heldReasons(gate, max = 2) {
+  const tally = new Map();
+  for (const x of gate?.results || []) {
+    if (x.ok) continue;
+    const seen = new Set();
+    for (const er of x.errors || []) {
+      const m = String(er?.message || er).replace(/: ".*$/, "").trim();
+      const k = m.replace(/\d+/g, "N").slice(0, 80);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const t = tally.get(k) || { n: 0, example: m };
+      t.n++; tally.set(k, t);
+    }
+  }
+  return [...tally.values()].sort((a, b) => b.n - a.n).slice(0, max).map((t) => `${t.example.slice(0, 90)} (${t.n})`);
+}
 export function describePrepare(r) {
   const e = r.email_sequence || 0, c = r.call_sequence || 0, m = r.missing_copy || 0;
-  const parts = [
-    `${plural(e, "company", "companies")} with a personal email → email sequence (ready to send from Dials)`,
-    `${c} without → backup numbers (call whenever)`,
-  ];
+  const generic = r.generic_email || 0;
+  const parts = [`${plural(e, "lead is", "leads are")} on the email track`];
+  if (c) parts.push(`${plural(c, "lead has", "leads have")} no personal email, so ${c === 1 ? "it goes" : "they go"} to backup numbers (calls only)${generic ? `, ${generic} of them with a generic address like info@` : ""}`);
   // One account of the email rows: the server check says how many are ready and how many are held for edits (rows with no copy
   // yet are among the held ones); without a server check, say how many have no copy.
   if (r.gate) {
-    // Say WHY rows are held: the most common reasons, numbers stripped so "Email 1 is 91 words" groups with "Email 1 is 88 words".
-    const tally = new Map();
-    for (const x of r.gate.results || []) for (const er of x.ok ? [] : (x.errors || []).slice(0, 1)) { const k = String(er?.message || er).replace(/\d+/g, "N").replace(/: ".*$/, "").slice(0, 70); tally.set(k, (tally.get(k) || 0) + 1); }
-    const why = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, n]) => `${k.replace(/N/g, "#")} (${n})`).join("; ");
-    parts.push(`${r.gate.summary?.passed ?? 0} emails ready, ${r.gate.summary?.held ?? 0} held for edits${m ? ` (${m} of them have no copy yet)` : why ? ` (${why})` : ""}`);
+    const ready = r.gate.summary?.passed ?? 0, held = r.gate.summary?.held ?? 0;
+    const why = heldReasons(r.gate).join("; ");
+    parts.push(`${ready} can send now${held ? `, ${held} need edits${m ? ` (${m} have no email copy yet)` : why ? `: ${why}` : ""}` : ""}`);
   }
-  else if (r.gate_error) { if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`); parts.push("server check will run when you open the review"); }
-  else if (m) parts.push(`${plural(m, "email row is", "email rows are")} missing copy`);
-  return parts.join(" · ");
+  else if (r.gate_error) { if (m) parts.push(`${plural(m, "lead has", "leads have")} no email copy`); parts.push("the server check will run when you open the review"); }
+  else if (m) parts.push(`${plural(m, "lead has", "leads have")} no email copy`);
+  return parts.join(". ") + ".";
 }
 
 // Ask for confirmation-free setup on an existing list; returns after showing the result.

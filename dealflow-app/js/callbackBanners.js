@@ -34,9 +34,10 @@ export async function loadTodaysCallbacks(userIds) {
     .lt("callback_at", end.toISOString())
     .order("callback_at", { ascending: true });
   if (error) return [];
-  const startMs = start.getTime();
+  // Overdue = the callback time is more than half an hour gone (earlier today counts, not only yesterday and before).
+  const lateMs = Date.now() - 30 * 60 * 1000;
   return (data || [])
-    .map((r) => ({ ...r, overdue: new Date(r.callback_at).getTime() < startMs }))
+    .map((r) => ({ ...r, overdue: new Date(r.callback_at).getTime() < lateMs }))
     .filter((r) => !r.overdue || ["busy_callback", "callback_interested"].includes(r.contact_status));
 }
 
@@ -79,7 +80,7 @@ export function initCallbackBanners(profile) {
     el.className = `callback-banner${soon ? " soon" : ""}`;
     el.innerHTML = `<button type="button" class="callback-banner-main" aria-expanded="${expanded}"><span class="callback-banner-title">${esc(bits.join(" · "))}</span><span class="callback-banner-view">${expanded ? "Hide" : "View"}</span></button>
       <button type="button" class="callback-banner-x" aria-label="Dismiss">&times;</button>
-      ${expanded ? `<div class="callback-banner-list">${rows.map((c) => `<button type="button" class="callback-banner-item" data-id="${esc(c.id)}"><span class="callback-banner-when">${c.overdue ? esc(new Date(c.callback_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })) : esc(timeLabel(c.callback_at))}</span><span class="callback-banner-who">${who(c)}</span></button>`).join("")}</div>` : ""}`;
+      ${expanded ? `<div class="callback-banner-list">${rows.map((c) => `<button type="button" class="callback-banner-item" data-id="${esc(c.id)}"><span class="callback-banner-when">${c.overdue && new Date(c.callback_at).toDateString() !== todayStr() ? esc(new Date(c.callback_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })) : esc(timeLabel(c.callback_at))}</span><span class="callback-banner-who">${who(c)}</span></button>`).join("")}</div>` : ""}`;
     el.querySelector(".callback-banner-main").addEventListener("click", () => { expanded = !expanded; render(); });
     el.querySelector(".callback-banner-x").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -99,7 +100,8 @@ export function initCallbackBanners(profile) {
     for (const c of callbacks) {
       const at = new Date(c.callback_at).getTime();
       const k = key(c);
-      if (dismissed.has(k) || shown.has(k)) continue;
+      if (dismissed.has(k)) continue;
+      if (shown.has(k)) { shown.set(k, c); continue; } // keep the latest copy (a callback missed since the page opened turns overdue)
       const soon = at - now <= SOON_MS && at - now > -30 * 60 * 1000;
       if (c.overdue) { if (firstOpen) shown.set(k, c); continue; } // listed once per day, never re-raised
       if ((firstOpen && at > now - 30 * 60 * 1000) || soon) shown.set(k, c);

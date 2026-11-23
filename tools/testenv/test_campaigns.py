@@ -350,4 +350,45 @@ def _transfer_and_reply():
     code, rows3 = T.api(CALEB, "GET", f"/my_followups?dial_id=eq.{r3['id']}&kind=eq.reply&select=dial_id,due_on")
     check("the owner's call sheet lists an overdue reply task, and a not-yet-due one from the day it exists", code == 200 and any(x["dial_id"] == r1["id"] for x in rows) and len(rows3) == 1 and rows3[0]["due_on"] > q("select current_date::text d")[0]["d"], (rows, rows3))
 
+    # ---- round 3: launch preview before the click, accounting for every lead, mandate-aware capacity, per-step stats
+    pl = mk_list(CALEB, 6, "TEST-CAMP r3 " + uuid.uuid4().hex[:6])
+    rpc(CALEB, "seq_prepare_list", p_list_id=pl)
+    q(f"""update dials d set email_subject = 'R3 subject ' || x.n, email_1 = E'Hi Pat,\\n\\nShort note number ' || x.n || ' for ref {pl[:6]}.\\n\\nBest,\\nCaleb',
+          email_2 = 'Hi Pat, circling back on note ' || x.n || ' ref {pl[:6]}.' from (select id, row_number() over (order by email) n from dials where list_id='{pl}') x where x.id = d.id""")
+    T.gate(CALEB, pl)
+    pe = [r["email"] for r in q(f"select email from dials where list_id='{pl}' order by email")]
+    for i, e in enumerate(pe): T.seed_mv(e, "invalid" if i == 3 else "ok")
+    q(f"insert into suppressed_emails (email, reason, source) values ('{pe[0]}', 'r3 test', 'test') on conflict do nothing")
+    other = mk_list(GAVIN, 1, "TEST-CAMP r3 other " + uuid.uuid4().hex[:6])
+    q(f"update dials set email='{pe[1]}', sequence='email5', seq_state='active' where list_id='{other}'")
+    code, pv = rpc(CALEB, "campaign_launch_preview", p_list=pl)
+    check("launch preview: counts every ready lead and says who is skipped before the click", code == 200 and pv["ready"] == 6 and pv["suppressed"] == 1 and pv["duplicate"] == 1 and pv["would_send"] == 4, pv)
+    check("launch preview: real per-mailbox caps with the reason when limited, and the day the first emails finish", pv["mailboxes"] and all(isinstance(m["cap"], int) and 0 <= m["cap"] <= 20 for m in pv["mailboxes"])
+          and pv["day_capacity"] == sum(m["cap"] for m in pv["mailboxes"]) and pv["finish_on"] and pv["first_send_day"] and pv["finish_on"] >= pv["first_send_day"], pv)
+    check("launch preview: shows the first email (subject + body)", pv["sample"] and pv["sample"]["subject"].startswith("R3 subject") and "Short note" in pv["sample"]["body"], pv.get("sample"))
+    check("launch preview: another intern is refused", rpc(GAVIN, "campaign_launch_preview", p_list=pl)[0] != 200)
+    for m in pv["mailboxes"]:
+        lim = q(f"select daily_send_limit l from email_accounts where email_address='{m['address']}'")[0]["l"]
+        if lim is not None and lim < 20: check("launch preview: a mailbox with a daily limit shows it as the reason", m["cap"] <= lim and m["reason"] and str(lim) in m["reason"], m); break
+    for mand in ("data", "ma"):
+        code, st = rpc(CALEB, "email_queue_status", p_owner=uid(CALEB), p_mandate=mand)
+        want = q(f"select count(*)::int n from owner_eligible_mailboxes('{uid(CALEB)}', '{mand}')")[0]["n"]
+        check(f"queue status for a {mand} campaign lists only the mailboxes that can send {mand} ({want})", code == 200 and len(st["mailboxes"]) == want, (code, len(st.get("mailboxes", [])), want))
+    code, res = T.start(CALEB, pl)
+    check("launch result accounts for every lead: started + bad address + do-not-email + other campaign = looked at", code == 200 and res["started"] == 3 and res["bad_address"] == 1 and res["suppressed"] == 1 and res["duplicate"] == 1
+          and res["started"] + res["bad_address"] + res["suppressed"] + res["duplicate"] == res["considered"] == 6, res)
+    check("launch result says how many leads are calls-only in this list", res["backup_total"] == 3, res)
+    # per-step stats
+    ds = [r["id"] for r in q(f"select id from dials where list_id='{pl}' and seq_state='active' order by email")]
+    for x in ds[:2]: q(f"update sequence_tasks set status='done', completed_at=now() where dial_id='{x}' and kind='email'")
+    q(f"""insert into sequence_tasks (dial_id, list_id, owner_id, step, seq_day, kind, due_on, status, completed_at)
+          values ('{ds[1]}','{pl}','{uid(CALEB)}',3,3,'followup_email',current_date,'done',now())
+          on conflict (dial_id, step) do update set status='done', completed_at=now()""")
+    q(f"update dials set seq_state='replied' where id='{ds[0]}'")
+    code, steps = rpc(CALEB, "campaign_step_stats", p_list=pl)
+    by = {x["step"]: x for x in steps} if code == 200 else {}
+    check("per-step stats: sent / replied / bounced for the first email and the follow-up", code == 200 and by.get(1, {}).get("sent") == 2 and by[1]["replied"] == 1 and by.get(3, {}).get("sent") == 1 and by[3]["replied"] == 0, steps)
+    check("per-step stats: another intern is refused", rpc(GAVIN, "campaign_step_stats", p_list=pl)[0] != 200)
+    q(f"delete from suppressed_emails where email='{pe[0]}'")
+
 if __name__ == "__main__": run()

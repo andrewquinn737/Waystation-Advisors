@@ -79,7 +79,7 @@ export const DIAL_FIELD_ALIASES = {
   full_name: ["full name", "fullname", "name", "client name", "contact name", "owner name", "owner", "contact", "person", "decision maker", "lead name", "primary contact"],
   first_name: ["first name", "firstname", "first", "given name", "owner first name"],
   last_name: ["last name", "lastname", "last", "surname", "family name", "owner last name"],
-  company_name: ["company name", "company", "business name", "business", "organization", "organisation", "org", "account name", "account", "firm", "employer", "dba", "company legal name", "legal name"],
+  company_name: ["company name", "company", "business name", "business", "organization", "organisation", "org", "account name", "account", "firm", "employer", "dba", "company legal name", "legal name", "biz", "biz name", "co", "co name", "company account", "company or account", "practice", "practice name", "store name"],
   email: ["email", "email address", "e mail", "e mail address", "owner email", "primary email", "work email", "contact email", "email addr", "emails"],
   // "Mobie number" is a real observed header typo; the fuzzy matcher below would also catch it.
   mobile_phone: ["mobile phone", "mobile", "cell phone", "cell", "phone", "phone number", "phone mobile", "mobile number", "mobie number", "cell number", "owner mobile", "owner phone", "direct phone", "direct dial", "personal phone", "mobile phone number", "telephone", "tel", "phone 1"],
@@ -304,7 +304,11 @@ function rowToDial(r, mapping, listId) {
       else d.contact_status = "uncontacted";
       continue;
     }
-    if (v) d[field] = field === "email" ? cleanEmailCell(v) : v;
+    if (v && field === "email") {
+      d.email = cleanEmailCell(v).toLowerCase();
+      const all = new Set((v.match(new RegExp(EMAIL_FIND.source, "gi")) || []).map((x) => x.toLowerCase()));
+      if (all.size > 1) d.__extra_email = true; // "a@x.com; b@x.com": the first is kept, the preview says so
+    } else if (v) d[field] = v;
   }
   if (!d.full_name) {
     const combined = `${d.first_name || ""} ${d.last_name || ""}`.trim();
@@ -342,7 +346,7 @@ export function stripInternal(d) { const rest = {}; for (const k of Object.keys(
 // dials: output of buildDials. Returns counts for the preview and per-row flags.
 export function validateDials(dials) {
   const s = {
-    total: dials.length, with_personal_email: 0, backup: 0, no_email: 0, bad_email: 0, role_email: 0,
+    total: dials.length, with_personal_email: 0, backup: 0, no_email: 0, bad_email: 0, role_email: 0, multi_email: 0,
     with_mobile: 0, with_company_phone: 0, no_phone: 0, bad_phone: 0, no_contact: 0, no_name: 0,
     email_missing_copy: 0, email_has_copy: 0, copy_columns: false,
     status_values: 0,
@@ -350,6 +354,7 @@ export function validateDials(dials) {
   const seenCols = { email_1: false, email_subject: false };
   for (const d of dials) {
     const hasEmail = !!d.email;
+    if (d.__extra_email) s.multi_email++;
     if (d.__bad_email) s.bad_email++;
     else if (hasEmail && !isPersonalEmail(d.email)) s.role_email++;
     if (isPersonalEmail(d.email)) {
@@ -437,4 +442,10 @@ export function mappingProblems(map) {
     if (!f.has("mobile_phone") && !f.has("company_phone") && !f.has("email")) p.push("No phone or email column mapped.");
   }
   return p;
+}
+
+// Not blocking, but worth a visible line: leads would be saved without a company name.
+export function mappingNotes(map) {
+  const f = new Set(Object.values(map).filter(Boolean));
+  return f.size && !f.has("company_name") ? ["No Company name column is mapped, so these leads would be saved with no company. Pick the right column below."] : [];
 }

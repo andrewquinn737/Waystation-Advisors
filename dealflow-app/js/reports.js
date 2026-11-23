@@ -1,6 +1,6 @@
 import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
-import { wireAccountsVisiblePopup, getVisibleAccountIds, initDefaultToSelf } from "./accountsVisible.js";
+import { wireAccountsVisiblePopup, getVisibleAccountIds, initDefaultToAll } from "./accountsVisible.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 
@@ -41,7 +41,8 @@ import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 // client_type = 'seller') and in loadAvailableBuyers() below.
 // ---------------------------------------------------------------------------
 
-const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible";
+// v2: Reports used to open with only the viewer selected (an empty table for a team lead, "No accounts selected" for an admin). It now opens on everyone the viewer may see.
+const REPORTS_ACCOUNTS_KEY = "waystation_report_accounts_visible_v2";
 // Admin accounts are excluded from Outreach/Team reports by default (their
 // own outreach numbers aren't the point of these reports, and mixing them
 // into "everyone" made per-team totals harder to read at a glance) — this
@@ -319,7 +320,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
     return error ? [] : withoutAi(data);
   }
 
-  initDefaultToSelf(profile.id, REPORTS_ACCOUNTS_KEY);
+  initDefaultToAll(REPORTS_ACCOUNTS_KEY);
 
   let includeAdmins = false;
   try {
@@ -739,6 +740,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       { callsMade: 0, attemptedContacts: 0, ownersTalked: 0, ownersAgreed: 0, introCompleted: 0 }
     );
     if (!rows.length) { lastTableData = { columns: [], rows: [] }; els.reportsTableWrap.innerHTML = `<div class="empty-state">No accounts selected. Choose who to include under Accounts visible.</div>`; return; }
+    rows = rows.slice().sort((a, b) => b.callsMade - a.callsMade || b.attemptedContacts - a.attemptedContacts || String(a.name).localeCompare(String(b.name)));
     const columns = ["Account", callsLabel, "Attempted contacts", "Owners talked to", "Owners agreed to intro call", "Intro calls completed (confirmed leads)"];
     const dataRows = rows.map((r) => [r.name, r.callsMade, r.attemptedContacts, r.ownersTalked, r.ownersAgreed, r.introCompleted]);
     const totalsRow = ["Totals", totals.callsMade, totals.attemptedContacts, totals.ownersTalked, totals.ownersAgreed, totals.introCompleted];
@@ -746,6 +748,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
 
     const bodyHTML = dataRows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`).join("");
     els.reportsTableWrap.innerHTML = `
+      <div class="reports-toolbar"><span class="reports-range-label">${escapeHtml(fmtPeriodLabel(selectedPeriodStart, periodType))} \u00b7 ${rows.length} account${rows.length === 1 ? "" : "s"}</span>
+        <span class="reports-toolbar-btns"><button type="button" class="btn secondary small" id="reportsAccountsInlineBtn">Accounts</button><button type="button" class="btn secondary small" id="reportsCsvBtn">Download CSV</button></span></div>
       <table>
         <thead><tr>${columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>
         <tbody>
@@ -755,6 +759,19 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
       </table>
     `;
   }
+
+  // Toolbar above the table: a visible Accounts button (the same picker as the options menu) and a CSV of exactly what is on screen.
+  els.reportsTableWrap.addEventListener("click", (e) => {
+    if (e.target.closest("#reportsAccountsInlineBtn")) { els.reportsAccountsVisibleBtn.click(); return; }
+    if (!e.target.closest("#reportsCsvBtn") || !lastTableData?.columns?.length) return;
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [lastTableData.columns, ...lastTableData.rows].map((r) => r.map(q).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
+    a.download = `report-${isoDate(selectedPeriodStart)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  });
 
   function renderTeamTable(rows) {
     if (!rows.length) { lastTableData = { columns: [], rows: [] }; els.reportsTableWrap.innerHTML = `<div class="empty-state">No accounts selected. Choose who to include under Accounts visible.</div>`; return; }
@@ -991,6 +1008,7 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   els.reportsAccountsVisiblePopup.addEventListener("click", (e) => {
     if (e.target === els.reportsAccountsVisiblePopup) els.reportsAccountsVisibleClose.click();
   });
+  els.reportsAccountsVisibleClose.addEventListener("click", () => els.reportsOptionsMenu?.classList.add("hidden")); // the menu does not stay open over the table after Done
   els.reportsIncludeAdminsCheckbox.checked = includeAdmins;
   els.reportsIncludeAdminsCheckbox.addEventListener("change", () => {
     setIncludeAdmins(els.reportsIncludeAdminsCheckbox.checked);

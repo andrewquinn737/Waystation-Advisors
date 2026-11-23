@@ -12,14 +12,14 @@
 .ad-main .btn.small { min-height: 32px; padding: 0 12px; font-size: 12.5px; }
 .ad-main .btn.secondary, .ad-sheet .btn.secondary, .ad-wiz-card .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 @media (hover: hover) { .ad-main .btn.secondary:hover, .ad-sheet .btn.secondary:hover, .ad-wiz-card .btn.secondary:hover { background: var(--gold-soft); } }
-.ad-link { background: none; border: 0; padding: 4px 2px; margin-left: 6px; font: inherit; font-size: inherit; color: var(--accent); cursor: pointer; min-height: 28px; }
+.ad-link { background: none; border: 0; padding: 4px 2px; margin-left: 6px; font: inherit; font-size: inherit; color: var(--tone); cursor: pointer; min-height: 28px; }
 .ad-link:hover { text-decoration: underline; }
 .ad-link:disabled { color: var(--text-muted); cursor: default; }
 
 /* section tabs: underline, not pills */
 .ad-tabs { display: flex; gap: 2px; margin: 6px 0 18px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 6; background: var(--bg); }
 .ad-tabs a { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; padding: 10px 14px; min-height: 44px; box-sizing: border-box; font-size: 14px; font-weight: 600; color: var(--text-muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.ad-tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+.ad-tabs a.active { color: var(--text); border-bottom-color: var(--tone); }
 @media (hover: hover) { .ad-tabs a:hover { color: var(--text); } }
 .ad-sec { margin-bottom: 30px; scroll-margin-top: 64px; }
 .ad-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -67,7 +67,7 @@
 .cp-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; box-sizing: border-box; font-size: 12px; font-weight: 500; padding: 0 10px 0 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted-strong); white-space: nowrap; }
 .cp-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); opacity: .6; }
 .cp-pill.live { color: var(--success); } .cp-pill.live::before { background: var(--success); opacity: 1; }
-.cp-pill.ready { color: var(--accent); } .cp-pill.ready::before { background: var(--accent); opacity: 1; }
+.cp-pill.ready { color: var(--tone); } .cp-pill.ready::before { background: var(--tone); opacity: 1; }
 .cp-pill.paused { color: var(--warn); } .cp-pill.paused::before { background: var(--warn); opacity: 1; }
 /* actions: one fixed-width primary + one overflow slot, so the column lines up whether or not a row has either */
 /* Action column: its own fixed width, with a left gap so the button never crowds the Bounced number. */
@@ -155,7 +155,7 @@ a.btn#adOpen { text-decoration: none; }
 .ad-wiz { position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; padding: 12px; }
 .ad-wiz-card { width: 100%; max-width: 520px; max-height: 94vh; overflow-y: auto; box-sizing: border-box; background: var(--bg); color: var(--text); border-radius: 14px; padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0px)); }
 .ad-wiz-card h2 { margin: 0 0 4px; font-size: 20px; }
-.ad-dots { display: flex; gap: 6px; margin-bottom: 12px; } .ad-dots i { flex: 1; height: 4px; border-radius: 2px; background: var(--border); } .ad-dots i.on { background: var(--accent); }
+.ad-dots { display: flex; gap: 6px; margin-bottom: 12px; } .ad-dots i { flex: 1; height: 4px; border-radius: 2px; background: var(--border); } .ad-dots i.on { background: var(--tone); }
 .ad-wiz-card ol, .ad-wiz-card ul { padding-left: 20px; font-size: 14.5px; line-height: 1.55; margin: 8px 0; }
 .ad-wiz-card input[type=text], .ad-url { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); word-break: break-all; }
 .ad-ok { color: var(--success); font-weight: 700; font-size: 16px; }
@@ -176,3 +176,29 @@ a.btn#adOpen { text-decoration: none; }
 .ad-sec-head h2 { padding-left: 15px; }
 .ad-tabs a { padding-left: 15px; padding-right: 15px; }
 @media (max-width: 720px) { .ad-tabs a { padding: 10px 2px; } }
+/* Do not email */
+.ad-ta { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 10px 12px; font: inherit; font-size: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); resize: vertical; }
+.sup-search { margin: 10px 0 0; }
+.sup-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; }
+.sup-list:empty { display: none; }
+.sup-row { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); min-width: 0; }
+.sup-row:last-child { border-bottom: 0; }
+.sup-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.sup-main .ad-muted, .sup-why { font-size: 12px; }
+.sup-why { color: var(--text); }
+.sup-row .btn { flex: none; min-height: 44px; }
+
+/* muted slate primary (same tokens as Calls) instead of the saturated blue */
+.ad-main .btn:not(.secondary):not(.danger), .ad-sheet .btn:not(.secondary):not(.danger), .ad-wiz-card .btn:not(.secondary):not(.danger) { background: var(--tone); border-color: var(--tone); color: #fff; }
+@media (hover: hover) { .ad-main .btn:not(.secondary):not(.danger):hover, .ad-sheet .btn:not(.secondary):not(.danger):hover, .ad-wiz-card .btn:not(.secondary):not(.danger):hover { background: var(--tone-hover); } }
+/* launch preview + details */
+.cp-prev p { margin: 0 0 8px; font-size: 13.5px; line-height: 1.45; }
+.cp-prev .warn { color: var(--danger); }
+.cp-sample { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 4px 0 10px; font-size: 13px; }
+.cp-sample summary { cursor: pointer; min-height: 28px; display: flex; align-items: center; }
+.cp-sample-b pre { white-space: pre-wrap; font: inherit; font-size: 12.5px; color: var(--text-muted-strong); margin: 6px 0 0; max-height: 180px; overflow-y: auto; }
+.cp-steps { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cp-steps th, .cp-steps td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--border); }
+.cp-steps th:first-child, .cp-steps td:first-child { text-align: left; }
+.cp-fine { font-size: 11.5px; margin: 6px 0 0; }
+@media (max-width: 420px) { .cp-name { grid-column: 1 / -1; } .cp-status { grid-column: 1 / -1; justify-self: start; } }

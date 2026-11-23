@@ -178,6 +178,11 @@ async function syncOneAccount(admin: ReturnType<typeof createClient>, account: R
         }
       }
 
+      // Out-of-office / auto-replies: Auto-Submitted (anything but "no"), X-Autoreply / X-Autorespond, Precedence: auto_reply.
+      // The database also recognises the usual subjects; this catches the ones that only announce themselves in headers.
+      const hdr = (n: string) => String(parsed.headers?.get(n) ?? "").toLowerCase();
+      const isAutoReply = (hdr("auto-submitted") !== "" && hdr("auto-submitted") !== "no") || parsed.headers?.has("x-autoreply") || parsed.headers?.has("x-autorespond") || /auto[_-]?reply/.test(hdr("precedence"));
+
       const snippet = ((parsed.text as string) || "").replace(/\s+/g, " ").trim().slice(0, 200);
 
       // Preview only — no body_text/body_html and no attachment files are
@@ -201,6 +206,7 @@ async function syncOneAccount(admin: ReturnType<typeof createClient>, account: R
         sent_at: parsed.date ? new Date(parsed.date).toISOString() : new Date().toISOString(),
       };
       if (threadId) insertPayload.thread_id = threadId;
+      if (isAutoReply) insertPayload.is_auto_reply = true;
 
       const { error: insertErr } = await admin.from("email_messages").insert(insertPayload);
       if (insertErr) {

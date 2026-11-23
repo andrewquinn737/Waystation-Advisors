@@ -12,6 +12,7 @@ const FIELDS = [
   { key: "email_1", label: "Email 1", rows: 7 },
   { key: "email_2", label: "Follow-up", rows: 5 },
 ];
+export const PAGE = 50;
 const COLS = "id, full_name, company_name, email, email_subject, email_1, email_2, copy_ok, copy_errors, copy_warnings, copy_hash, seq_state";
 
 async function loadHeld(listId, all) {
@@ -53,11 +54,24 @@ export async function openCopyReview(list, { onChanged, all = false } = {}) {
     ${FIELDS.map((f) => `<label class="cr-field"><span>${f.label}</span><textarea data-f="${f.key}" rows="${f.rows}" spellcheck="true">${escapeHtml(l[f.key] || "")}</textarea></label>`).join("")}
     <div class="cr-card-foot"><div class="cr-save"></div><button type="button" class="btn cr-savebtn" style="min-height:44px">Save</button></div></div>`;
 
-  function render(leads) {
-    body.innerHTML = leads.length ? leads.map(card).join("")
+  // A 10,000-lead list must not build 10,000 cards: problem rows come first and only PAGE cards are in the page at a time.
+  let leads = [], shown = 0;
+  const bad = () => leads.filter((l) => !l.copy_ok).length;
+  const counts = () => `Showing ${Math.min(shown, leads.length).toLocaleString()} of ${leads.length.toLocaleString()}. ${bad().toLocaleString()} need edits${all ? `, ${(leads.length - bad()).toLocaleString()} already pass the check` : ""}.`;
+  const moreBtn = () => (shown < leads.length ? `<button type="button" class="btn secondary" id="crMore" style="min-height:44px;margin:8px 0">Show ${Math.min(PAGE, leads.length - shown)} more</button>` : "");
+  function render(list) {
+    leads = list; shown = Math.min(PAGE, leads.length);
+    body.innerHTML = leads.length ? `<div class="cr-count" id="crCount" aria-live="polite">${counts()}</div><div id="crCards">${leads.slice(0, shown).map(card).join("")}</div><div id="crMoreHost">${moreBtn()}</div>`
       : `<div class="cr-done"><div class="cr-done-big">${all ? "No drafts to review" : "All fixed"}</div><button type="button" class="btn" id="crDone">Done</button></div>`;
     const d = body.querySelector("#crDone"); if (d) d.onclick = close;
   }
+  const refreshCount = () => { const c = body.querySelector("#crCount"); if (c) c.textContent = counts(); };
+  body.addEventListener("click", (e) => {
+    if (!e.target.closest("#crMore")) return;
+    const next = leads.slice(shown, shown + PAGE); shown += next.length;
+    body.querySelector("#crCards").insertAdjacentHTML("beforeend", next.map(card).join(""));
+    body.querySelector("#crMoreHost").innerHTML = moreBtn(); refreshCount();
+  });
   body.addEventListener("click", async (e) => {
     const btn = e.target.closest(".cr-savebtn"); if (!btn) return;
     const el = btn.closest(".cr-card"), st = el.querySelector(".cr-save");
@@ -69,13 +83,15 @@ export async function openCopyReview(list, { onChanged, all = false } = {}) {
     try {
       await runCopyGate(list.id);
       const { data } = await supabase.from("dials").select(COLS).eq("id", el.dataset.id).single();
+      const at = leads.findIndex((x) => x.id === el.dataset.id);
+      if (at >= 0) { if (data && data.seq_state === "awaiting_copy" && (all || !data.copy_ok)) leads[at] = data; else leads.splice(at, 1); refreshCount(); }
       if (all && data && data.seq_state === "awaiting_copy") {
         el.outerHTML = card(data);
         const n = body.querySelector(`.cr-card[data-id="${data.id}"] .cr-save`); n.className = data.copy_ok ? "cr-save ok" : "cr-save bad"; n.textContent = data.copy_ok ? "Saved. Passes the check." : "Saved, still has a problem.";
       } else if (data && data.seq_state === "awaiting_copy" && !data.copy_ok) {
         el.outerHTML = card(data);
         const n = body.querySelector(`.cr-card[data-id="${data.id}"] .cr-save`); n.className = "cr-save bad"; n.textContent = "Still has a problem.";
-      } else { el.remove(); if (!body.querySelector(".cr-card")) render([]); }
+      } else { el.remove(); shown = Math.max(0, shown - 1); if (!leads.length) render([]); else if (!body.querySelector(".cr-card")) render(leads); }
     } catch (err) { st.className = "cr-save bad"; st.textContent = "Saved, but the check failed: " + msg(err); btn.disabled = false; }
   });
 

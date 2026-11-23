@@ -5,9 +5,10 @@ import { escapeHtml } from "./clientForm.js";
 
 let el = null;
 
-const OUTCOMES = [["no_response", "No answer"], ["unable_to_contact", "Wrong number"], ["not_interested", "Not interested"], ["busy_callback", "Call back"], ["callback_interested", "Interested"]];
+const DEFAULT_OUTCOMES = [["callback_interested", "Talked – interested"], ["busy_callback", "Call back"], ["no_response", "No answer"], ["not_interested", "Not interested"], ["unable_to_contact", "Wrong / dead number"]];
 
-export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutcome, onNext }) {
+export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutcome, onNext, outcomes }) {
+  const OUTCOMES = outcomes?.length ? outcomes : DEFAULT_OUTCOMES;
   el?.remove();
   el = document.createElement("div");
   el.className = "call-panel";
@@ -93,8 +94,10 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutco
       clearInterval(timer);
       $(".call-panel-state").textContent = text || "Call ended";
       el.querySelector('[data-act="mute"]').remove();
+      el.querySelector('[data-act="keypad"]')?.remove(); // nothing to dial once the call is over
+      $(".call-keypad")?.classList.add("hidden");
       const h = el.querySelector('[data-act="hangup"]');
-      h.textContent = "Close"; h.classList.remove("call-hangup");
+      h.textContent = "Close"; h.classList.remove("call-hangup"); h.classList.add("secondary");
       h.onclick = () => this.close();
       // One tap logs the outcome (written to the dial AND linked to this call by the database), another moves to the next company.
       const box = $(".call-panel-outcome");
@@ -105,7 +108,7 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutco
         box.querySelectorAll(".call-outcome-chip").forEach((b) => onTap(b, async () => {
           const ok = await onOutcome(b.dataset.v);
           box.querySelectorAll(".call-outcome-chip").forEach((x) => x.classList.toggle("active", ok && x === b));
-          box.querySelector(".call-outcome-msg").textContent = ok ? "Saved to this call." : "Open the company card to set the outcome.";
+          box.querySelector(".call-outcome-msg").textContent = ok ? (b.dataset.v === "busy_callback" || b.dataset.v === "callback_interested" ? "Saved. Pick the callback time." : b.dataset.v === "intro_call_scheduled" ? "Saved. Enter the intro call time." : "Saved to this call.") : "Not saved. Open the company card to set the outcome, or check what is missing.";
         }));
         const nx = box.querySelector('[data-act="next"]');
         if (nx) onTap(nx, () => { this.close(); onNext(); });

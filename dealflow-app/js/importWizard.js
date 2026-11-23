@@ -2,13 +2,12 @@
 // The engine is js/csvImport.js (pure); this file is the screen and the network calls.
 import { supabase } from "./supabaseClient.js";
 import { escapeHtml } from "./clientForm.js";
-import { createNotification } from "./notifications.js";
 import { prepareList, describePrepare, MANDATES } from "./copyReview.js";
 import { msg } from "./copyCommon.js";
 import { withoutAi } from "./teamScope.js";
 import {
   analyzeFile, buildDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates,
-  mappingProblems, stripInternal, FIELD_LABELS,
+  mappingProblems, mappingNotes, stripInternal, FIELD_LABELS, isPersonalEmail,
 } from "./csvImport.js";
 
 const CHUNK = 500;
@@ -121,7 +120,7 @@ export function createImportWizard(ctx) {
     assignees = withoutAi(data).filter((p) => p.id !== ctx.profile.id);
     render();
   }
-  const roleLabel = (r) => ({ admin: "admin", team_lead: "team lead", intern: "intern", independent_lead: "lead" }[r] || r || "");
+  const roleLabel = (r) => ({ admin: "admin", team_lead: "team lead", intern: "intern", independent_lead: "independent lead" }[r] || r || "");
   const assigneeName = () => assignees.find((p) => p.id === assigneeId)?.full_name || "";
 
   // ---- render ----
@@ -145,7 +144,8 @@ export function createImportWizard(ctx) {
       !s.copy_columns && s.with_personal_email ? chip("no email copy in this file (add it on the review screen)", "") : "",
       s.copy_columns && s.email_has_copy ? chip(`${num(s.email_has_copy)} of those have email copy`, "") : "",
       s.bad_email ? chip(`${num(s.bad_email)} invalid emails (left blank)`, "warn") : "",
-      s.role_email ? chip(`${num(s.role_email)} generic emails (info@, sales@)`, "") : "",
+      s.role_email ? chip(`${num(s.role_email)} generic emails (info@, sales@): calls only, no email sequence`, "") : "",
+      s.multi_email ? chip(`${plural(s.multi_email, "row has", "rows have")} two emails in one cell. The first is kept`, "warn") : "",
       s.bad_phone ? chip(`${num(s.bad_phone)} odd phone numbers`, "warn") : "",
     ].join("");
     const dupFile = it.fileDups.size, dupDb = it.serverDups.size;
@@ -169,7 +169,7 @@ export function createImportWizard(ctx) {
     }
     const noContact = s.no_contact
       ? `<label class="iw-check"><input type="checkbox" data-act="nocontact" data-i="${idx}" ${it.skipNoContact ? "checked" : ""}> Skip the ${plural(s.no_contact, "row", "rows")} with no email and no phone <span class="iw-muted">(nothing to call or email)</span></label>` : "";
-    const probs = it.problems.map((p) => `<div class="iw-err">${escapeHtml(p)}</div>`).join("") + (it.a.warnings || []).map((w) => `<div class="iw-warn">${escapeHtml(w)}</div>`).join("");
+    const probs = it.problems.map((p) => `<div class="iw-err">${escapeHtml(p)}</div>`).join("") + [...(it.a.warnings || []), ...mappingNotes(it.map)].map((w) => `<div class="iw-warn">${escapeHtml(w)}</div>`).join("");
     const cols = it.a.headers.map((h, ci) => {
       const cur = it.map[ci] || "";
       const how = it.a.how[ci] && it.map[ci] === it.a.map[ci] ? it.a.how[ci] : "";
@@ -180,7 +180,7 @@ export function createImportWizard(ctx) {
         ${how === "typo" ? `<span class="iw-tag">matched despite spelling</span>` : how === "contents" ? `<span class="iw-tag">guessed from the values</span>` : ""}</div>`;
     }).join("");
     const mappedFields = Object.entries(it.map).filter(([, f]) => f).map(([, f]) => f);
-    const previewCols = [...new Set(["full_name", "company_name", "email", "mobile_phone", "company_phone", "city", "state", "email_subject", "email_1", "email_2"].filter((f) => mappedFields.includes(f) || (f === "full_name" && mappedFields.includes("first_name"))))];
+    const previewCols = [...new Set(["full_name", "company_name", "email", "mobile_phone", "company_phone", "city", "state", "email_subject", "email_1", "email_2"].filter((f) => f === "company_name" || mappedFields.includes(f) || (f === "full_name" && mappedFields.includes("first_name"))))];
     const mark = (i) => (it.skip.get(i) === "dup_file" ? "repeat in file" : it.skip.get(i) === "dup_existing" ? "already in system" : it.skip.get(i) === "no_contact" ? "no contact info" : "");
     const prev = it.dials.slice(0, 5).map((d, i) => `<tr${mark(i) ? ` class="iw-skiprow"` : ""}>${previewCols.map((f) => `<td${/^email_/.test(f) ? ` class="iw-copycell"` : ""}>${escapeHtml(/^email_/.test(f) ? String(d[f] || "").slice(0, 60) : d[f] || "")}</td>`).join("")}${mark(i) ? `<td><span class="iw-tag">${mark(i)} (skipped)</span></td>` : "<td></td>"}</tr>`).join("");
     return `<div class="iw-item ${it.open ? "iw-open" : ""}">
@@ -193,7 +193,7 @@ export function createImportWizard(ctx) {
         <div class="iw-sub">Preview</div>
         <div class="iw-tablewrap"><table class="iw-table"><thead><tr>${previewCols.map((f) => `<th>${escapeHtml(FIELD_LABELS[f] || f)}</th>`).join("")}<th></th></tr></thead><tbody>${prev || ""}</tbody></table></div>
         <button type="button" class="iw-link" data-act="togglemap" data-i="${idx}">${it.showMap ? "Hide columns" : mappedFields.length === it.a.headers.length ? `All ${it.a.headers.length} columns matched. Check them` : `${mappedFields.length} of ${it.a.headers.length} columns matched. Fix the rest`}</button>
-        ${it.showMap ? `<div class="iw-cols">${cols}</div>` : ""}
+        ${it.showMap || (!mappedFields.includes("company_name") && mappedFields.length < it.a.headers.length) ? `<div class="iw-cols">${cols}</div>` : ""}
       </div>` : ""}
     </div>`;
   }
@@ -323,7 +323,7 @@ export function createImportWizard(ctx) {
           progress(`${res.name}: sending to ${assigneeName()}...`);
           const { error } = await supabase.rpc("transfer_dial_list", { p_list_id: listId, p_new_owner: target });
           if (error) throw error;
-          createNotification(target, `${ctx.profile.full_name} sent you a list of people to contact.`, "dial_transfer");
+          // the recipient is notified by the database when the list changes hands (trigger dial_lists_notify_transfer)
           res.assignedTo = assigneeName(); res.ms.assign = Math.round(performance.now() - t1);
         } catch (e) { res.assignError = msg(e); }
       }
@@ -331,7 +331,7 @@ export function createImportWizard(ctx) {
       if (opts.mandate) {
         const t2 = performance.now();
         progress(`${res.name}: setting up sequences...`);
-        try { res.seq = await prepareList(listId, (left) => left && progress(`${res.name}: setting up sequences (${num(left)} left)...`)); } catch (e) { res.seqError = msg(e); }
+        try { res.seq = await prepareList(listId, (left) => left && progress(`${res.name}: setting up sequences (${num(left)} left)...`)); res.seq.generic_email = importRows(it).filter((d) => d.email && !isPersonalEmail(d.email)).length; } catch (e) { res.seqError = msg(e); }
         res.ms.prepare = Math.round(performance.now() - t2);
       }
       res.ms.total = Math.round(performance.now() - tAll);

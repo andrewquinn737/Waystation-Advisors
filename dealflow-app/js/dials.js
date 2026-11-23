@@ -20,7 +20,7 @@ import { wirePageHeaderMenu, closeAllPageHeaderMenus as closePageHeaderMenu } fr
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { getDealSide, wireDealSideToggle } from "./dealSide.js";
 import { getVisibleAccountIds, setVisibleAccountIds, wireAccountsVisiblePopup, initDefaultToSelf } from "./accountsVisible.js";
-import { createNotification, wireNotificationsToggle } from "./notifications.js";
+import { wireNotificationsToggle } from "./notifications.js";
 import { createImportWizard } from "./importWizard.js";
 import { startCall, isCallActive, primeAudio } from "./callSession.js";
 import { callBlocked } from "./testCallGuard.js";
@@ -236,6 +236,7 @@ const els = {
   requiredPopup: document.getElementById("requiredPopup"),
   requiredPopupText: document.getElementById("requiredPopupText"),
   requiredPopupOk: document.getElementById("requiredPopupOk"),
+  requiredPopupFill: document.getElementById("requiredPopupFill"),
   newListModal: document.getElementById("newListModal"),
   newListError: document.getElementById("newListError"),
   newListNameInput: document.getElementById("newListNameInput"),
@@ -403,6 +404,7 @@ els.introCallPopupClose.addEventListener("click", () => {
   const back = onIntroCallPopupClosed;
   onIntroCallPopupClosed = null;
   if (back) back();
+  else revertIntroStatus(); // closed the chooser without booking: the dial and its placeholder client go back like Cancel on the time step
 });
 
 function openConfirmDelete(onConfirm) {
@@ -655,8 +657,19 @@ function placeCall(dial, phone, method) {
     onRecordingSaved: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     fallbackTel: (num) => dialViaPhone(dial, method, num),
     // After hangup: one-tap outcome (the DB links it to this call) and straight on to the next company.
-    onOutcome: async (status) => (currentDial?.id === dial.id && dialMode === "view" ? !!(await updateDialStatus(status)) : false),
-    onNext: () => { const t = nextCompanyTarget(); if (t?.dial) { primeAudio(); runAutodial(t); } else showNotice("There are no more uncontacted dials with a phone number in this list.", { title: "Next company" }); },
+    // Same outcomes, labels and follow-ups as the card (callback time picker, intro booking), so there is one flow, not two.
+    outcomes: OUTCOME_CHIPS,
+    onOutcome: async (status) => {
+      if (!(currentDial?.id === dial.id && dialMode === "view")) return false;
+      if (status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" && introInfoMissing(dial)) return false;
+      introRevert = status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? { id: dial.id, status: dial.contact_status || "uncontacted" } : null;
+      const saved = !!(await updateDialStatus(status));
+      if (!saved) return false;
+      if (status === "intro_call_scheduled") handleScheduleIntroCallFromDial(dial);
+      else if (OUTCOMES.find((o) => o.status === status)?.callback) openCallbackModal(dial, {});
+      return true;
+    },
+    onNext: () => { const t = nextCompanyTarget(); if (t?.dial) { primeAudio(); runAutodial(t); } else showNotice("Nothing more is due. Check Callbacks, or pick another list.", { title: "Next company" }); },
   });
 }
 document.addEventListener(
@@ -698,6 +711,14 @@ async function loadDialTranscript() {
     el.innerHTML = `<div class="help-text">${error ? "Couldn't load calls." : "No in-app calls yet."}</div>`;
     return;
   }
+  // The newest call's summary is shown above "More" when it is from the last day, so nobody has to dig for what was just said.
+  const recent = data.find((c) => c.summary && Date.now() - Date.parse(c.started_at) < 86400000);
+  const more = document.querySelector(".dial-more");
+  let last = document.getElementById("dialLastCall");
+  if (recent && more) {
+    if (!last) { last = document.createElement("div"); last.id = "dialLastCall"; last.className = "dial-last-call"; more.before(last); }
+    last.innerHTML = `<b>Last call, ${escapeHtml(new Date(recent.started_at).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" }))}:</b> ${escapeHtml(recent.summary)}`;
+  } else last?.remove();
   el.innerHTML = data
     .map((c) => {
       const when = new Date(c.started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -734,7 +755,8 @@ async function loadDialTranscript() {
           try { window.location.href = await signedRecordingUrl(path, 300, true); } catch { /* ignore */ }
         });
       } catch (err) {
-        box.innerHTML = `<div class="help-text">Couldn't load the recording: ${escapeHtml(err?.message || String(err))}</div>`;
+        const gone = /not found|404|no such|does not exist/i.test(err?.message || String(err));
+        box.innerHTML = `<div class="help-text">${gone ? "This recording is no longer available." : "Couldn't load the recording. Check your connection and tap Play again."}</div>`;
       }
     });
   });
@@ -774,32 +796,40 @@ function buildCallNotesLiveHTML(dial) {
 // overwriting the just-typed text with stale data on the next render (see
 // goToDial/updateDialStatus/autoMarkContacted, all of which now `await`
 // this before doing anything else).
+// Returns true when there is nothing to save or the save worked, false when it failed. A failed save says so under the notes box in
+// plain words (never "Saved", never a raw error at the top of the card) and the text stays in the box so it can be saved again.
+function setNotesStatus(ok, text) {
+  const msg = document.getElementById("callNotesSavedMsg");
+  if (!msg) return;
+  msg.textContent = text;
+  msg.classList.toggle("bad", !ok);
+  msg.classList.remove("hidden");
+  clearTimeout(setNotesStatus.t);
+  if (ok) setNotesStatus.t = setTimeout(() => msg.classList.add("hidden"), 1500);
+}
 async function flushCallNotes() {
   const notesEl = document.getElementById("d_call_notes_live");
-  if (!notesEl || !currentDial) return;
+  if (!notesEl || !currentDial) return true;
   const val = notesEl.value.trim() || null;
-  if (val === (currentDial.call_notes || null)) return;
+  if (val === (currentDial.call_notes || null)) return true;
   const { error } = await supabase.from("dials").update({ call_notes: val }).eq("id", currentDial.id);
   if (error) {
-    showError(els.dialModalError, error);
-    return;
+    setNotesStatus(false, `Note not saved (${friendlyMsg(error) || "no connection"}). Tap outside the box to try again.`);
+    return false;
   }
   currentDial.call_notes = val;
   const idx = dials.findIndex((d) => d.id === currentDial.id);
   if (idx !== -1) dials[idx].call_notes = val;
   await syncTodaysCallLogSnapshot({ call_notes: val });
+  return true;
 }
 
 function wireCallNotesAutosave() {
   const notesEl = document.getElementById("d_call_notes_live");
   if (!notesEl || !currentDial) return;
   notesEl.addEventListener("blur", async () => {
-    await flushCallNotes();
-    const msg = document.getElementById("callNotesSavedMsg");
-    if (msg) {
-      msg.classList.remove("hidden");
-      setTimeout(() => msg.classList.add("hidden"), 1500);
-    }
+    const ok = await flushCallNotes();
+    if (ok) setNotesStatus(true, "Saved");
   });
 }
 
@@ -1065,7 +1095,7 @@ async function openTransferMenu() {
     const ownerHTML = ownerTarget
       ? `<div class="dial-tab-transfer-owner">${escapeHtml(ownerTarget.full_name)} (tab owner)</div><div class="dial-tab-transfer-divider"></div>`
       : "";
-    const ROLE = { admin: "admin", team_lead: "team lead", intern: "intern", independent_lead: "lead" };
+    const ROLE = { admin: "admin", team_lead: "team lead", intern: "intern", independent_lead: "independent lead" };
     const option = (p) => `<button type="button" class="dial-tab-transfer-option" data-id="${p.id}" data-name="${escapeHtml(p.full_name || "")}"><span>${escapeHtml(p.full_name)}${p.id === profile.id ? " (you)" : ""}</span><small>${ROLE[p.role] || ""}</small></button>`;
     const searchHTML = otherTargets.length > 6 ? `<input type="search" class="dial-tab-transfer-search" placeholder="Search people" aria-label="Search people" autocomplete="off">` : "";
     els.dialTabTransferList.innerHTML = `${searchHTML}<div class="dial-tab-transfer-confirm hidden"></div><div class="dial-tab-transfer-opts">${ownerHTML}${otherTargets.length ? otherTargets.map(option).join("") : `<div class="dial-tab-transfer-empty">No other accounts yet.</div>`}</div>`;
@@ -1106,12 +1136,7 @@ async function completeTransfer(targetId, targetName) {
   const { error } = await supabase.rpc("transfer_dial_list", { p_list_id: tabId, p_new_owner: targetId });
   if (error) return showError(els.errorBox, error);
 
-  // Let the recipient know a tab of dials just landed in their account — see
-  // js/notifications.js. Best-effort: a failure here shouldn't block or
-  // error out the transfer itself, which already succeeded above.
-  if (targetId !== profile.id) {
-    createNotification(targetId, `${profile.full_name} sent you a list of people to contact.`, "dial_transfer");
-  }
+  // The recipient is notified by the database when the list changes hands (trigger dial_lists_notify_transfer).
 
   archiveMenuTabId = null;
   currentListId = null;
@@ -2457,12 +2482,12 @@ function renderDialsTable() {
   if (sc) { const q = dialSearchQuery.trim(); sc.classList.toggle("hidden", !q); if (q) { const n = visibleDials().length; sc.textContent = n === 1 ? "1 match" : `${n} matches`; } }
   if (dialsLoadFailed && currentListId) { els.dialsTableWrap.innerHTML = loadFailedHTML(); updateProspectCount(0); return; }
   if (home && sheetMode()) {
-    home.renderSheet(!currentListId ? (simpleUi ? "No lists yet. Your team lead will add one." : "No lists yet for this category — tap + next to the tabs to create one.")
+    home.renderSheet(!currentListId ? (simpleUi ? "No lists yet. Your team lead will add one." : "Nothing to call yet.")
       : dials.length === 0 ? (simpleUi ? "No companies in this list yet." : `No dials in this list yet — use the arrow next to "Dials" and tap "Add new".`) : "You're all caught up.");
     return;
   }
   if (!currentListId) {
-    els.dialsTableWrap.innerHTML = `<div class="empty-state">${simpleUi ? "No lists yet. Your team lead will add one." : "No lists yet for this category — tap + next to the tabs to create one."}</div>`;
+    els.dialsTableWrap.innerHTML = `<div class="empty-state">${simpleUi ? "No lists yet. Your team lead will add one." : "Nothing to call yet."}</div>`;
     updateProspectCount(0);
     return;
   }
@@ -2637,6 +2662,7 @@ function buildDialViewHTML(dial) {
 // the call sheet. Admins/team leads also keep the old status pill (to re-categorise or reset a company).
 // ---------------------------------------------------------------------------
 const simpleUi = !isAdmin && !isTeamLead; // interns (and independent leads): the slimmest card
+const OUTCOME_CHIPS = [["callback_interested", "Talked – interested"], ["busy_callback", "Call back"], ["no_response", "No answer"], ["not_interested", "Not interested"], ["unable_to_contact", "Wrong / dead number"], ["intro_call_scheduled", "Intro call booked"]];
 const OUTCOMES = [
   { status: "callback_interested", label: "Talked – interested", callback: true },
   { status: "busy_callback", label: "Call back", callback: true },
@@ -2673,6 +2699,7 @@ function wireOutcomeButtons() {
   wrap.querySelectorAll("[data-outcome]").forEach((b) => b.addEventListener("click", async () => {
     const value = b.dataset.outcome, dial = currentDial;
     wrap.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    if (value === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" && introInfoMissing(dial)) { renderDialModal(); return; } // asked BEFORE anything is saved
     const target = autodialTarget(value); // the Autodial setting (if on) still picks its own next company
     if (target) primeAudio();
     // Remember where the dial was, so backing out of the "Confirm the scheduled time" step can put it back.
@@ -3169,6 +3196,11 @@ function autodialTarget(newStatus) {
 // "Next company" in the call bar: the next uncontacted dial with a phone number, whether or not Autodial is on.
 function nextCompanyTarget() {
   if (!currentDial) return null;
+  // A callback that is due (or within 5 minutes) comes first, oldest first: a promise to an owner beats a cold dial.
+  const dueBy = Date.now() + 5 * 60 * 1000;
+  const due = dials.filter((d) => d.id !== currentDial.id && ["busy_callback", "callback_interested"].includes(d.contact_status) && d.callback_at && Date.parse(d.callback_at) <= dueBy && (d.mobile_phone || d.company_phone))
+    .sort((a, b) => Date.parse(a.callback_at) - Date.parse(b.callback_at));
+  if (due.length) return { dial: due[0] };
   const list = visibleDials();
   const i = list.findIndex((d) => d.id === currentDial.id);
   const after = i >= 0 ? [...list.slice(i + 1), ...list.slice(0, i)] : list;
@@ -3178,7 +3210,7 @@ function nextCompanyTarget() {
 
 function runAutodial(target) {
   if (target.none) {
-    showNotice("There are no more uncontacted dials with a phone number in this list.", { title: "Autodial" });
+    showNotice("Nothing more is due. Check Callbacks, or pick another list.", { title: "Autodial" });
     return;
   }
   const d = target.dial;
@@ -3409,6 +3441,17 @@ function getMissingDialClientFields(dial) {
 // call attached. Calendly itself is pre-filled straight from the dial's own
 // name/email (see the `prefill` opt) rather than from a client row that
 // doesn't exist yet.
+// Before "Intro call booked" is saved: a dial missing what a client needs is not flipped to Accepted. Returns true when it is blocked, after
+// saying what is missing, with a button that opens the edit form right away.
+function introInfoMissing(dial) {
+  if (isQuestionnaireDial(dial)) return false;
+  const { missing, labels } = getMissingDialClientFields(dial);
+  if (!missing.length) return false;
+  els.requiredPopupText.textContent = `Please fill out the missing information on this dial before booking an intro call: ${labels.join(", ")}. The outcome was not changed.`;
+  els.requiredPopupFill?.classList.remove("hidden");
+  els.requiredPopup.classList.remove("hidden");
+  return true;
+}
 async function handleScheduleIntroCallFromDial(dial) {
   if (isQuestionnaireDial(dial)) {
     openQuestionnaireIntroPopup(dial);
@@ -3577,6 +3620,22 @@ async function createClientRecordFromDial(dial) {
 let introCallTimeConfirmCleanup = null;
 let introRevert = null; // { id, status }: the dial's status before "Intro call booked" was tapped
 
+// "Intro call booked" was tapped but no time was saved (time step cancelled, or the chooser closed): put the dial back to what it was.
+// The dials_intro_booked trigger removes the placeholder client when the status leaves "Accepted intro call".
+async function revertIntroStatus(dialArg) {
+  const back = introRevert;
+  introRevert = null;
+  const dial = dialArg || (back && (dials.find((d) => d.id === back.id) || (currentDial?.id === back.id ? currentDial : null)));
+  if (!back || !dial || back.id !== dial.id || dial.contact_status !== "intro_call_scheduled") return;
+  const { error } = await supabase.from("dials").update({ contact_status: back.status }).eq("id", dial.id);
+  if (error) return showToast("The status could not be set back. Change it from the outcome buttons.", "bad");
+  dial.contact_status = back.status;
+  const idx = dials.findIndex((d) => d.id === dial.id); if (idx !== -1) dials[idx].contact_status = back.status;
+  if (currentDial?.id === dial.id) currentDial.contact_status = back.status;
+  renderDialModal(); renderDialsTable();
+  showToast("No time was saved, so the intro call is not booked.");
+}
+
 function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false } = {}) {
   introCallTimeConfirmCleanup?.();
   introCallTimeConfirmCleanup = null;
@@ -3594,11 +3653,20 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false 
   today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
   dateInput.min = today.toISOString().slice(0, 10);
   dateInput.value = "";
+  // Prefill what we already know: a callback time the owner agreed to (only when it is still ahead). The rep confirms or changes it.
+  let guess = "";
+  if (dial.callback_at && Date.parse(dial.callback_at) > Date.now()) {
+    const cb = new Date(dial.callback_at), pad2 = (n) => String(n).padStart(2, "0");
+    const mins = Math.round((cb.getHours() * 60 + cb.getMinutes()) / 30) * 30;
+    if (mins >= 7 * 60 && mins <= 19 * 60) { dateInput.value = `${cb.getFullYear()}-${pad2(cb.getMonth() + 1)}-${pad2(cb.getDate())}`; guess = `${pad2(Math.floor(mins / 60))}:${pad2(mins % 60)}`; }
+  }
   const pastOk = document.getElementById("introCallPastOk");
   if (pastOk) { pastOk.checked = false; pastOk.onchange = () => { dateInput.min = pastOk.checked ? "" : today.toISOString().slice(0, 10); }; }
-  timeSelect.innerHTML = timeOptionsHTML("", { includeNoTime: false });
+  timeSelect.innerHTML = timeOptionsHTML(guess, { includeNoTime: false });
   tzSelect.innerHTML = timezoneOptionsHTML(defaultTimezone());
   errEl.classList.add("hidden");
+  const prefillNote = document.getElementById("introCallPrefillNote");
+  if (prefillNote) prefillNote.classList.toggle("hidden", !guess);
 
   modal.classList.remove("hidden");
 
@@ -3672,15 +3740,7 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false 
   // Cancel / Esc / tap outside: nothing was saved, so the dial goes back to what it was before "Intro call booked" was tapped.
   const onCancel = async () => {
     cleanup();
-    const back = !createdClient && !onConfirmed && introRevert?.id === dial.id && dial.contact_status === "intro_call_scheduled" ? introRevert : null;
-    introRevert = null;
-    if (!back) return;
-    const { error } = await supabase.from("dials").update({ contact_status: back.status }).eq("id", dial.id);
-    if (error) return showToast("The status could not be set back. Change it from the outcome buttons.", "bad");
-    dial.contact_status = back.status;
-    const idx = dials.findIndex((d) => d.id === dial.id); if (idx !== -1) dials[idx].contact_status = back.status;
-    renderDialModal(); renderDialsTable();
-    showToast("No time was saved, so the intro call is not booked.");
+    if (!createdClient && !onConfirmed) await revertIntroStatus(dial);
   };
   const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
   const onKey = (e) => { if (e.key === "Escape") onCancel(); };
@@ -3877,7 +3937,11 @@ function openCompletedIntroReportModal(dial) {
   completedIntroCleanup = cleanup;
 }
 
-els.requiredPopupOk.addEventListener("click", () => els.requiredPopup.classList.add("hidden"));
+els.requiredPopupOk.addEventListener("click", () => { els.requiredPopup.classList.add("hidden"); els.requiredPopupFill?.classList.add("hidden"); });
+els.requiredPopupFill?.addEventListener("click", async () => {
+  els.requiredPopup.classList.add("hidden"); els.requiredPopupFill.classList.add("hidden");
+  if (currentDial) { await flushCallNotes(); dialMode = "edit"; renderDialModal(); }
+});
 
 // ---------------------------------------------------------------------------
 // "Categories" (formerly the palette/dot filter button) — hides/shows dials
@@ -4012,6 +4076,8 @@ home = initDialsHome({
   profile,
   getList: () => allLists.find((l) => l.id === currentListId) || null,
   getDials: () => dials,
+  loadFailed: () => dialsLoadFailed && !!currentListId,
+  loadFailedHtml: () => loadFailedHTML(),
   openCard: openCardFrom,
   isSheet: sheetMode,
   isHidden: (d) => hiddenStatuses.has(d.contact_status || "uncontacted"),

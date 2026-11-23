@@ -37,7 +37,7 @@ function callbackText(iso) {
   return { text: `${when} ${time}`, missed: d.getTime() < Date.now() - 30 * 60000 };
 }
 
-export function initDialsHome({ profile, getList, getDials, openCard, isSheet, isHidden, rowIcons, wireIcons }) {
+export function initDialsHome({ profile, getList, getDials, openCard, isSheet, isHidden, rowIcons, wireIcons, loadFailed, loadFailedHtml }) {
   let tasks = [], taskDials = [], followErr = "", firstLoadDone = false, queue = null, queueErr = false;
   let nextByDial = new Map(); // dial_id -> its next upcoming step (for group 8 "In sequence")
   let emptyText = "You're all caught up.", groups = [], allLists = false, otherCount = 0; // follow-ups from other tabs are hidden unless allLists
@@ -50,14 +50,17 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   async function loadFollowups() {
     const { data, error } = await supabase.from("my_followups").select("*").limit(500);
     if (error) { followErr = "Couldn't load follow-ups."; firstLoadDone = true; if (isSheet()) renderSheet(); return; }
-    followErr = "";
-    tasks = (data || []).filter((t) => KIND[t.kind] && !["done", "skipped"].includes(t.status) && (!t.owner_id || t.owner_id === profile.id))
+    const fresh = (data || []).filter((t) => KIND[t.kind] && !["done", "skipped"].includes(t.status) && (!t.owner_id || t.owner_id === profile.id))
       .map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || String(a.t.due_on).localeCompare(String(b.t.due_on)) || a.i - b.i).map((x) => x.t);
-    const ids = [...new Set(tasks.map((t) => t.dial_id))], rows = [];
+    const ids = [...new Set(fresh.map((t) => t.dial_id))], rows = [];
     for (let i = 0; i < ids.length; i += 60) {
-      const { data: d } = await supabase.from("dials").select("*").in("id", ids.slice(i, i + 60));
+      const { data: d, error: de } = await supabase.from("dials").select("*").in("id", ids.slice(i, i + 60));
+      // The companies behind the tasks could not be read: keep what was loaded before instead of dropping Past due / Due today rows
+      // into "In sequence", and say so.
+      if (de) { followErr = tasks.length ? "Couldn't refresh follow-ups. Showing the last ones that loaded." : "Couldn't load follow-ups."; firstLoadDone = true; if (isSheet()) renderSheet(); return; }
       rows.push(...(d || []));
     }
+    followErr = "";
     const byId = new Map(rows.map((d) => [d.id, d]));
     taskDials = ids.map((id) => byId.get(id)).filter(Boolean);
     // next upcoming step per company in a running sequence (one query; RLS limits rows to what this person may see)
@@ -65,7 +68,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       .in("status", ["pending", "queued"]).gt("due_on", localDate(tz)).order("due_on").limit(5000);
     nextByDial = new Map();
     for (const u of up || []) if (!nextByDial.has(u.dial_id)) nextByDial.set(u.dial_id, u);
-    tasks = tasks.filter((t) => byId.has(t.dial_id));
+    tasks = fresh.filter((t) => byId.has(t.dial_id));
     firstLoadDone = true;
     if (isSheet()) renderSheet();
   }
@@ -100,6 +103,18 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       buckets[late.length ? 0 : 1].push({ d, t, late: late.length ? dayDiff(today, t.due_on) : 0 });
       placed.add(id);
     }
+    // A callback promised to an owner: missed ones go to Past due (oldest first), the rest of today's to Due today (by time), ahead of the tasks.
+    const nowMs = Date.now(), missed = [], laterToday = [];
+    for (const d of mine) {
+      if (placed.has(d.id) || (isHidden && isHidden(d)) || !d.callback_at || !["callback_interested", "busy_callback"].includes(d.contact_status)) continue;
+      const at = Date.parse(d.callback_at); if (isNaN(at)) continue;
+      if (at <= nowMs) missed.push({ d, cb: at, late: Math.max(0, dayDiff(today, new Date(at).toLocaleDateString("en-CA", { timeZone: tz }))) });
+      else if (new Date(at).toLocaleDateString("en-CA", { timeZone: tz }) === today) laterToday.push({ d, cb: at });
+      else continue;
+      placed.add(d.id);
+    }
+    buckets[0].unshift(...missed.sort((a, b) => a.cb - b.cb));
+    buckets[1].unshift(...laterToday.sort((a, b) => a.cb - b.cb));
     for (const d of mine) {
       if (placed.has(d.id) || (isHidden && isHidden(d))) continue;
       const g = groupFor(d); if (g) buckets[g - 1].push(g === 8 ? { d, next: nextByDial.get(d.id) } : { d });
@@ -127,6 +142,10 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
         bits.push(`<b class="dh-do">${esc(DO[t.kind] || KIND[t.kind])}</b>`);
         bits.push(it.late ? `${it.late} day${it.late === 1 ? "" : "s"} late` : "today");
       }
+    } else if (it.cb) {
+      const c = callbackText(new Date(it.cb).toISOString());
+      bits.push(`<b class="dh-do">${it.cb <= Date.now() ? "Missed callback" : "Callback"}</b>`);
+      bits.push(esc(c.text));
     } else if (g.n === 8) {
       const nx = it.next, NEXT = { email: "Email", followup_email: "Follow-up email", ...KIND };
       if (d.seq_state === "awaiting_copy") bits.push("First email not sent yet");
@@ -190,6 +209,8 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   function renderSheet(empty) {
     if (typeof empty === "string") emptyText = empty;
     const w = wrap(); if (!w) return;
+    // The list itself could not be loaded: this is a Retry state, whatever the follow-ups finish doing later.
+    if (loadFailed && loadFailed()) { w.innerHTML = loadFailedHtml(); return; }
     // Until the follow-ups are in, groups 1-2 are unknown: show the skeleton instead of a sheet that then jumps (unless there is no list at all).
     if (!firstLoadDone && getList()) { w.innerHTML = skeletonSheetHtml(); return; }
     groups = buildGroups();

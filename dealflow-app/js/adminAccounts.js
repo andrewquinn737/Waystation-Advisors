@@ -23,6 +23,8 @@ function msg(text, ok = false) { const el = $("mbxMsg"); el.textContent = text |
 export function initAccounts() {
   $("mbxEndpoint").textContent = ENDPOINT;
   $("mbxRefresh").onclick = load;
+  // remember which owner groups are open, so a Pause / owner change does not collapse them
+  $("mbxList").addEventListener("toggle", (e) => { const d = e.target; if (d.matches?.("details.ad-group")) { if (d.open) openKeys.add(d.dataset.k); else openKeys.delete(d.dataset.k); } }, true);
   $("mbxCheckAll").onclick = checkAll;
   $("mbxAddToggle").onclick = () => { $("mbxAddPanel").classList.toggle("hidden"); $("addEmail").focus(); };
   $("addCancel").onclick = () => $("mbxAddPanel").classList.add("hidden");
@@ -33,8 +35,10 @@ export function initAccounts() {
   load();
 }
 
+let openKeys = new Set(); // owner groups the admin has open: kept across the reload after every change
+const ROLE = { admin: "admin", team_lead: "team lead", independent_lead: "lead", intern: "intern" };
 async function load() {
-  $("mbxList").innerHTML = `<p class="ad-empty">Loading...</p>`;
+  if (!boxes.length) $("mbxList").innerHTML = `<p class="ad-empty">Loading...</p>`; // an existing list stays on screen while it refreshes
   try {
     const r = await api({ action: "list" });
     boxes = r.mailboxes; people = r.people.filter((p) => p.full_name !== "AI Assistant").sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
@@ -66,7 +70,7 @@ function indicators(b) {
 function boxHtml(b) {
   const lim = b.effective_daily_limit ?? 0, sent = b.sent_24h ?? 0, paused = !!b.send_paused_reason;
   const ver = indicators(b);
-  const owners = people.map((p) => `<option value="${p.id}" ${!b.needs_assignment && p.id === b.owner_id ? "selected" : ""}>${esc(p.full_name)}</option>`).join("");
+  const owners = people.map((p) => `<option value="${p.id}" ${!b.needs_assignment && p.id === b.owner_id ? "selected" : ""}>${esc(p.full_name)}${ROLE[p.role] ? ` (${ROLE[p.role]})` : ""}</option>`).join("");
   return `<div class="ad-box${paused ? " paused" : ""}" data-id="${b.id}">
     <div class="ad-box-top"><span class="ad-addr" title="${esc(b.email_address)}">${esc(b.email_address)}</span><span class="ad-use${lim && sent + (b.scheduled ?? 0) >= lim ? " full" : ""}" title="Sent in the last 24h / daily limit (${b.scheduled ?? 0} queued)">${sent}/${lim} today</span></div>
     <div class="ad-badges">${ver}<button type="button" class="ad-link" data-act="check" title="Log in to this mailbox now (nothing is sent)">Check now</button>${paused ? `<span class="ad-badge warn" title="${esc(b.send_paused_reason)}">paused: ${esc(b.send_paused_reason)}</span>` : ""}</div>
@@ -82,7 +86,7 @@ function render() {
   const unassigned = boxes.filter((b) => b.needs_assignment).length;
   $("mbxSummary").textContent = `${boxes.length} account${boxes.length === 1 ? "" : "s"}` + (unassigned ? `, ${unassigned} need an owner` : "");
   if (!boxes.length) { $("mbxList").innerHTML = `<p class="ad-empty">No email accounts yet. Tap "Add account".</p>`; return; }
-  const wasOpen = new Set([...$("mbxList").querySelectorAll("details.ad-group[open]")].map((d) => d.dataset.k));
+  const wasOpen = openKeys;
   const groups = new Map();
   for (const b of boxes) {
     const k = b.needs_assignment ? "__un" : b.owner_id;
@@ -101,7 +105,11 @@ async function run(fn, okText) { try { await fn(); if (okText) msg(okText, true)
 function onEvent(ev) {
   const el = ev.target.closest("[data-act]"), card = ev.target.closest(".ad-box"); if (!el || !card) return;
   const id = card.dataset.id, b = boxes.find((x) => x.id === id), act = el.dataset.act; if (!b) return;
-  if (act === "owner" && ev.type === "change" && el.value) run(() => api({ action: "assign", account_ids: [id], owner_id: el.value }), "Owner updated.");
+  if (act === "owner" && ev.type === "change" && el.value) {
+    const to = people.find((x) => x.id === el.value)?.full_name || "them";
+    openKeys.add(String(el.value)); // the group it moves into opens so the change is visible
+    run(() => api({ action: "assign", account_ids: [id], owner_id: el.value }), `${b.email_address} now belongs to ${to}.`);
+  }
   else if (act === "mandate" && ev.type === "change") run(() => api({ action: "update", account_id: id, mandate: el.value || null }));
   else if (act === "sync" && ev.type === "change") run(() => api({ action: "update", account_id: id, sync_enabled: el.checked }));
   else if (act === "limit" && ev.type === "change") {
@@ -109,7 +117,7 @@ function onEvent(ev) {
     if (v !== "" && (!/^\d+$/.test(v) || +v > 200)) { msg("Daily limit must be a whole number from 0 to 200."); el.value = b.daily_send_limit ?? ""; return; }
     run(() => api({ action: "update", account_id: id, daily_send_limit: v === "" ? null : +v }));
   } else if (act === "check" && ev.type === "click") checkLogin(b, el);
-  else if (act === "pause" && ev.type === "click") run(() => api({ action: "update", account_id: id, send_paused_reason: b.send_paused_reason ? null : "Paused by admin" }));
+  else if (act === "pause" && ev.type === "click") run(() => api({ action: "update", account_id: id, send_paused_reason: b.send_paused_reason ? null : "Paused by admin" }), b.send_paused_reason ? `${b.email_address} will send again.` : `${b.email_address} paused. Nothing is sent from it until you resume.`);
 }
 
 async function addOne() {

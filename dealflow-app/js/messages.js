@@ -377,7 +377,7 @@ async function loadThreadList(loadMore = false) {
 
   let query = supabase
     .from("email_messages")
-    .select("id, thread_id, account_id, direction, from_address, from_name, to_addresses, subject, snippet, is_read, client_id, sent_at")
+    .select("id, thread_id, account_id, direction, from_address, from_name, to_addresses, subject, snippet, is_read, client_id, sent_at, is_auto_reply")
     .order("sent_at", { ascending: false })
     .limit(PAGE_SIZE);
   if (ids) query = query.in("account_id", ids);
@@ -739,7 +739,7 @@ function renderThreadList() {
         </div>
         <div class="mc-sub">${escapeHtml(t.latest.subject || "(no subject)")}</div>
         <div class="mc-sub faint">${escapeHtml(t.latest.snippet || "")}</div>
-        ${(multi && acct) || seq ? `<div>${multi && acct ? `<span class="message-mailbox-chip">${escapeHtml(acct.email_address)}${acct.mine ? "" : ` · ${escapeHtml(ownerFirstName(acct))}`}</span>` : ""}${seq ? `<span class="message-seq-badge ${seq.replied ? "replied" : ""}">${escapeHtml(seq.label)}</span>` : ""}</div>` : ""}
+        ${(multi && acct) || seq || t.latest.is_auto_reply ? `<div>${multi && acct ? `<span class="message-mailbox-chip">${escapeHtml(acct.email_address)}${acct.mine ? "" : ` · ${escapeHtml(ownerFirstName(acct))}`}</span>` : ""}${seq ? `<span class="message-seq-badge ${seq.replied ? "replied" : ""}">${escapeHtml(seq.label)}</span>` : ""}${t.latest.is_auto_reply ? `<span class="message-seq-badge auto" title="Out-of-office or automatic reply. It does not stop the emails.">Auto-reply</span>` : ""}</div>` : ""}
       </div>
       ${
         threadListSelectMode
@@ -1162,7 +1162,7 @@ function renderComposeQuota() {
     full = q.left <= 0;
     text = full
       ? `${a?.email_address || "This mailbox"} has reached its daily limit (${q.sent} sent${q.scheduled ? `, ${q.scheduled} scheduled` : ""} of ${q.daily_limit}). Pick another mailbox or try again later.`
-      : `${q.left} of ${q.daily_limit} sends left today from ${a?.email_address || "this mailbox"}${q.scheduled ? ` (${q.scheduled} scheduled)` : ""}.`;
+      : `${q.left} of ${q.daily_limit} sends left today from ${a?.email_address || "this mailbox"}${q.scheduled ? ` (${q.scheduled} scheduled)` : ""}. This daily limit is for replies you write yourself; campaigns send fewer a day per mailbox.`;
   }
   if (a?.send_paused_reason) text += `${text ? " " : ""}Sending is paused on this mailbox: ${a.send_paused_reason}`;
   note.textContent = text;

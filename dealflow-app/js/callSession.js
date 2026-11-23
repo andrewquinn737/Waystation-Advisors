@@ -92,7 +92,7 @@ export async function startCall(opts) {
     name: dial.full_name || dial.company_name, company: dial.company_name,
     onHangup: () => { try { call?.hangup(); } catch { /* ignore */ } if (!call) finish("Call cancelled"); },
     onMute: (m) => setMuted(m),
-    onOutcome: opts.onOutcome, onNext: opts.onNext,
+    onOutcome: opts.onOutcome, onNext: opts.onNext, outcomes: opts.outcomes,
     onDtmf: (d) => { try { call?.dtmf(d); } catch { /* call not connected yet */ } },
   });
 

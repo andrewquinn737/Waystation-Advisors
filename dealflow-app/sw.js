@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v123";
+const CACHE = "waystation-shell-v124";
 // Every page, script and stylesheet is precached (a page whose module is missing offline used to hang on its skeleton for good).
 const SHELL = [
   "/",
@@ -13,11 +13,11 @@ const SHELL = [
   "/css/aiChat.css", "/css/copyReview.css", "/css/dialsHome.css", "/css/importWizard.css",
   "/css/messages-inbox.css", "/css/simple.css", "/css/style.css", "/js/accountsVisible.js",
   "/js/admin.js", "/js/adminAccounts.js", "/js/adminCalendly.js", "/js/adminCampaigns.js",
-  "/js/adminOnboarding.js", "/js/adminSettings.js", "/js/advancedSettings.js", "/js/aiChat.js",
+  "/js/adminLaunch.js", "/js/adminOnboarding.js", "/js/adminSettings.js", "/js/adminSuppression.js", "/js/advancedSettings.js", "/js/aiChat.js",
   "/js/aiChatSetup.js", "/js/auth.js", "/js/autodial.js", "/js/callAudio.js",
   "/js/callPanel.js", "/js/callRecordings.js", "/js/callSession.js", "/js/callTranscript.js",
   "/js/callbackBanners.js", "/js/claudeConnect.js", "/js/claudeHelp.js", "/js/clientForm.js",
-  "/js/clients.js", "/js/config.js", "/js/contactIcons.js", "/js/copyCommon.js",
+  "/js/clientCalls.js", "/js/clients.js", "/js/config.js", "/js/contactIcons.js", "/js/copyCommon.js",
   "/js/copyGate.js", "/js/copyLint.js", "/js/copyReview.js", "/js/copyReviewScreen.js",
   "/js/csvImport.js", "/js/dealSide.js", "/js/deletedTabs.js", "/js/dials.js",
   "/js/dialsHome.js", "/js/eventTime.js", "/js/finance.js", "/js/followUp.js",

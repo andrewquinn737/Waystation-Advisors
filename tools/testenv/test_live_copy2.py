@@ -11,11 +11,11 @@ def team_ids(team):
 
 def reports_session(b, name, ids):
     ctx = b.new_context(viewport={"width": 1100, "height": 900}, accept_downloads=True); errs = []
-    ctx.add_init_script("localStorage.setItem('waystation_report_accounts_visible', %s); localStorage.setItem('waystation_report_accounts_visible_initialized','1')" % json.dumps(json.dumps(ids)))
+    ctx.add_init_script("localStorage.setItem('waystation_report_accounts_visible_v2', %s); localStorage.setItem('waystation_report_accounts_visible_v2_initialized','1')" % json.dumps(json.dumps(ids)))
     p = new_page(ctx, errs); e, pw = creds(name); login(p, e, pw); return ctx, p, errs
 
 def table_rows(p):
-    t = p.inner_text("#reportsTableWrap").strip().split("\n")[1:]
+    t = p.inner_text("#reportsTableWrap table").strip().split("\n")[1:]
     out = {}
     for ln in t:
         c = ln.split("\t")
@@ -231,7 +231,7 @@ def callbacks(b):
 def lead_scope(b):
     print("-- K. team lead scope + phone width with real data")
     ctx, p, errs = session(b, "Jonah Johnson"); p.goto(BASE + "profile.html"); p.wait_for_timeout(3500); p.click("#reportsBtn"); p.wait_for_timeout(3500)
-    p.click("#reportsMenuToggle"); p.click("#reportsAccountsVisibleBtn"); p.wait_for_timeout(800); p.click("#accountsSelectAllBtn"); p.click("#reportsAccountsVisibleClose"); p.wait_for_timeout(3000)
+    p.wait_for_timeout(1500)   # round 3: Reports opens on the whole team already (no "Select all" click needed)
     rows = set(table_rows(p)) | {"Jonah Johnson (live copy)"}
     TEAM2 = "d83fb5c8-96a4-4e0a-be21-bfafe7054368"   # Jonah also leads Team 2 through team_lead_teams
     team = {r["full_name"] for r in q(f"select full_name from profiles where team_id in ('{TEAM3}','{TEAM2}') and role in ('intern','independent_lead','team_lead') and id in (select id from auth.users where email like 'live.%')")}

@@ -3,9 +3,9 @@ Setup and the clock-driven dispatcher run as the database owner; what people do 
 Sections: 1 anonymous access / null-safe guards, 2 mailbox-admin, 3 duplicate-send protection, 4 suppression + dedup,
 5 time zones + caps + ramp, 6 bounce auto-pause, 7 SMTP auth failure + header injection, 8 list/lead deletion, 9 Vault.
 Run: python3 test_hardening.py"""
-import sb, json, os, uuid, hashlib, time, traceback, urllib.request, urllib.error
+import sb, json, os, uuid, hashlib, time, traceback, urllib.request, urllib.error, urllib.parse
 import test_sequences as T
-from test_sequences import q, uid, lit, make_list, COPY, gate, start, seed_mv, login, api, rpc, CALEB, GAVIN, ADMIN, URL, ANON, SEC
+from test_sequences import q, uid, lit, make_list, COPY, gate, start, seed_mv, login, api, rpc, CALEB, GAVIN, ADMIN, URL, ANON, SEC, LEAD_A, LEAD_B
 
 results = []
 def check(name, cond, detail=""):
@@ -510,7 +510,7 @@ def run():
         l = q(f"select send_paused_reason from dial_lists where id='{lid}'")[0]["send_paused_reason"]
         check(f"bounce guard: {label}", (r is not None and l is not None) == expect_pause and (not expect_pause or (r.startswith("Auto-paused: bounce rate") and l.startswith("Auto-paused: bounce rate"))), (r, l))
         return b, lid, r
-    bounce_case("19 sends, 5 bounced -> under the 20-send minimum, no pause", 19, 5, False)
+    bounce_case("19 sends, 5 bounced -> a new mailbox now pauses early (round 3: >= 3 hard bounces under 20 sends)", 19, 5, True)
     bounce_case("40 sends, 1 bounced (2.5%) -> fine", 40, 1, False)
     bounce_case("100 sends, 3 bounced (exactly 3%) -> fine, the limit is 'over 3%'", 100, 3, False)
     b, lid_p, reason = bounce_case("30 sends, 1 bounced (3.3%) -> mailbox AND list paused", 30, 1, True)
@@ -574,6 +574,149 @@ def run():
     check("service_role can (edge functions)", code == 200 and body == "Changed-Secret-2", (code, body))
     q(f"update email_accounts set password='legacy-plain', password_secret_id=null where id='{pwb}'")
     check("rollout fallback: legacy plaintext is used if Vault has nothing", q(f"select get_mailbox_password('{pwb}') p")[0]["p"] == "legacy-plain")
+    round3()
+
+def round3():
+    """Round 3 (20261203_round3_review.sql): the three security majors, bounce guard for new mailboxes, reply-stop on thread / domain,
+    auto-replies, suppression list screen RPCs."""
+    print("-- 10. round 3: security")
+    JORDAN, CASEY, TAYLOR = "jordan.intern@example.com", "casey.intern@example.com", "taylor.lead@example.com"
+    co = f"TEST-HARD r3 {TAG}"
+    def post(who, path, body): return api(who, "POST", path, body)
+    # ---- call_status_changes: insert only as yourself; read own / team / admin
+    code, _ = post(JORDAN, "/call_status_changes", {"user_id": uid(CASEY), "company_name": co})
+    check("call_status_changes: an intern cannot write a row for someone else", code in (401, 403), code)
+    code, _ = post(JORDAN, "/call_status_changes", {"user_id": uid(JORDAN), "company_name": co})
+    check("call_status_changes: an intern can write their own row", code in (200, 201), code)
+    code, _ = post(ADMIN, "/call_status_changes", {"user_id": uid(CASEY), "company_name": co + " admin"})
+    check("call_status_changes: an admin may write for anyone", code in (200, 201), code)
+    q(f"insert into call_status_changes (user_id, company_name) values ('{uid(CASEY)}', '{co} casey')")
+    def see(who, tag): return len(api(who, "GET", f"/call_status_changes?company_name=eq.{urllib.parse.quote(co + tag)}&select=id")[1] or [])
+    check("call_status_changes: you read your own rows", see(JORDAN, "") == 1)
+    check("call_status_changes: another team's intern cannot read them", see(CASEY, "") == 0 and see(JORDAN, " casey") == 0)
+    check("call_status_changes: a team lead reads their own team's rows, not another team's", see(LEAD_A, "") == 1 and see(LEAD_A, " casey") == 0 and see(LEAD_B, " casey") == 1)
+    check("call_status_changes: an admin reads all", see(ADMIN, "") == 1 and see(ADMIN, " casey") == 1)
+    q(f"delete from call_status_changes where company_name like '{co}%'")
+    # ---- profiles: nothing for the anonymous key
+    code, body = http("GET", URL + "/rest/v1/profiles?select=email&limit=5", None, {"apikey": ANON, "Authorization": "Bearer " + ANON})
+    check("profiles: the public anon key reads nothing (no names, emails, phones)", code in (200, 401, 403) and (body == [] or code != 200), (code, str(body)[:100]))
+    code, body = api(JORDAN, "GET", "/profiles?select=full_name&limit=3")
+    check("profiles: a signed-in user still reads the directory", code == 200 and len(body) == 3, (code, body))
+    # ---- create_notification: self / team lead of the target / admin / service role
+    def notify(who, to, msg): return post(who, "/rpc/create_notification", {"p_user_id": uid(to), "p_message": msg, "p_type": "hard_r3"})
+    check("create_notification: an intern cannot push a message to someone else", notify(JORDAN, CASEY, f"r3 forged {TAG}")[0] in (401, 403, 400))
+    check("create_notification: an intern can notify themselves", notify(JORDAN, JORDAN, f"r3 self {TAG}")[0] in (200, 204))
+    check("create_notification: a team lead can notify their own intern", notify(LEAD_A, JORDAN, f"r3 lead {TAG}")[0] in (200, 204))
+    check("create_notification: a team lead cannot notify another team's intern", notify(LEAD_A, CASEY, f"r3 lead2 {TAG}")[0] in (401, 403, 400))
+    check("create_notification: an admin can notify anyone", notify(ADMIN, CASEY, f"r3 admin {TAG}")[0] in (200, 204))
+    code, _ = http("POST", URL + "/rest/v1/rpc/create_notification", {"p_user_id": uid(CASEY), "p_message": f"r3 service {TAG}", "p_type": "hard_r3"}, {"apikey": SRK, "Authorization": "Bearer " + SRK})
+    check("create_notification: the service role (edge functions) can", code in (200, 204), code)
+    got = {r["message"] for r in q(f"select message from notifications where type='hard_r3' and message like '%{TAG}'")}
+    check("create_notification: exactly the allowed ones were written", got == {f"r3 self {TAG}", f"r3 lead {TAG}", f"r3 admin {TAG}", f"r3 service {TAG}"}, got)
+    check("create_notification_internal and the heavy jobs are not callable by a signed-in user",
+          all(post(JORDAN, "/rpc/" + fn, a)[0] in (401, 403, 404) for fn, a in [("create_notification_internal", {"p_user_id": uid(JORDAN), "p_message": "x"}), ("compute_report_rollups", {}),
+              ("prune_report_data", {}), ("run_daily_event_notifications", {}), ("callback_tasks_escalate", {})]))
+    q(f"delete from notifications where type='hard_r3'")
+    # the server-side notice survives: cron/trigger callers still create notifications (a transfer notifies the recipient via a trigger)
+    lid_t = new_list(CALEB, [dict(email=f"hardtest-t1-{TAG}@example.com", **COPY)])
+    n0 = q(f"select count(*) n from notifications where user_id='{uid(GAVIN)}' and type='dial_transfer'")[0]["n"]
+    code, _ = rpc(ADMIN, "transfer_dial_list", p_list_id=lid_t, p_new_owner=uid(GAVIN))
+    n1 = q(f"select count(*) n from notifications where user_id='{uid(GAVIN)}' and type='dial_transfer'")[0]["n"]
+    check("transfer: the recipient is notified once, by the database", code in (200, 204) and n1 == n0 + 1, (code, n0, n1))
+    q(f"delete from notifications where user_id='{uid(GAVIN)}' and type='dial_transfer' and message like '%sent you a list%' and created_at > now() - interval '2 minutes'")
+
+    # ---- bounce guard: new mailbox pauses early; soft bounces count only when repeated
+    print("-- 11. round 3: bounce guard, reply stop, auto-replies")
+    def bounce_case2(label, sends, hard=0, soft=0, repeated_soft=0, expect=True):
+        b, _ = tmp_box(OWNER, f"bn3-{uuid.uuid4().hex[:5]}.example")
+        lid = make_list(OWNER, [dict(email=f"hardtest-b3-{TAG}-{uuid.uuid4().hex[:6]}@example.com", **COPY)], name=f"TEST-HARD {TAG} b3 {uuid.uuid4().hex[:6]}")
+        q(f"delete from dials where list_id='{lid}'")
+        q(f"""insert into dials (list_id, created_by, company_name, full_name, email, sequence, seq_state, sender_account_id, email_1_message_id)
+              select '{lid}', '{uid(OWNER)}', 'B3 ' || g, 'P', 'hardtest-b3-' || g || '-{TAG}{uuid.uuid4().hex[:5]}@example.com', 'email5', 'completed', '{b}', '<hard-x>' from generate_series(1,{sends}) g""")
+        q(f"""insert into sequence_tasks (dial_id, list_id, owner_id, step, seq_day, kind, due_on, status, completed_at)
+              select id, list_id, created_by, 1, 1, 'email', current_date, 'done', now() from dials where list_id='{lid}'""")
+        ids = [r["id"] for r in q(f"select id from dials where list_id='{lid}' order by company_name")]
+        for i in ids[:hard]: q(f"update dials set bounced_at=now(), bounce_kind='hard' where id='{i}'")
+        for i in ids[hard:hard + soft]: q(f"update dials set bounced_at=now(), bounce_kind='soft', soft_bounces=1 where id='{i}'")
+        for i in ids[hard + soft:hard + soft + repeated_soft]: q(f"update dials set bounced_at=now(), bounce_kind='soft', soft_bounces=2 where id='{i}'")
+        q("select check_bounce_rates()")
+        r = q(f"select send_paused_reason from email_accounts where id='{b}'")[0]["send_paused_reason"]
+        check(f"bounce guard (r3): {label}", (r is not None) == expect, r)
+        return r
+    r = bounce_case2("a new mailbox with 3 hard bounces in 12 sends pauses at once", 12, hard=3)
+    check("...and the reason says how many", r and "3 of 12" in r, r)
+    bounce_case2("2 hard bounces in 9 sends is under the early limit (needs 3, or 10 sends)", 9, hard=2, expect=False)
+    bounce_case2("12 sends, 2 hard bounces (16.7%) pauses at the 10% rule", 12, hard=2)
+    bounce_case2("12 sends, 1 hard bounce (8.3%) is fine", 12, hard=1, expect=False)
+    bounce_case2("5 soft bounces (mailbox full) in 12 sends do not pause", 12, soft=5, expect=False)
+    bounce_case2("soft bounces that repeated count: 3 repeated in 12 sends pauses", 12, repeated_soft=3)
+    bounce_case2("after 20 sends the old 3% rule still applies (1 of 25 = 4%)", 25, hard=1)
+    # soft bounce counters come from the real inbound path
+    sb_box = q(f"select id from email_accounts where owner_id='{uid(CALEB)}' order by email_address limit 1")[0]["id"]
+    em = f"hardtest-sb-{TAG}@example.com"
+    lid = new_list(CALEB, [dict(email=em, **COPY)]); activate(CALEB, lid, "2026-12-10")
+    q(f"update dials set sender_account_id='{sb_box}', email_1_message_id='<hard-sent>' where list_id='{lid}'")
+    def inbound3(frm, subject, body, thread=None, reply_to=None, auto=False):
+        cols = ["account_id", "message_id", "direction", "from_address", "subject", "body_text", "snippet", "sent_at", "to_addresses", "is_read", "is_auto_reply"]
+        vals = [f"'{sb_box}'", lit(mid()), "'inbound'", lit(frm), lit(subject), lit(body), lit(body[:150]), "now()", "'[]'", "false", str(auto).lower()]
+        if thread: cols.append("thread_id"); vals.append(lit(thread))
+        if reply_to: cols.append("in_reply_to"); vals.append(lit(reply_to))
+        q(f"insert into email_messages ({', '.join(cols)}) values ({', '.join(vals)})")
+    for _ in range(2): inbound3("mailer-daemon@hardtest-mail.example", "Delivery Status Notification (Delay)", f"Final-Recipient: rfc822; {em}\n452 4.2.2 mailbox full for {em}")
+    d = q(f"select bounce_kind, soft_bounces, seq_state from dials where email='{em}'")[0]
+    check("soft bounce is recorded as soft, and a second one counts as repeated", d == {"bounce_kind": "soft", "soft_bounces": 2, "seq_state": "bounced"}, d)
+    em2 = f"hardtest-hb-{TAG}@example.com"
+    lid = new_list(CALEB, [dict(email=em2, **COPY)]); activate(CALEB, lid, "2026-12-10")
+    q(f"update dials set sender_account_id='{sb_box}', email_1_message_id='<hard-sent>' where list_id='{lid}'")
+    inbound3("mailer-daemon@hardtest-mail.example", "Undelivered Mail Returned to Sender", f"Final-Recipient: rfc822; {em2}\n550 5.1.1 <{em2}>: user unknown")
+    check("hard bounce is recorded as hard", q(f"select bounce_kind from dials where email='{em2}'")[0]["bounce_kind"] == "hard")
+
+    # ---- reply stop: thread, in-reply-to, company domain; auto-replies do not stop it
+    dom = f"co-{TAG}.hardtest.org"
+    leads = [f"alpha@{dom}", f"beta-{TAG}@thread-{TAG}.hardtest.org", f"gamma{TAG}@gmail.com", f"delta-{TAG}@third-{TAG}.hardtest.org", f"eps-{TAG}@fourth-{TAG}.hardtest.org"]
+    for e in leads: seed_mv(e, "ok")
+    lid = new_list(CALEB, [dict(email=e, **COPY) for e in leads]); activate(CALEB, lid, "2026-12-10")
+    th = str(uuid.uuid4())
+    q(f"update dials set sender_account_id='{sb_box}', email_1_message_id='<hard-sent-'||left(id::text,8)||'>' where list_id='{lid}'")
+    q(f"update dials set email_1_thread_id='{th}' where list_id='{lid}' and email='{leads[1]}'")
+    def state(e): return q(f"select seq_state from dials where list_id='{lid}' and email='{e}'")[0]["seq_state"]
+    def reply_tasks(e): return q(f"select count(*) n from sequence_tasks t join dials d on d.id=t.dial_id where d.list_id='{lid}' and d.email='{e}' and t.kind='reply'")[0]["n"]
+    inbound3(f"assistant@{dom}", "Re: quick question", "Sure, he will call you.")
+    check("reply from someone else at the lead's company domain stops the sequence", state(leads[0]) == "replied" and reply_tasks(leads[0]) == 1, state(leads[0]))
+    inbound3(f"an-alias-{TAG}@elsewhere.hardtest.org", "Re: quick question", "Forwarded to the owner.", thread=th)
+    check("reply on the same thread from a different address stops the sequence", state(leads[1]) == "replied" and reply_tasks(leads[1]) == 1, q(f"select sequence, seq_state, seq_stop_reason, email_1_thread_id from dials where list_id='{lid}' and email='{leads[1]}'"))
+    inbound3(f"other-person{TAG}@gmail.com", "Re: hi", "who is this")
+    check("a stranger on a free-mail domain does not stop anyone", state(leads[2]) == "active")
+    h = q(f"select email_1_message_id m from dials where list_id='{lid}' and email='{leads[3]}'")[0]["m"]
+    inbound3(f"ghost-{TAG}@nowhere.hardtest.org", "Re: quick question", "Thanks, we will think about it.", reply_to=h)
+    check("reply whose In-Reply-To is our first email stops the sequence", state(leads[3]) == "replied", state(leads[3]))
+    inbound3(leads[4], "Automatic reply: quick question", "I am out of the office until Monday with limited access to email.")
+    check("an out-of-office reply from the lead does NOT stop the sequence or create a reply task", state(leads[4]) == "active" and reply_tasks(leads[4]) == 0, (state(leads[4]), reply_tasks(leads[4])))
+    check("...and the message is marked as an auto-reply (Inbox badge)", q(f"select is_auto_reply a from email_messages where from_address={lit(leads[4])} order by created_at desc limit 1")[0]["a"] is True)
+    inbound3(leads[4], "Re: quick question", "x", auto=True)
+    check("a message the mail sync flagged from Auto-Submitted headers is an auto-reply too", state(leads[4]) == "active")
+    inbound3(leads[4], "Re: quick question", "Yes, interested. Call me.")
+    check("a normal reply from the lead still stops it", state(leads[4]) == "replied")
+    check("email_is_auto_reply: real replies are not flagged", not q("select email_is_auto_reply('a@b.co', 'Re: your note', 'Thanks, sounds good. Call me Tuesday.') f")[0]["f"] and q("select email_is_auto_reply('a@b.co', 'Out of Office: hello', 'x') f")[0]["f"])
+    nn = q(f"select count(*) n from notifications where type='new_email' and message like 'New email from %Automatic reply%' and created_at > now() - interval '3 minutes'")[0]["n"]
+    check("an auto-reply does not push a 'New email' notification", nn == 0, nn)
+
+    # ---- suppression list screen RPCs
+    print("-- 12. round 3: suppression list screen")
+    code, res = rpc(ADMIN, "suppress_many", p_text=f"R3One-{TAG}@Example.com, r3two-{TAG}@example.org\nr3-{TAG}.hardtest.org  not-an-address", p_reason=f"r3reason{TAG}")
+    check("suppress_many: emails and a domain are added, junk is reported", code == 200 and res["emails"] == 2 and res["domains"] == 1 and res["skipped"] == ["not-an-address"], (code, res))
+    code, res = rpc(ADMIN, "suppress_many", p_text=f"r3one-{TAG}@example.com", p_reason="again")
+    check("suppress_many: repeats are counted as already on the list", code == 200 and res["emails"] == 0 and res["already"] == 1, (code, res))
+    code, res = rpc(ADMIN, "suppression_list", p_search=f"r3reason{TAG}", p_limit=10, p_offset=0)
+    check("suppression_list: search returns kind, value, reason, date, who added it", code == 200 and res["total"] == 3 and {x["kind"] for x in res["items"]} == {"email", "domain"}
+          and all(x["reason"] and x["created_at"] for x in res["items"]), (code, res))
+    code, res = rpc(ADMIN, "suppression_list", p_search=f"r3reason{TAG}", p_limit=2, p_offset=2)
+    check("suppression_list: paging", code == 200 and len(res["items"]) == 1 and res["total"] == 3, (code, res))
+    check("suppression list: an intern can neither read nor edit it", rpc(JORDAN, "suppression_list")[0] != 200 and rpc(JORDAN, "suppress_many", p_text="x@y.co")[0] != 200 and rpc(JORDAN, "unsuppress_domain", p_domain="y.co")[0] != 200)
+    rpc(ADMIN, "unsuppress_domain", p_domain=f"r3-{TAG}.hardtest.org"); rpc(ADMIN, "unsuppress_email", p_email=f"r3one-{TAG}@example.com")
+    check("unsuppress removes a domain and an address", rpc(ADMIN, "suppression_list", p_search=f"r3reason{TAG}")[1]["total"] == 1)
+    q(f"delete from suppressed_emails where email like '%{TAG}%'"); q(f"delete from suppressed_domains where domain like '%{TAG}%'")
+    q(f"delete from email_messages where from_address like '%{TAG}%' or from_address like 'assistant@co-{TAG}%'")
 
 if __name__ == "__main__":
     ok = True

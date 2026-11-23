@@ -1,6 +1,6 @@
 // Run: node tools/testenv/import_unit.test.mjs   (pure engine: parser, auto-mapping, validation, duplicates)
 import assert from "node:assert/strict";
-import { parseCSV, analyzeFile, autoMapColumns, buildDials, rowsToDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates, mappingProblems, cleanEmailCell, normEmail, stripInternal } from "../../dealflow-app/js/csvImport.js";
+import { parseCSV, analyzeFile, autoMapColumns, buildDials, rowsToDials, validateDials, findFileDuplicates, dupCheckKeys, matchServerDuplicates, mappingProblems, mappingNotes, cleanEmailCell, normEmail, stripInternal } from "../../dealflow-app/js/csvImport.js";
 let pass = 0, fail = 0;
 const t = (n, f) => { try { f(); pass++; } catch (e) { fail++; console.log("FAIL", n, "\n  ", e.message); } };
 
@@ -121,5 +121,16 @@ t("2,500-row parse + build is fast", () => {
   for (let i = 0; i < 2500; i++) s += `"Co ${i}, LLC",o${i}@co${i}.com,(801) 555-${String(i).padStart(4, "0")},Provo,UT\r\n`;
   const t0 = performance.now(); const rows = parseCSV(s); const ds = buildDials(rows, autoMapColumns(rows[0], rows.slice(1)).map, "x"); validateDials(ds); findFileDuplicates(ds);
   const ms = performance.now() - t0; assert.equal(ds.length, 2500); assert.ok(ms < 800, "took " + ms);
+});
+t("round 3: 'Biz Name' maps to the company; a mapped file without a company says so", () => {
+  const rows = parseCSV("Biz Name,Owner,Email\nAcme,Pat,pat@acme.com\n");
+  const a = autoMapColumns(rows[0], rows.slice(1)); assert.equal(a.map[0], "company_name");
+  assert.deepEqual(mappingNotes({ 0: "full_name", 1: "email" }).length, 1); assert.equal(mappingNotes(a.map).length, 0);
+});
+t("round 3: emails are lower-cased; a second address in one cell is kept out and counted", () => {
+  const rows = parseCSV('Company,Email\nA,"INFO@Acme.COM"\nB,"eve@a.com; eve2@a.com"\n');
+  const ds = buildDials(rows, { 0: "company_name", 1: "email" }, "x");
+  assert.equal(ds[0].email, "info@acme.com"); assert.equal(ds[1].email, "eve@a.com"); assert.ok(ds[1].__extra_email);
+  const s = validateDials(ds); assert.equal(s.multi_email, 1); assert.equal(s.role_email, 1);
 });
 console.log(`${pass}/${pass + fail} passed`); process.exit(fail ? 1 : 0);

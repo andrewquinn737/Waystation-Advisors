@@ -187,6 +187,145 @@ def round2(b):
         sb.test_sql("delete from dial_lists where name like 'TEST-R2 %'")
     print()
 
+def round3(b):
+    """Round-3 review fixes: Calls (Retry survives follow-ups, missed callbacks, failed note save, intro prompts, in-call outcome set), Reports default,
+    suppression screen, review paging (120-row fixture), client Timeline calls, launch preview. Test data is TEST-R3 and removed at the end."""
+    print("-- round 3 review fixes")
+    adm = sb.test_sql("select id from profiles where full_name='Test Admin'")[0]["id"]
+    ids, made_lists = {}, []
+    try:
+        for k in ("A", "B"):
+            ids[k] = sb.test_sql(f"insert into dial_lists(name,dial_type,status,created_by,mandate,sort_order) values ('TEST-R3 list {k}','seller','current','{adm}','ma',901) returning id")[0]["id"]
+        d = {}
+        for n, (k, extra) in enumerate([("A", ""), ("A", ""), ("A", ""), ("B", "")]):
+            key = k + str(n)
+            d[key] = sb.test_sql(f"insert into dials(list_id,created_by,company_name,full_name,email,mobile_phone,city,state,industry,contact_status) values ('{ids[k]}','{adm}','TEST-R3 Co {key}','Rae {key}','r3{key.lower()}@testr3.example','(801) 555-02{n}0','Provo','UT','Plumbing','uncontacted') returning id")[0]["id"]
+        # a callback missed 45 minutes ago, one due in 30 minutes, an overdue call task for the Retry test, and one dial with no industry
+        sb.test_sql(f"update dials set contact_status='busy_callback', callback_user_id='{adm}' where id='{d['A1']}'")   # the status change sets a default callback time...
+        sb.test_sql(f"update dials set contact_status='callback_interested', callback_user_id='{adm}' where id='{d['A2']}'")
+        sb.test_sql(f"update dials set callback_at=now() - interval '45 minutes' where id='{d['A1']}'")   # ...which is then moved to the time we want
+        sb.test_sql(f"update dials set callback_at=now() + interval '30 minutes' where id='{d['A2']}'")
+        sb.test_sql(f"insert into sequence_tasks(dial_id,list_id,owner_id,step,seq_day,kind,due_on,status) values ('{d['B3']}','{ids['B']}','{adm}',1,1,'call',current_date-2,'pending')")
+        sb.test_sql(f"update dials set industry=null where id='{d['A0']}'")
+        ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        def open_list(k):
+            p.goto(BASE + "dials.html"); p.wait_for_selector(".dial-tab", timeout=15000)
+            if not p.query_selector(f'.dial-tab[data-id="{ids[k]}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
+            if p.query_selector(f'.dial-tab[data-id="{ids[k]}"]:not(.active)'): p.click(f'.dial-tab[data-id="{ids[k]}"]:not(.active)')
+            p.wait_for_timeout(2500)
+        # -- Retry survives the follow-ups finishing (the real sheet view)
+        open_list("A")
+        p.route("**/rest/v1/dials?*list_id=eq.*", lambda r: r.fulfill(status=500, body='{"message":"boom"}', headers={"content-type": "application/json"}))
+        p.click(f'.dial-tab[data-id="{ids["B"]}"]') if p.query_selector(f'.dial-tab[data-id="{ids["B"]}"]') else (p.click("#dialTabMoreBtn"), p.click(f'.dial-tab[data-id="{ids["B"]}"]'))
+        p.wait_for_timeout(9000)   # long enough for loadFollowups (and the 6s fallback timer) to finish and re-render
+        t = p.inner_text("#dialsTableWrap")
+        check("Calls: the load-failure Retry is still there after the follow-ups finish (10s later)", p.locator(".dials-load-failed").count() == 1 and "caught up" not in t and "No internet" not in t, t[:200])
+        p.unroute("**/rest/v1/dials?*list_id=eq.*"); p.click("[data-reload-dials]"); p.wait_for_timeout(2500)
+        check("Calls: Retry reloads the list", p.locator(".dials-load-failed").count() == 0 and "TEST-R3 Co B" in p.inner_text("#dialsTableWrap"))
+        # -- missed callbacks are in Past due, later today in Due today, and the banner lists the missed one
+        open_list("A")
+        grp = lambda n: p.inner_text(f'[data-g="{n}"]') if p.query_selector(f'[data-g="{n}"]') else ""
+        check("Calls: a callback missed earlier today is in Past due, marked 'Missed callback'", "TEST-R3 Co A1" in grp(1) and "Missed callback" in grp(1), grp(1)[:200])
+        check("Calls: a callback due later today is in Due today", "TEST-R3 Co A2" in grp(2), grp(2)[:200])
+        c2 = b.new_context(viewport={"width": 1280, "height": 900}); p2 = new_page(c2, []); login(p2, "admin")   # the banner lists once per day per browser: a fresh browser sees it
+        p2.goto(BASE + "dials.html"); p2.wait_for_timeout(3500)
+        check("Calls: the callback banner lists the missed one as overdue", "overdue callback" in p2.inner_text("#callbackBanners"), p2.inner_text("#callbackBanners")[:100])
+        c2.close()
+        # -- failed note save: plain words, never 'Saved', no raw error at the top of the card
+        p.locator(".dh-row", has_text="TEST-R3 Co A0").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+        p.click(".dial-more summary")
+        p.route("**/rest/v1/dials?id=eq.*", lambda r: r.abort() if r.request.method == "PATCH" else r.continue_())
+        p.fill("#d_call_notes_live", "owner wants a call next week"); p.click("#dialModalTitle") if p.query_selector("#dialModalTitle") else p.keyboard.press("Tab"); p.wait_for_timeout(1500)
+        msg = p.inner_text("#callNotesSavedMsg") if p.is_visible("#callNotesSavedMsg") else ""
+        check("Calls: a failed note save says so in plain words (not 'Saved', no raw TypeError)", msg.startswith("Note not saved") and "TypeError" not in msg and "Failed to fetch" not in msg and not p.is_visible("#dialModalError"), msg)
+        p.unroute("**/rest/v1/dials?id=eq.*")
+        # -- intro: the missing-information prompt comes BEFORE the status flips
+        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_timeout(1200)
+        row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A0']}') c from dials where id='{d['A0']}'")[0]
+        check("Calls: 'Intro call booked' on a dial with no industry asks first (Fill in now) and changes nothing", p.is_visible("#requiredPopup") and p.is_visible("#requiredPopupFill") and row["contact_status"] != "intro_call_scheduled" and row["c"] == 0, row)
+        p.click("#requiredPopupFill"); p.wait_for_timeout(600)
+        check("Calls: 'Fill in now' opens the edit form", p.is_visible("#dialSaveBtn"))
+        p.click("#dialCancelBtn"); p.wait_for_timeout(500)
+        # -- intro: closing the first chooser puts the dial back and removes the placeholder client
+        sb.test_sql(f"update dials set industry='Plumbing' where id='{d['A0']}'")
+        open_list("A"); p.locator(".dh-row", has_text="TEST-R3 Co A0").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
+        p.click("#introCallPopupClose"); p.wait_for_timeout(1800)
+        row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A0']}') c from dials where id='{d['A0']}'")[0]
+        check("Calls: closing the Schedule Intro Call chooser reverts the dial and leaves no client", row["contact_status"] != "intro_call_scheduled" and row["c"] == 0, row)
+        # -- in-call bar: the same outcome set as the card, no keypad after hangup
+        out = p.evaluate("""async () => { const m = await import('/js/callPanel.js'); const pnl = m.openCallPanel({ name: 'X', onHangup() {}, onOutcome: async () => true, onNext() {}, outcomes: [["a", "A"], ["b", "B"]] });
+            pnl.ended('Call ended'); const r = { chips: [...document.querySelectorAll('.call-outcome-chip')].map((x) => x.textContent), keypad: !!document.querySelector('[data-act="keypad"]'), close: document.querySelector('[data-act="hangup"]').className }; pnl.close(); return r; }""")
+        check("Calls: the in-call outcome chips are the list handed in (one outcome set), the Keypad is gone, Close is neutral", out["chips"] == ["A", "B"] and not out["keypad"] and "secondary" in out["close"], out)
+        hr = p.evaluate("""async () => { const m = await import('/js/copyReview.js'); const gate = { summary: { passed: 0, held: 2 }, results: [
+            { ok: false, errors: [{ message: 'Same sentence is in 5 other lead email(s)' }, { message: 'Subject contains an em/en dash' }] }, { ok: false, errors: [{ message: 'Same sentence is in 3 other lead email(s)' }] }] };
+            return { why: m.heldReasons(gate), line: m.describePrepare({ email_sequence: 2, call_sequence: 1, generic_email: 1, gate }) }; }""")
+        check("Import result: reasons are real sentences (no '#'), every kind of problem is counted once per lead", hr["why"][0].startswith("Same sentence is in") and "#" not in hr["line"] and hr["why"][0].endswith("(2)") and "(1)" in hr["why"][1] and "generic address like info@" in hr["line"], hr)
+        src = open(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..", "dealflow-app", "js", "dials.js")).read()
+        i = src.index("function nextCompanyTarget()")
+        check("Calls: 'Next company' looks at due callbacks first", "callback_at" in src[i:i + 900] and "busy_callback" in src[i:i + 900])
+        ctx.close()
+        # -- Reports default: a team lead sees the team, an admin sees everyone (not an empty table)
+        for role in ("lead", "admin"):
+            ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, role)
+            p.goto(BASE + "profile.html"); p.wait_for_timeout(2500)
+            p.evaluate("document.getElementById('reportsBtn').click()"); p.wait_for_selector("#reportsTableWrap table", timeout=20000); p.wait_for_timeout(1500)
+            rows = p.locator("#reportsTableWrap tbody tr").count(); t = p.inner_text("#reportsTableWrap")
+            check(f"Reports ({role}): opens on the team / everyone (more than the totals row), not an empty table", rows >= 3 and "No accounts selected" not in t, (rows, t[:120]))
+            check(f"Reports ({role}): the week is labelled, there is an Accounts button and a CSV download", "Week of" in t and p.is_visible("#reportsAccountsInlineBtn") and p.is_visible("#reportsCsvBtn"), t[:120])
+            ctx.close()
+        # -- admin: Do not email screen + review paging + launch preview
+        ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        p.goto(BASE + "admin.html#suppression"); p.wait_for_selector("#supAdd", timeout=15000); p.wait_for_timeout(1500)
+        addr = f"r3-ui-{__import__('uuid').uuid4().hex[:6]}@testr3.example"
+        p.fill("#supText", addr + "\nr3-ui.testr3.example"); p.fill("#supReason", "asked by phone (test)"); p.click("#supAdd"); p.wait_for_timeout(1500)
+        check("Admin > Do not email: adding an address and a domain works and shows reason + date", addr in p.inner_text("#supList") and "asked by phone" in p.inner_text("#supList") and re.search(r"[A-Z][a-z]{2} \d+, 20\d\d", p.inner_text("#supList")), p.inner_text("#supMsg"))
+        p.fill("#supSearch", addr); p.wait_for_timeout(900)
+        check("Admin > Do not email: search narrows the list", p.locator(".sup-row").count() == 1)
+        p.click(".sup-row .btn"); p.wait_for_selector("[data-y]", timeout=5000); p.click("[data-y]"); p.wait_for_timeout(1200)
+        check("Admin > Do not email: remove (with a confirm) takes it off", sb.test_sql(f"select count(*) n from suppressed_emails where email='{addr}'")[0]["n"] == 0)
+        sb.test_sql("delete from suppressed_domains where domain='r3-ui.testr3.example'")
+        # review paging: 120 drafts, 50 at a time
+        rl = sb.test_sql(f"insert into dial_lists(name,dial_type,status,created_by,mandate,sort_order) values ('TEST-R3 review','seller','current','{adm}','ma',902) returning id")[0]["id"]
+        sb.test_sql(f"""insert into dials(list_id,created_by,company_name,full_name,email,sequence,seq_state,email_subject,email_1,email_2)
+            select '{rl}','{adm}','R3 Review ' || lpad(g::text,3,'0'),'Pat','r3rev' || g || '@testr3.example','email5','awaiting_copy','Subject ' || g,'Hi Pat, note ' || g,'Follow up ' || g from generate_series(1,120) g""")
+        p.evaluate(f"import('/js/copyReviewScreen.js').then((m) => m.openCopyReview({{ id: '{rl}', name: 'TEST-R3 review' }}, {{ all: true }}))")
+        p.wait_for_selector(".cr-card", timeout=20000)
+        n1 = p.locator(".cr-card").count(); cnt = p.inner_text("#crCount")
+        check("Review: 120 drafts render 50 cards, with 'Showing 50 of 120' and a Show more button", n1 == 50 and "Showing 50 of 120" in cnt and p.is_visible("#crMore"), (n1, cnt))
+        p.click("#crMore"); p.wait_for_timeout(400)
+        check("Review: Show more adds the next 50", p.locator(".cr-card").count() == 100 and "Showing 100 of 120" in p.inner_text("#crCount"))
+        p.click("#crMore"); p.wait_for_timeout(400)
+        check("Review: the last page has no more button", p.locator(".cr-card").count() == 120 and not p.query_selector("#crMore"))
+        p.click(".cr-close"); p.wait_for_timeout(300)
+        # launch sheet preview before the click
+        import test_sequences as T
+        ll = T.make_list("test.caleb.hong@example.com", [dict(email=f"r3prev{i}@testr3.example", subj="Quick note", e1=f"Hi Pat,\n\nShort note {i}.\n\nBest,\nCaleb", e2=f"Hi Pat, circling back on note {i} ref r3.\n\nCaleb") for i in range(3)], name="TEST-R3 launch " + __import__("uuid").uuid4().hex[:5])
+        made_lists.append(ll)
+        T.rpc("test.caleb.hong@example.com", "seq_prepare_list", p_list_id=ll); T.gate("test.caleb.hong@example.com", ll)
+        p.goto(BASE + "admin.html#campaigns"); p.wait_for_function("document.querySelector('#cpList') && document.querySelector('#cpList').innerText.length > 20", timeout=20000)
+        row = p.locator(".cp-row", has_text="TEST-R3 launch").first
+        row.locator('[data-a="launch"]').click(); p.wait_for_function("document.querySelector('#adPrev') && !document.querySelector('#adPrev').innerText.includes('Working out')", timeout=15000)
+        t = p.inner_text("#adPrev")
+        check("Launch sheet: before the click it shows how many are ready, who sends, how many a day, and when the first emails finish", "3 emails are ready" in t and " a day" in t and re.search(r"(finish|are all out|start)", t) is not None and "First email:" in t, t[:300])
+        p.click("#adCancel")
+        ctx.close()
+        # -- client Timeline shows the call that led to the client
+        cl = sb.test_sql(f"insert into clients(client_type, full_name, company_name, assigned_to, source_dial_id) values ('seller','R3 Client','TEST-R3 Co','{adm}','{d['B3']}') returning id")[0]["id"]
+        sb.test_sql(f"insert into calls(user_id, dial_id, list_id, direction, mode, answered, transcribed, summary, duration_sec) values ('{adm}','{d['B3']}','{ids['A']}','outbound','in_app',true,false,'Owner said the shop is not for sale yet but would talk in spring.',95)")
+        ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        p.goto(BASE + f"clients.html?client={cl}&tab=timeline"); p.wait_for_selector(".client-calls", timeout=20000); p.wait_for_timeout(1000)
+        check("Client Timeline: the call that led to the client shows with its summary and length", "not for sale yet" in p.inner_text(".client-calls") and "1:35" in p.inner_text(".client-calls"), p.inner_text(".client-calls")[:200])
+        ctx.close()
+    finally:
+        sb.test_sql("delete from sequence_tasks where list_id in (select id from dial_lists where name like 'TEST-R3 %')")
+        sb.test_sql("delete from calls where list_id in (select id from dial_lists where name like 'TEST-R3 %')")
+        sb.test_sql("delete from clients where company_name = 'TEST-R3 Co' or source_dial_id in (select d.id from dials d join dial_lists l on l.id=d.list_id where l.name like 'TEST-R3 %')")
+        sb.test_sql("delete from dial_lists where name like 'TEST-R3 %'")
+        sb.test_sql("delete from suppressed_emails where email like '%testr3.example'")
+        sb.test_sql("delete from call_status_changes where company_name like 'TEST-R3 %'")
+    print()
+
 def run():
     with sync_playwright() as pw:
         b = pw.chromium.launch(channel="chrome", headless=True)
@@ -219,6 +358,7 @@ def run():
             ctx.close()
         round1(b)
         round2(b)
+        round3(b)
         b.close()
     print(f"\n{sum(results)}/{len(results)} passed")
 run()

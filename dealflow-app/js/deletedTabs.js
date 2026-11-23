@@ -339,6 +339,12 @@ export function wireDeletedTabsPopup({ menuBtn, closePageHeaderMenu, escapeHtml 
     await loadTabs();
   });
 
+  // Esc closes the topmost popup: the reassign / purge question first, then the list (Cancel did already).
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || el.modal.classList.contains("hidden")) return;
+    if (!el.purgeModal.classList.contains("hidden")) el.purgeModal.classList.add("hidden");
+    else if (!el.reassignModal.classList.contains("hidden")) el.reassignModal.classList.add("hidden");
+  });
   el.closeBtn.addEventListener("click", () => {
     loadToken++;
     el.modal.classList.add("hidden");

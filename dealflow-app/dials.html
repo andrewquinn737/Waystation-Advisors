@@ -264,7 +264,8 @@
       <h2>Missing information</h2>
       <p id="requiredPopupText"></p>
       <div class="form-actions">
-        <button type="button" class="btn" id="requiredPopupOk">OK</button>
+        <button type="button" class="btn hidden" id="requiredPopupFill">Fill in now</button>
+        <button type="button" class="btn secondary" id="requiredPopupOk">OK</button>
       </div>
     </div>
   </div>
@@ -610,6 +611,7 @@
     <div class="modal">
       <h2>Confirm the scheduled time</h2>
       <p class="help-text">Enter the date and time you and the client agreed on (from Calendly, or by phone). It goes on the client's Timeline and in Upcoming events.</p>
+      <p class="help-text hidden" id="introCallPrefillNote">Filled in from the callback time you set. Change it if the owner said something different.</p>
       <label for="introCallTimeDateInput">Date</label>
       <input type="date" id="introCallTimeDateInput" />
       <label for="introCallTimeSelect">Time</label>

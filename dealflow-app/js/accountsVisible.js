@@ -98,6 +98,16 @@ export function initDefaultToSelf(myProfileId, storageKey = KEY) {
   persist(storageKey, initKey);
 }
 
+// First time only: everyone the page's own account pool allows (no filter), instead of just the viewer. Used by Reports, where
+// "only me" opens as an empty table for a team lead and "No accounts selected" for an admin.
+export function initDefaultToAll(storageKey) {
+  const initKey = `${storageKey}_initialized`;
+  load(storageKey);
+  try { if (localStorage.getItem(initKey)) return; } catch { return; }
+  stateFor(storageKey).visibleAccountIds = null;
+  persist(storageKey, initKey);
+}
+
 // null = no filter (every account passes).
 export function getVisibleAccountIds(storageKey = KEY) {
   load(storageKey);

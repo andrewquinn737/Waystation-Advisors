@@ -27,3 +27,12 @@
 .mailbox-row input[type=checkbox], .mailbox-group-row input[type=checkbox], .select-all input[type=checkbox] { width: 20px; height: 20px; flex-shrink: 0; }
 #mailboxesPopupClose, #viewingPopupClose { min-height: 44px; min-width: 88px; }
 #threadBackBtn, #threadReplyBtn, #liveBackBtn { min-height: 44px; min-width: 64px; }
+.message-seq-badge.auto { background: transparent; border: 1px solid var(--border); color: var(--text-muted); font-weight: 600; }
+body:has(.thread-detail) .compose-fab { display: none; }
+@media (max-width: 480px) {
+  .thread-message-header { flex-wrap: wrap; gap: 2px 12px; }
+  .thread-message-date { flex-basis: 100%; }
+  .thread-detail-subject { font-size: 17px; margin-bottom: 10px; }
+  .thread-detail-actions { position: sticky; bottom: 0; z-index: 5; background: var(--bg); padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); margin-top: 8px; border-top: 1px solid var(--border); }
+  .thread-detail-actions .btn { flex: 1; min-height: 44px; }
+}

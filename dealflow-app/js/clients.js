@@ -1,3 +1,4 @@
+import { mountClientCalls } from "./clientCalls.js";
 import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
@@ -21,7 +22,7 @@ import { cacheGet, cacheSet, isNetworkError, showOfflineNotice, hideOfflineNotic
 import { timeOptionsHTML, timezoneOptionsHTML, defaultTimezone, zonedTimeToUtcIso, dateStrInZone, nearestCuratedZone } from "./eventTime.js";
 import { skeletonListHtml } from "./placeholders.js";
 import { wireAdvancedSettingsPopup } from "./advancedSettings.js";
-import { showNotice } from "./notice.js";
+import { showNotice, showToast } from "./notice.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -1318,7 +1319,7 @@ function timelineEventDateStr(e) {
   // The auto-inserted "Client created" row is the exception: its event_date is
   // the exact moment the client was created (see create_client_created_event),
   // so it always shows that real time instead of "No set time".
-  if (!e.details?.time && e.event_type !== "created") return `${dateStr}, No set time`;
+  if (!e.details?.time && e.event_type !== "created") return e.details?.time_pending ? `${dateStr}, time to be set` : `${dateStr}, No set time`;
   const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${dateStr}, ${timeStr}`;
 }
@@ -1439,7 +1440,7 @@ function buildTimelineHTML(events) {
         const editBtn = `<button type="button" class="timeline-edit-btn" data-event-id="${e.id}" title="Edit event">&#9998;</button>`;
         const confirmBtn = future
           ? ""
-          : `<button type="button" class="timeline-confirm-btn ${e.confirmed ? "confirmed" : ""}" data-event-id="${e.id}" data-confirmed="${e.confirmed ? "1" : "0"}" title="${e.confirmed ? "Mark as not happened" : "Mark as happened"}">${e.confirmed ? CHECK_SVG : ""}</button>`;
+          : `${!e.confirmed ? `<span class="tl-confirm-label">Did it happen?</span>` : ""}<button type="button" class="timeline-confirm-btn ${e.confirmed ? "confirmed" : ""}" data-event-id="${e.id}" data-confirmed="${e.confirmed ? "1" : "0"}" title="${e.confirmed ? "Mark as not happened" : "Mark as happened"}">${e.confirmed ? CHECK_SVG : ""}</button>`;
         actionsHTML = `<div class="timeline-box-actions">${editBtn}${confirmBtn}</div>`;
 
         // Triangle toggle + connected report box — only exist at all once the
@@ -2389,53 +2390,73 @@ function askMoveOrAddIntro(pending, newWhen) {
     box.className = "intro-choice";
     box.innerHTML = `<p class="help-text" style="font-size:14px;color:var(--text)">This client already has an intro call on <b>${escapeHtml(fmt(pending.event_date))}</b>. What should happen with ${escapeHtml(fmt(newWhen))}?</p>
       <div class="form-actions"><button type="button" class="btn secondary" data-c="move">Move the ${escapeHtml(fmt(pending.event_date))} call to ${escapeHtml(fmt(newWhen))}</button><button type="button" class="btn secondary" data-c="add">Add a second intro call</button><button type="button" class="btn secondary" data-c="cancel">Cancel</button></div>`;
+    // Only the question is on screen while it is asked: the Calendly buttons and the footer Close are hidden, so there is one Cancel.
+    const others = [...els.introCallPopupBody.children].filter((x) => !x.classList.contains("hidden"));
+    others.forEach((x) => x.classList.add("hidden"));
+    els.introCallPopupClose?.classList.add("hidden");
     els.introCallPopupBody.appendChild(box);
     box.addEventListener("click", (e) => {
       const c = e.target.closest("[data-c]")?.dataset.c;
       if (!c) return;
       box.remove();
+      others.forEach((x) => x.classList.remove("hidden"));
+      els.introCallPopupClose?.classList.remove("hidden");
       resolve(c === "cancel" ? null : c);
     });
   });
 }
 
+// Books the intro call for an existing client at the chosen time (shared by the Calendly chooser and the direct path below).
+async function scheduleTimelineIntro(client, eventDate, time, timezone, info) {
+  // A pending intro call already exists: never overwrite it silently. Ask: move it to this time, or add a second one.
+  const { data: pend } = await supabase.from("client_events").select("id, event_date, created_at").eq("client_id", client.id)
+    .eq("event_type", "intro_call").eq("confirmed", false).limit(50);
+  // The one a "move" changes: the nearest upcoming pending call, else the latest created (same rule as set_intro_call_time).
+  const now = Date.now(), up = (pend || []).filter((x) => Date.parse(x.event_date) >= now).sort((x, y) => Date.parse(x.event_date) - Date.parse(y.event_date));
+  const target = up[0] || (pend || []).slice().sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
+  const when = eventDate || new Date().toISOString(), via = info?.skipped ? "manual" : "calendly_link";
+  const errEl = els.introCallPopupBody.querySelector("#introCallError");
+  // "move" = the same single entry point as Dials (updates the pending event); "add" = a second, separate intro call.
+  // The database writes the one-per-client "Intro calls" credit and notifies the team. The popup shows success only if this worked;
+  // after a failure the Move / Add choice comes back so nothing has to be reopened.
+  for (;;) {
+    let mode = "move";
+    if (target) {
+      els.introCallPopup.classList.remove("hidden"); // the question needs the popup even when the Calendly step was skipped
+      mode = await askMoveOrAddIntro(target, when);
+      if (!mode) { els.introCallPopup.classList.add("hidden"); return { cancelled: true }; }
+    }
+    const common = { p_client_id: client.id, p_event_date: when, p_time: time || null, p_timezone: time ? timezone : null, p_via: via, p_past_ok: true };
+    const { error: introErr } = await supabase.rpc(mode === "add" ? "add_intro_call" : "set_intro_call_time", mode === "add" ? common : { ...common, p_dial_id: null });
+    if (!introErr) break;
+    if (!target) return { error: introErr };
+    if (errEl) { errEl.textContent = introErr.message || String(introErr); errEl.classList.remove("hidden"); }
+  }
+  errEl?.classList.add("hidden");
+  await loadClientEvents();
+  renderModalBody();
+  setTimeout(() => els.introCallPopup.classList.add("hidden"), 1500); // success text shows first (see wireIntroCallForm)
+}
+
 function openTimelineIntroCall(eventDate, time, timezone) {
+  // The date and time were just entered: do not ask for them again in a Calendly step. Without a time, the chooser still opens.
+  if (time) {
+    els.introCallPopupBody.innerHTML = "";
+    scheduleTimelineIntro(currentClient, eventDate, time, timezone, { skipped: true }).then((r) => {
+      if (r?.error) showError(document.getElementById("clientModalError"), r.error);
+      showToast(r?.cancelled ? "No intro call was added." : r?.error ? "The intro call was not saved." : "Intro call added.");
+    });
+    return;
+  }
   els.introCallPopupBody.innerHTML = buildIntroCallFormHTML({ allowSkip: true });
   els.introCallPopup.classList.remove("hidden");
   wireIntroCallForm(els.introCallPopupBody, {
     client: currentClient,
     profile,
-    onScheduled: async (client, info) => {
-      // A pending intro call already exists: never overwrite it silently. Ask: move it to this time, or add a second one.
-      const { data: pend } = await supabase.from("client_events").select("id, event_date, created_at").eq("client_id", client.id)
-        .eq("event_type", "intro_call").eq("confirmed", false).limit(50);
-      // The one a "move" changes: the nearest upcoming pending call, else the latest created (same rule as set_intro_call_time).
-      const now = Date.now(), up = (pend || []).filter((x) => Date.parse(x.event_date) >= now).sort((x, y) => Date.parse(x.event_date) - Date.parse(y.event_date));
-      const target = up[0] || (pend || []).slice().sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
-      const when = eventDate || new Date().toISOString(), via = info?.skipped ? "manual" : "calendly_link";
-      const errEl = els.introCallPopupBody.querySelector("#introCallError");
-      // "move" = the same single entry point as Dials (updates the pending event); "add" = a second, separate intro call.
-      // The database writes the one-per-client "Intro calls" credit and notifies the team. The popup shows success only if this worked;
-      // after a failure the Move / Add choice comes back so nothing has to be reopened.
-      for (;;) {
-        let mode = "move";
-        if (target) {
-          mode = await askMoveOrAddIntro(target, when);
-          if (!mode) return { cancelled: true };
-        }
-        const common = { p_client_id: client.id, p_event_date: when, p_time: time || null, p_timezone: time ? timezone : null, p_via: via, p_past_ok: true };
-        const { error: introErr } = await supabase.rpc(mode === "add" ? "add_intro_call" : "set_intro_call_time", mode === "add" ? common : { ...common, p_dial_id: null });
-        if (!introErr) break;
-        if (!target) return { error: introErr };
-        errEl.textContent = introErr.message || String(introErr); errEl.classList.remove("hidden");
-      }
-      errEl?.classList.add("hidden");
-      await loadClientEvents();
-      renderModalBody();
-      setTimeout(() => els.introCallPopup.classList.add("hidden"), 1500); // success text shows first (see wireIntroCallForm)
-    },
+    onScheduled: (client, info) => scheduleTimelineIntro(client, eventDate, time, timezone, info),
   });
 }
+
 
 // ---------------------------------------------------------------------------
 // Profile / Progress / Timeline sub-tabs — only shown in view mode (creating
@@ -2597,6 +2618,7 @@ function renderModalBody() {
     wireReferralsTab();
   } else if (currentSubTab === "timeline") {
     wireTimelineTab();
+    mountClientCalls(currentClient, els.clientModalBody);
   } else if (currentSubTab === "progress") {
     positionProgressConnectors();
     wireProgressMetWith();
