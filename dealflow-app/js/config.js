@@ -4,11 +4,12 @@
 // this key.
 // Environment switch. Default is LIVE. Only Vercel preview/branch URLs for this
 // project (waystation-advisors-<hash|git-branch>-waystation-advisors.vercel.app)
-// and localhost use the TEST project. So test-branch previews never touch live
+// localhost and the GitHub Pages test copy use the TEST project. So test-branch previews never touch live
 // data, and merging this file into main cannot point production at test.
 const HOST = typeof location !== "undefined" ? location.hostname : "";
 const IS_TEST = /^waystation-advisors-[a-z0-9-]+-waystation-advisors\.vercel\.app$/.test(HOST)
-  || HOST === "localhost" || HOST === "127.0.0.1";
+  || HOST === "localhost" || HOST === "127.0.0.1"
+  || HOST === "andrewquinn737.github.io"; // the GitHub Pages test copy (test branch) for reps trying the new CRM
 const IS_PROD = !IS_TEST;
 export const APP_ENV = IS_PROD ? "live" : "test";
 export const SUPABASE_URL = IS_PROD ? "https://jabjrhkhnbabfihodqie.supabase.co" : "https://aglqusdpkwdidoiaavub.supabase.co";

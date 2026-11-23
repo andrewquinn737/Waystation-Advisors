@@ -2,8 +2,10 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v129";
+const CACHE = "waystation-shell-v130";
 // Every page, script and stylesheet is precached (a page whose module is missing offline used to hang on its skeleton for good).
+// Paths are relative to wherever the app is served (the site root on Vercel, a sub-folder on the GitHub Pages test copy).
+const APP = (u) => new URL(String(u).replace(/^\//, ""), self.registration?.scope || self.location.href).href;
 const SHELL = [
   "/",
   "/admin.html", "/buyers.html", "/campaigns.html", "/clients.html",
@@ -34,7 +36,7 @@ self.addEventListener("install", (event) => {
   self.skipWaiting();
   event.waitUntil(
     // one file at a time, so a single failed fetch does not throw away the whole shell
-    caches.open(CACHE).then((cache) => Promise.all(SHELL.map((u) => cache.add(u).catch(() => {}))))
+    caches.open(CACHE).then((cache) => Promise.all(SHELL.map((u) => cache.add(APP(u)).catch(() => {}))))
   );
 });
 
@@ -86,7 +88,7 @@ self.addEventListener("fetch", (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(req, { ignoreSearch: true }).then((cached) => cached || caches.match("/index.html")))
+      .catch(() => caches.match(req, { ignoreSearch: true }).then((cached) => cached || caches.match(APP("index.html"))))
   );
 });
 
@@ -105,8 +107,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
+      icon: APP("icons/icon-192.png"),
+      badge: APP("icons/icon-192.png"),
       // send-push sets payload.url (new-email pings open Messages);
       // anything without one keeps opening Profile as before.
       data: { url: payload.url || "/profile.html" },
@@ -118,7 +120,7 @@ self.addEventListener("push", (event) => {
 // otherwise opens a new one straight to Profile.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || "/profile.html";
+  const targetUrl = APP(event.notification.data?.url || "profile.html");
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

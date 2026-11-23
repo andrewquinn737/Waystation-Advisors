@@ -1,0 +1,36 @@
+# Publishes the `test` branch's web app to GitHub Pages (https://andrewquinn737.github.io/Waystation-Advisors/)
+# so reps can try the new CRM. That address is listed in dealflow-app/js/config.js as a TEST host, so it only ever
+# talks to the TEST Supabase project, never the live CRM. Production (main) is still served by Vercel only.
+name: Test copy on GitHub Pages
+on:
+  push:
+    branches: [test]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages-test
+  cancel-in-progress: true
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/test'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safety check - this copy must talk to TEST only
+        run: grep -q 'HOST === "andrewquinn737.github.io"' dealflow-app/js/config.js
+      - name: Site files (no server code)
+        run: |
+          mkdir site && cp -R dealflow-app/. site/ && rm -rf site/supabase site/waproject
+          touch site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
