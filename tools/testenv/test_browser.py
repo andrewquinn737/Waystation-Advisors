@@ -262,8 +262,8 @@ def round3(b):
             return { why: m.heldReasons(gate), line: m.describePrepare({ email_sequence: 2, call_sequence: 1, generic_email: 1, gate }) }; }""")
         check("Import result: reasons are real sentences (no '#'), every kind of problem is counted once per lead", hr["why"][0].startswith("Same sentence is in") and "#" not in hr["line"] and hr["why"][0].endswith("(2)") and "(1)" in hr["why"][1] and "generic address like info@" in hr["line"], hr)
         src = open(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..", "dealflow-app", "js", "dials.js")).read()
-        i = src.index("function nextCompanyTarget()")
-        check("Calls: 'Next company' looks at due callbacks first", "callback_at" in src[i:i + 900] and "busy_callback" in src[i:i + 900])
+        hs = open(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..", "dealflow-app", "js", "dialsHome.js")).read()
+        check("Calls: 'Next company' follows the call sheet (missed callbacks sit in Past due, first)", "nextCallTarget" in src[src.index("function nextCompanyTarget()"):][:200] and "callQueue()" in hs and "busy_callback" in hs)
         ctx.close()
         # -- Reports default: a team lead sees the team, an admin sees everyone (not an empty table)
         for role in ("lead", "admin"):

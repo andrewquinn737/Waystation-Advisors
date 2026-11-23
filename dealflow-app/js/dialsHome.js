@@ -283,6 +283,22 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     refreshFollowups: loadFollowups,
     refreshEmails: renderEmails,
     renderSheet,
+    // Autodial's running order: the call-ready rows of Past due, Due today and Not called yet, in the order shown on the sheet.
+    // `kind` says which number the sequence wants: "call" = the owner's mobile, "call_company" = the office line. A callback
+    // later today is skipped until it is due (5-minute grace), and LinkedIn / reply tasks are not calls.
+    callQueue() {
+      const dueBy = Date.now() + 5 * 60 * 1000, out = [];
+      for (const g of buildGroups()) {
+        if (g.n > 3) continue;
+        for (const it of g.items) {
+          if (it.t && !CALL_KINDS.includes(it.t.kind)) continue;
+          if (it.cb && it.cb > dueBy) continue;
+          if (!it.d.mobile_phone && !it.d.company_phone) continue;
+          out.push({ d: it.d, kind: it.t?.kind || "call" });
+        }
+      }
+      return out;
+    },
     // The call task still waiting for an outcome on this company (completed when its outcome is saved on the card).
     callTaskFor: (dialId) => tasks.find((t) => t.dial_id === dialId && CALL_KINDS.includes(t.kind)) || null,
     taskDone(id) { tasks = tasks.filter((t) => t.id !== id); if (isSheet()) renderSheet(); },

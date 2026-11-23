@@ -646,6 +646,9 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => { if (pendingNative) { pendingNative.left = true; commitPendingNative(); } });
 
 function placeCall(dial, phone, method) {
+  // Count tries on the same number in a row, so Autodial knows a mobile has only been rung once (see autodialTarget).
+  autoCall = autoCall?.dialId === dial.id && autoCall.method === method && autoCall.phone === phone
+    ? { ...autoCall, attempt: autoCall.attempt + 1 } : { dialId: dial.id, method, phone, attempt: 1 };
   // "Transcript calling" off (Dials > Advanced): plain calling through the phone's own dialer, no in-app call.
   if (profile.transcript_calling_enabled === false) {
     dialViaPhone(dial, method, phone);
@@ -664,10 +667,14 @@ function placeCall(dial, phone, method) {
       if (!(currentDial?.id === dial.id && dialMode === "view")) return false;
       if (status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" && introInfoMissing(dial)) return false;
       introRevert = status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? snapIntro(dial) : null;
+      const isCallback = !!OUTCOMES.find((o) => o.status === status)?.callback;
+      const target = autodialTarget(status); // decided before the save, so the right "next" company is used
+      if (target) primeAudio();
       const saved = !!(await updateDialStatus(status));
       if (!saved) return false;
       if (status === "intro_call_scheduled") handleScheduleIntroCallFromDial(dial);
-      else if (OUTCOMES.find((o) => o.status === status)?.callback) openCallbackModal(dial, {});
+      else if (isCallback) openCallbackModal(dial, target ? { after: () => runAutodial(target) } : {}); // the callback time is picked first
+      else if (target) setTimeout(() => runAutodial(target), 0);
       return true;
     },
     onNext: () => { const t = nextCompanyTarget(); if (t?.dial) { primeAudio(); runAutodial(t); } else showNotice("Nothing more is due. Check Callbacks, or pick another list.", { title: "Next company" }); },
@@ -2717,9 +2724,9 @@ function wireOutcomeButtons() {
       return;
     }
     if (value === "intro_call_scheduled") return handleScheduleIntroCallFromDial(dial); // the existing intro-call flow
-    if (target) return runAutodial(target);
     const def = OUTCOMES.find((o) => o.status === value);
-    if (def?.callback) openCallbackModal(dial, { after: advanceAfterOutcome });
+    if (def?.callback) return openCallbackModal(dial, { after: target ? () => runAutodial(target) : advanceAfterOutcome }); // pick the time first
+    if (target) return runAutodial(target);
     else await advanceAfterOutcome();
   }));
 }
@@ -3181,34 +3188,48 @@ async function updateDialStatus(newStatus) {
 }
 
 // ---------------------------------------------------------------------------
-// Autodial (setting in Dials > Advanced, js/autodial.js): the moment a category is chosen, jump to the
-// next "uncontacted" (white) dial in the list being worked — skipping any with no phone number —
-// and start the call to its first listed number (mobile, else company). Not for "Accepted intro
-// call" (the form may still be open) or "Uncontacted", and not while a call is still in progress.
+// Autodial (setting in Dials > Advanced, js/autodial.js). The moment an outcome is chosen it:
+//  1. calls a MOBILE twice in a row: "No answer" on the first try rings the same mobile once more before moving on;
+//  2. opens the card of the company it is about to call;
+//  3. works down the call sheet in its own order (Past due, Due today, Not called yet) and dials the number the
+//     sequence step asks for: a "Call" step = the owner's mobile, a "Call company line" step = the office (each falls
+//     back to the other number when one is missing). A company with no step due yet starts with its mobile.
+// Never after "Accepted intro call" (the booking form is open) or a callback outcome (the time is picked first),
+// and never while a call is still in progress.
 // ---------------------------------------------------------------------------
+let autoCall = null; // { dialId, method, phone, attempt }: the last call placed, and how many times in a row (see placeCall)
+
+function sequenceNumber(d, kind) {
+  const mobile = d.mobile_phone ? { phone: d.mobile_phone, method: "mobile" } : null;
+  const office = d.company_phone ? { phone: d.company_phone, method: "company" } : null;
+  return kind === "call_company" ? office || mobile : mobile || office;
+}
+
 function autodialTarget(newStatus) {
   if (!profile.autodial_enabled || !currentDial || dialMode !== "view") return null;
   if (newStatus === "intro_call_scheduled" || newStatus === "uncontacted" || isCallActive()) return null;
-  const list = visibleDials();
-  const i = list.findIndex((d) => d.id === currentDial.id);
-  const after = i >= 0 ? [...list.slice(i + 1), ...list.slice(0, i)] : list; // then wrap around
-  const next = after.find((d) => (d.contact_status || "uncontacted") === "uncontacted" && (d.mobile_phone || d.company_phone));
-  return next ? { dial: next } : { none: true };
+  if (newStatus === "no_response" && autoCall?.dialId === currentDial.id && autoCall.method === "mobile" && autoCall.attempt === 1)
+    return { dial: currentDial, number: { phone: autoCall.phone, method: "mobile" }, attempt: 2 };
+  return nextCallTarget(currentDial.id);
 }
 
-// "Next company" in the call bar: the next uncontacted dial with a phone number, whether or not Autodial is on.
-function nextCompanyTarget() {
-  if (!currentDial) return null;
-  // A callback that is due (or within 5 minutes) comes first, oldest first: a promise to an owner beats a cold dial.
-  const dueBy = Date.now() + 5 * 60 * 1000;
-  const due = dials.filter((d) => d.id !== currentDial.id && ["busy_callback", "callback_interested"].includes(d.contact_status) && d.callback_at && Date.parse(d.callback_at) <= dueBy && (d.mobile_phone || d.company_phone))
-    .sort((a, b) => Date.parse(a.callback_at) - Date.parse(b.callback_at));
-  if (due.length) return { dial: due[0] };
+// The next company to call, skipping `skipId` (the one just finished).
+function nextCallTarget(skipId) {
+  if (home && sheetMode()) {
+    const x = home.callQueue().find((q) => q.d.id !== skipId && sequenceNumber(q.d, q.kind));
+    return x ? { dial: x.d, number: sequenceNumber(x.d, x.kind), attempt: 1 } : { none: true };
+  }
+  // "Show all companies" view (leads/admins): the next uncontacted company below this one, wrapping around.
   const list = visibleDials();
-  const i = list.findIndex((d) => d.id === currentDial.id);
+  const i = list.findIndex((d) => d.id === skipId);
   const after = i >= 0 ? [...list.slice(i + 1), ...list.slice(0, i)] : list;
-  const next = after.find((d) => (d.contact_status || "uncontacted") === "uncontacted" && (d.mobile_phone || d.company_phone));
-  return next ? { dial: next } : { none: true };
+  const next = after.find((d) => d.id !== skipId && (d.contact_status || "uncontacted") === "uncontacted" && (d.mobile_phone || d.company_phone));
+  return next ? { dial: next, number: sequenceNumber(next, "call"), attempt: 1 } : { none: true };
+}
+
+// "Next company" in the call bar: same order and same numbers, whether or not Autodial is on.
+function nextCompanyTarget() {
+  return currentDial ? nextCallTarget(currentDial.id) : null;
 }
 
 function runAutodial(target) {
@@ -3216,11 +3237,12 @@ function runAutodial(target) {
     showNotice("Nothing more is due. Check Callbacks, or pick another list.", { title: "Autodial" });
     return;
   }
-  const d = target.dial;
-  const idx = visibleDials().findIndex((x) => x.id === d.id);
-  if (idx < 0) return;
-  openDialModal(idx);
-  placeCall(d, d.mobile_phone || d.company_phone, d.mobile_phone ? "mobile" : "company");
+  const d = target.dial, num = target.number || sequenceNumber(d, home?.callTaskFor(d.id)?.kind);
+  if (!num) return;
+  const set = visibleDials(), idx = set.findIndex((x) => x.id === d.id);
+  if (idx >= 0) openCardFrom(set, idx); else openCardFrom([d], 0); // a follow-up from another tab is not in this list's array
+  if (target.attempt === 2) showToast("No answer. Calling the mobile a second time.");
+  placeCall(d, num.phone, num.method);
 }
 
 function handleDeleteDial() {

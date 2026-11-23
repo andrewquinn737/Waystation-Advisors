@@ -499,14 +499,12 @@ export function resolvePersonalizedTextingBody(profile, dial) {
 // most one of the two ever returns non-null for a given profile. Callers
 // just OR the two together (see js/dials.js) rather than needing to check
 // which one is actually enabled themselves.
-export function resolveAboutUsEmailBody(profile, dial) {
-  if (!profile.about_us_email_enabled || !profile.about_us_email_template) return null;
-  return substitutePersonalizedTokens(profile.about_us_email_template, dial, profile);
+export function resolveAboutUsEmailBody() {
+  return null; // About us email was removed (2026-11-23): an old "on" setting no longer changes the email icon
 }
 
-export function resolveAboutUsEmailSubject(profile, dial) {
-  if (!profile.about_us_email_enabled || !profile.about_us_email_subject) return null;
-  return substitutePersonalizedTokens(profile.about_us_email_subject, dial, profile);
+export function resolveAboutUsEmailSubject() {
+  return null; // removed, see resolveAboutUsEmailBody
 }
 
 // Recommended first/second email — the per-dial text imported from the
