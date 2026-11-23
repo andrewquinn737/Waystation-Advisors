@@ -2149,3 +2149,14 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 @media (hover: hover) { .timeline-add-btn:hover, .compose-fab:hover { background: var(--tone-hover); } }
 .timeline-dot { background: var(--tone); }
 #eventReportModal .btn:not(.secondary):not(.danger), #introCallTimeModal .btn:not(.secondary):not(.danger), #requiredPopup .btn:not(.secondary):not(.danger) { background: var(--tone); color: #fff; }
+
+/* round 4: the in-call bar must not hide the bottom of a popup; the popup gets bottom padding of the bar's height and scrolls past it */
+body.has-call-bar .modal-backdrop { padding-bottom: calc(var(--call-bar-h, 0px) + 12px) !important; }
+body.has-call-bar #dialModalBackdrop { padding-bottom: calc(var(--call-bar-h, 0px) + 12px) !important; }
+.call-outcome-chips.hidden, .call-outcome-label.hidden { display: none; }
+/* the card shows the same six outcomes once it is open: the bar's copy is hidden then (it stays when the card is closed) */
+body:has(#dialModalBackdrop:not(.hidden)) .call-panel .call-outcome-chips, body:has(#dialModalBackdrop:not(.hidden)) .call-panel .call-outcome-label { display: none; }
+.client-calls-all { background: none; border: 0; color: var(--text-muted); text-decoration: underline; padding: 8px 0; min-height: 44px; cursor: pointer; font: inherit; font-size: 13px; }
+/* timeline: the date keeps to one line (shorter wrap on phones) */
+.timeline-box .tl-date { white-space: nowrap; }
+@media (max-width: 480px) { .tl-confirm-label { font-size: 11.5px; } .timeline-box .tl-date { font-size: 11.5px; } }

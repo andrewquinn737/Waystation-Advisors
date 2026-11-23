@@ -74,3 +74,6 @@ function offlineBanner() {
 window.addEventListener("offline", offlineBanner);
 window.addEventListener("online", () => { document.getElementById("offlineBanner")?.remove(); if (document.querySelector(".skeleton, .skeleton-row, #pageLoadingOverlay:not(.hidden)")) window.location.reload(); });
 window.addEventListener("load", () => setTimeout(offlineBanner, 3000));
+
+// the service worker asks an open window to go to a notification's link when it cannot navigate it itself
+try { navigator.serviceWorker?.addEventListener("message", (e) => { if (e.data?.type === "open-url" && typeof e.data.url === "string" && new URL(e.data.url, location.origin).origin === location.origin) location.href = e.data.url; }); } catch { /* no service worker */ }

@@ -31,6 +31,14 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutco
       <button type="button" class="btn call-hangup" data-act="hangup">Hang up</button>
     </div>`;
   document.body.appendChild(el);
+  // The bar floats over the bottom of the screen. While it is open, popups get bottom padding of the bar's height (and scroll past it),
+  // so More, Prev / Next and Save are never hidden under it.
+  const barEl = el;
+  const syncBar = () => document.documentElement.style.setProperty("--call-bar-h", Math.ceil(barEl.getBoundingClientRect().height + 24 + 16) + "px");
+  document.body.classList.add("has-call-bar");
+  syncBar();
+  let ro = null;
+  try { ro = new ResizeObserver(syncBar); ro.observe(barEl); } catch { /* old browser: the height at open time stays */ }
   const $ = (s) => el.querySelector(s);
   const caps = $(".call-panel-captions");
   let timer = null, startedAt = 0, muted = false, lines = [];
@@ -118,6 +126,9 @@ export function openCallPanel({ name, company, onHangup, onMute, onDtmf, onOutco
       const s = $(".call-panel-summary");
       s.textContent = text; s.classList.remove("hidden");
     },
-    close() { clearInterval(timer); el?.remove(); el = null; },
+    close() {
+      clearInterval(timer); ro?.disconnect(); el?.remove(); el = null;
+      document.body.classList.remove("has-call-bar"); document.documentElement.style.removeProperty("--call-bar-h");
+    },
   };
 }

@@ -9,7 +9,7 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const when = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; };
 const SOURCE = { admin: "Added by an admin", bounce: "Bounced", reply: "Asked to stop", manual: "Added by hand" };
 const PAGE = 100;
-let items = [], total = 0, term = "", offset = 0, busy = false;
+let items = [], total = 0, term = "", offset = 0, seq = 0;
 
 export function initSuppression() {
   $("adSuppression").innerHTML = `<section class="ad-panel"><h3>Add addresses</h3>
@@ -32,10 +32,11 @@ export function initSuppression() {
 function msg(text, ok = false) { const el = $("supMsg"); el.textContent = text || ""; el.classList.toggle("hidden", !text); el.classList.toggle("ok", ok); }
 
 async function load(more) {
-  if (busy) return; busy = true;
+  const mine = ++seq;   // a newer request always wins: older answers that arrive late are ignored, a new one is never skipped
   if (!more) { offset = 0; $("supList").innerHTML = `<p class="ad-empty">Loading...</p>`; }
-  const { data, error } = await supabase.rpc("suppression_list", { p_search: term || null, p_limit: PAGE, p_offset: offset });
-  busy = false;
+  const asked = term;
+  const { data, error } = await supabase.rpc("suppression_list", { p_search: asked || null, p_limit: PAGE, p_offset: offset });
+  if (mine !== seq) return;
   if (error) { $("supList").innerHTML = `<p class="ad-empty">Couldn't load the list: ${esc(error.message)} <button type="button" class="ad-link" id="supRetry">Retry</button></p>`; $("supRetry").onclick = () => load(false); return; }
   total = data?.total ?? 0;
   items = more ? items.concat(data?.items || []) : data?.items || [];
@@ -56,12 +57,23 @@ async function add() {
   const text = $("supText").value.trim();
   if (!text) return msg("Paste at least one address or domain.");
   const b = $("supAdd"); b.disabled = true; msg("");
+  // Preview first: free-mail domains are refused, a company domain asks "N leads will move to backup" before it is added
+  const pv = await supabase.rpc("suppress_preview", { p_text: text });
+  if (pv.error) { b.disabled = false; return msg("Not added: " + pv.error.message); }
+  const refused = pv.data?.refused || [], doms = pv.data?.domains || [];
+  const refusedMsg = refused.length ? `${refused.join(", ")} ${refused.length === 1 ? "is a free-mail domain" : "are free-mail domains"} and can't be blocked as a whole: it would stop email to everyone using that service. Add the individual addresses instead. ` : "";
+  if (doms.length) {
+    const lines = doms.map((d) => `${d.domain}: ${d.leads} ${d.leads === 1 ? "lead" : "leads"} will move to backup (calls only)`).join("; ");
+    const ok = await confirmBox({ title: "Block whole companies?", body: `Nobody at ${doms.length === 1 ? "this company" : "these companies"} will be emailed again. ${lines}.`, yes: "Block" });
+    if (!ok) { b.disabled = false; return msg(refusedMsg.trim()); }
+  }
   const { data, error } = await supabase.rpc("suppress_many", { p_text: text, p_reason: $("supReason").value.trim() || "manual" });
   b.disabled = false;
   if (error) return msg("Not added: " + error.message);
   const bits = [data.emails && `${data.emails} address${data.emails === 1 ? "" : "es"}`, data.domains && `${data.domains} domain${data.domains === 1 ? "" : "s"}`].filter(Boolean);
   const extra = [data.already && `${data.already} already on the list`, data.skipped?.length && `${data.skipped.length} not recognised (${data.skipped.slice(0, 3).join(", ")})`].filter(Boolean);
-  msg(`${bits.length ? "Added " + bits.join(" and ") : "Nothing new added"}${extra.length ? ". " + extra.join(", ") : ""}.`, bits.length > 0);
+  const refusedNow = data.refused?.length ? ` ${data.refused.join(", ")} not added: free-mail domains can't be blocked as a whole. Add the individual addresses instead.` : "";
+  msg(`${bits.length ? "Added " + bits.join(" and ") : "Nothing new added"}${extra.length ? ". " + extra.join(", ") : ""}.${refusedNow}`, bits.length > 0 && !refusedNow);
   if (bits.length) { $("supText").value = ""; $("supReason").value = ""; load(false); }
 }
 async function onRemove(e) {

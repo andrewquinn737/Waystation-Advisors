@@ -20,6 +20,24 @@ export const STATES = [
   "West Virginia", "Wisconsin", "Wyoming", "Not in the US",
 ];
 
+// 2-letter codes (older / imported rows store "UT", newer ones "Utah"). The state <select> only has full names, so a code is
+// mapped to its name for display, and a value that matches nothing is kept as its own option rather than being saved as blank.
+const ABBR = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
+export function stateToName(v) {
+  const t = String(v ?? "").trim();
+  if (!t) return "";
+  if (ABBR[t.toUpperCase()] && t.length === 2) return ABBR[t.toUpperCase()];
+  return STATES.find((s) => s.toLowerCase() === t.toLowerCase()) || t;
+}
+export function stateOptionsHTML(current) {
+  // A stored value is kept exactly as saved ("UT" stays "UT"): its option shows the full name but carries the stored value, and a value that
+  // matches no state ("DC", a province) gets its own selected option, so saving the form never wipes or rewrites a state nobody touched.
+  const raw = String(current ?? "").trim(), cur = stateToName(raw), known = STATES.includes(cur);
+  return `<option value="">Select a state...</option>` +
+    (raw && !known ? `<option value="${escapeHtml(raw)}" selected>${escapeHtml(raw)}</option>` : "") +
+    STATES.map((s) => known && s === cur ? `<option value="${escapeHtml(raw)}" selected>${s}</option>` : `<option value="${s}">${s}</option>`).join("");
+}
+
 export function escapeHtml(str) {
   if (str === null || str === undefined) return "";
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

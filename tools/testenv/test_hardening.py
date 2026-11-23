@@ -3,7 +3,7 @@ Setup and the clock-driven dispatcher run as the database owner; what people do 
 Sections: 1 anonymous access / null-safe guards, 2 mailbox-admin, 3 duplicate-send protection, 4 suppression + dedup,
 5 time zones + caps + ramp, 6 bounce auto-pause, 7 SMTP auth failure + header injection, 8 list/lead deletion, 9 Vault.
 Run: python3 test_hardening.py"""
-import sb, json, os, uuid, hashlib, time, traceback, urllib.request, urllib.error, urllib.parse
+import sys, sb, json, os, uuid, hashlib, time, traceback, urllib.request, urllib.error, urllib.parse
 import test_sequences as T
 from test_sequences import q, uid, lit, make_list, COPY, gate, start, seed_mv, login, api, rpc, CALEB, GAVIN, ADMIN, URL, ANON, SEC, LEAD_A, LEAD_B
 
@@ -392,8 +392,9 @@ def run():
     inbound("mailer-daemon@hardtest-mail.example", "Undelivered Mail Returned to Sender", f"Final-Recipient: rfc822; {lead_e[4]}\n550 5.1.1 <{lead_e[4]}>: user unknown")
     check("hard bounce -> address suppressed (source bounce)", supp(lead_e[4]) and supp(lead_e[4])[0]["source"] == "bounce", supp(lead_e[4]))
     check("...lead is bounced and bounced_at set", q(f"select seq_state, bounced_at is not null b from dials where email='{lead_e[4]}'")[0] == {"seq_state": "bounced", "b": True})
-    inbound("mailer-daemon@hardtest-mail.example", "Delivery Status Notification (Delay)", f"Final-Recipient: rfc822; {lead_e[5]}\n452 4.2.2 mailbox full for {lead_e[5]}")
-    check("soft bounce (mailbox full) -> lead bounced but address NOT suppressed", not supp(lead_e[5]) and q(f"select seq_state from dials where email='{lead_e[5]}'")[0]["seq_state"] == "bounced")
+    # round 4: a "(Delay)" notice is ignored and a first mailbox-full failure is retried once; the SECOND soft bounce stops the lead
+    for _ in range(2): inbound("mailer-daemon@hardtest-mail.example", "Undelivered Mail Returned to Sender", f"Final-Recipient: rfc822; {lead_e[5]}\n452 4.2.2 mailbox full for {lead_e[5]}")
+    check("soft bounce (mailbox full, twice) -> lead bounced but address NOT suppressed", not supp(lead_e[5]) and q(f"select seq_state from dials where email='{lead_e[5]}'")[0]["seq_state"] == "bounced")
     # global dedup: same address / same company domain across interns; free-mail domains are not companies
     dom, dom2 = f"dupco-{TAG}.hardtest.org", f"other-{TAG}.hardtest.org"
     for e in (f"a@{dom}", f"b@{dom}", f"c@{dom2}", f"hardtestjohn{TAG}@gmail.com", f"hardtestother.person{TAG}@gmail.com"): seed_mv(e, "ok")
@@ -662,7 +663,7 @@ def round3():
         if thread: cols.append("thread_id"); vals.append(lit(thread))
         if reply_to: cols.append("in_reply_to"); vals.append(lit(reply_to))
         q(f"insert into email_messages ({', '.join(cols)}) values ({', '.join(vals)})")
-    for _ in range(2): inbound3("mailer-daemon@hardtest-mail.example", "Delivery Status Notification (Delay)", f"Final-Recipient: rfc822; {em}\n452 4.2.2 mailbox full for {em}")
+    for _ in range(2): inbound3("mailer-daemon@hardtest-mail.example", "Undelivered Mail Returned to Sender", f"Final-Recipient: rfc822; {em}\n452 4.2.2 mailbox full for {em}")   # round 4: a "(Delay)" notice is no longer a bounce; a real mailbox-full failure is
     d = q(f"select bounce_kind, soft_bounces, seq_state from dials where email='{em}'")[0]
     check("soft bounce is recorded as soft, and a second one counts as repeated", d == {"bounce_kind": "soft", "soft_bounces": 2, "seq_state": "bounced"}, d)
     em2 = f"hardtest-hb-{TAG}@example.com"
@@ -718,10 +719,230 @@ def round3():
     q(f"delete from suppressed_emails where email like '%{TAG}%'"); q(f"delete from suppressed_domains where domain like '%{TAG}%'")
     q(f"delete from email_messages where from_address like '%{TAG}%' or from_address like 'assistant@co-{TAG}%'")
 
+def round4():
+    """Round 4 (20261204_round4_review.sql): security exploits that must now fail AND the legit access that must still work, email reply /
+    bounce / pause / do-not-email behaviour."""
+    print("-- 13. round 4: security (anon / intern exploits fail, legit roles still work)")
+    JORDAN, CASEY, TAYLOR = "jordan.intern@example.com", "casey.intern@example.com", "taylor.lead@example.com"
+    ah = {"apikey": ANON, "Authorization": "Bearer " + ANON}
+    fails = (401, 403)
+    # ---- is_team_lead() and the five legacy tables
+    for t, body in [("buyers", {"company_name": f"R4 {TAG}"}), ("sellers", {"business_name": f"R4 {TAG}"}), ("deals", {}), ("commissions", {}), ("subscription_payments", {})]:
+        c1, _ = http("GET", URL + f"/rest/v1/{t}?select=id&limit=1", None, ah)
+        c2, _ = http("POST", URL + f"/rest/v1/{t}", body, ah)
+        c3, _ = http("DELETE", URL + f"/rest/v1/{t}?id=not.is.null", None, ah)
+        check(f"anon cannot read, write or delete {t}", c1 in fails and c2 in fails and c3 in fails, (c1, c2, c3))
+    check("is_team_lead() is false for anon / intern and true for lead / admin",
+          rpc(JORDAN, "is_team_lead")[1] is False and rpc(LEAD_A, "is_team_lead")[1] is True and rpc(ADMIN, "is_team_lead")[1] is True and anon_rpc("is_team_lead")[0] in fails)
+    code, _ = api(JORDAN, "POST", "/buyers", {"company_name": f"R4 intern {TAG}"})
+    check("an intern cannot create a buyer", code in fails, code)
+    code, _ = api(JORDAN, "POST", "/sellers", {"business_name": f"R4 intern {TAG}"})
+    check("an intern cannot create a seller they did not find", code in fails, code)
+    code, body = api(JORDAN, "POST", "/sellers", {"business_name": f"R4 own {TAG}", "found_by": uid(JORDAN)})
+    check("an intern can still create a seller they found (legit access)", code in (200, 201) and body, (code, body))
+    code, body = api(LEAD_A, "POST", "/buyers", {"company_name": f"R4 lead {TAG}"})
+    check("a team lead can create a buyer (legit access)", code in (200, 201) and body, (code, body))
+    seen = lambda who, t, col, val: len(api(who, "GET", f"/{t}?{col}=eq.{urllib.parse.quote(val)}&select=id")[1] or [])
+    check("an intern cannot read the lead's buyer; lead and admin can", seen(JORDAN, "buyers", "company_name", f"R4 lead {TAG}") == 0 and seen(LEAD_A, "buyers", "company_name", f"R4 lead {TAG}") == 1 and seen(ADMIN, "buyers", "company_name", f"R4 lead {TAG}") == 1)
+    q(f"update sellers set assigned_to='{uid(JORDAN)}' where business_name='R4 own {TAG}'")
+    code, body = api(JORDAN, "PATCH", f"/sellers?business_name=eq.R4%20own%20{TAG}", {"asking_price": 5})
+    check("protect_seller_financials: an intern cannot set the asking price", code in (400, 403, 409), (code, body))
+    code, _ = api(LEAD_A, "PATCH", f"/buyers?company_name=eq.R4%20lead%20{TAG}", {"monthly_fee": 100})
+    check("protect_buyer_financials: a team lead can set the fee", code == 200)
+    q(f"delete from sellers where business_name like 'R4 %{TAG}'"); q(f"delete from buyers where company_name like 'R4 %{TAG}'")
+
+    # ---- profiles self-update lock
+    def patch_me(who, body): return api(who, "PATCH", f"/profiles?id=eq.{uid(who)}", body)
+    before = q(f"select sourcing_access, sourcing_send_access, role, team_id, autodial_enabled, timezone, record_all_calls from profiles where id='{uid(JORDAN)}'")[0]
+    for col, val in [("sourcing_access", True), ("sourcing_send_access", True), ("role", "admin"), ("team_id", None)]:
+        code, body = patch_me(JORDAN, {col: val})
+        check(f"an intern cannot change their own {col}", code in (400, 403), (code, str(body)[:100]))
+    after = q(f"select sourcing_access, sourcing_send_access, role, team_id from profiles where id='{uid(JORDAN)}'")[0]
+    check("...and nothing changed in the database", all(after[k] == before[k] for k in after), (before, after))
+    ok = True
+    for body in [{"full_name": "Jordan Intern"}, {"phone": "(801) 555-0199"}, {"calendly_link": f"https://calendly.com/r4{TAG}"}, {"personalized_email_template": "Hi"}, {"notifications_enabled": True},
+                 {"autodial_enabled": not before["autodial_enabled"]}, {"record_all_calls": not before["record_all_calls"]}, {"timezone": before["timezone"] or "America/Denver"}]:
+        code, _ = patch_me(JORDAN, body); ok = ok and code == 200
+    check("an intern can still save their own profile (name, phone, calendly, templates, Calls > Advanced switches)", ok)
+    q(f"update profiles set phone=null, calendly_link=null, personalized_email_template=null, autodial_enabled={before['autodial_enabled']}, record_all_calls={before['record_all_calls']}, timezone={lit(before['timezone'])} where id='{uid(JORDAN)}'")
+    code, _ = api(ADMIN, "PATCH", f"/profiles?id=eq.{uid(JORDAN)}", {"sourcing_access": True})
+    check("an admin can still change another person's permission flags", code == 200 and q(f"select sourcing_access s from profiles where id='{uid(JORDAN)}'")[0]["s"] is True)
+    api(ADMIN, "PATCH", f"/profiles?id=eq.{uid(JORDAN)}", {"sourcing_access": False})
+
+    # ---- clients: log_shared_client_event / get_client_full_name / get_buyer_*
+    mk = lambda who, name, typ: q(f"insert into clients (client_type, full_name, created_by) values ('{typ}', {lit(name)}, '{uid(who)}') returning id")[0]["id"]
+    c_jordan = mk(JORDAN, f"R4 Seller {TAG}", "seller"); c_taylor = mk(LEAD_A, f"R4 Buyer A {TAG}", "buyer"); c_jonah = mk(LEAD_B, f"R4 Buyer B {TAG}", "buyer")
+    ev = lambda who, other, by: rpc(who, "log_shared_client_event", p_client_id=c_jordan, p_counterpart_client_id=other, p_event_type="client_meeting", p_event_date="2026-12-01T17:00:00Z", p_time="10:00", p_created_by=by, p_category=None, p_timezone="America/Denver")
+    code, body = ev(JORDAN, c_jonah, uid(CASEY))
+    check("log_shared_client_event: a counterpart in another team is refused", code in (400, 403) and q(f"select count(*) n from client_events where client_id='{c_jonah}' and event_type='client_meeting'")[0]["n"] == 0, (code, str(body)[:120]))
+    code, body = ev(JORDAN, c_taylor, uid(CASEY))
+    rows = q(f"select created_by from client_events where client_id in ('{c_jordan}', '{c_taylor}') and event_type='client_meeting'")
+    check("log_shared_client_event: a counterpart in my team works, and created_by is always the caller (a forged one is ignored)",
+          code in (200, 204) and len(rows) == 2 and all(r["created_by"] == uid(JORDAN) for r in rows), (code, body, rows))
+    nm = lambda who, c: rpc(who, "get_client_full_name", p_client_id=c)[1]
+    check("get_client_full_name: another team's lead and an intern get nothing; own team's lead and an admin get the name",
+          nm(LEAD_A, c_jonah) is None and nm(JORDAN, c_taylor) is None and nm(LEAD_A, c_taylor) == f"R4 Buyer A {TAG}" and nm(ADMIN, c_jonah) == f"R4 Buyer B {TAG}")
+    bp = lambda who, c: rpc(who, "get_buyer_progress_summary", p_buyer_id=c)
+    check("get_buyer_progress_summary: a team lead cannot read another team's buyer", bp(LEAD_A, c_jonah)[0] in (400, 403, 404), bp(LEAD_A, c_jonah))
+    check("...but reads their own team's buyer, and an admin reads any", bp(LEAD_A, c_taylor)[0] == 200 and bp(ADMIN, c_jonah)[0] == 200)
+    for fn in ("get_buyer_milestone_clients", "get_buyer_outreach_since_signed"):
+        check(f"{fn}: scoped the same way", rpc(LEAD_A, fn, p_buyer_id=c_jonah)[0] in (400, 403, 404) and rpc(LEAD_A, fn, p_buyer_id=c_taylor)[0] == 200 and rpc(ADMIN, fn, p_buyer_id=c_jonah)[0] == 200)
+    for fn in ("get_buyer_outreach_chart", "get_buyer_contacted_owners"):
+        a = dict(p_buyer_id=c_jonah, p_period_start="2026-11-01T00:00:00Z", p_period_end_excl="2026-12-01T00:00:00Z")
+        check(f"{fn}: scoped the same way", rpc(LEAD_A, fn, **a)[0] in (400, 403, 404) and rpc(LEAD_A, fn, **{**a, "p_buyer_id": c_taylor})[0] == 200 and rpc(ADMIN, fn, **a)[0] == 200)
+    # sequence helpers and the rest of the definer list
+    lid_c = make_list(CASEY, [dict(email=f"r4-c-{TAG}@example.com", **COPY)], name=f"TEST-HARD {TAG} r4 casey")
+    did = q(f"select id from dials where list_id='{lid_c}' limit 1")[0]["id"]
+    q(f"update dials set seq_state='active', sequence='email5' where id='{did}'")
+    rpc(JORDAN, "seq_maybe_complete", p_dial_id=did)
+    check("seq_maybe_complete: an intern cannot complete another person's dial", q(f"select seq_state s from dials where id='{did}'")[0]["s"] == "active")
+    rpc(CASEY, "seq_maybe_complete", p_dial_id=did)
+    check("...the owner can (no open tasks)", q(f"select seq_state s from dials where id='{did}'")[0]["s"] == "completed")
+    check("seq_pick_sender is not callable by a signed-in user", rpc(JORDAN, "seq_pick_sender", p_owner=uid(CASEY), p_mandate=None)[0] in (401, 403, 404))
+    check("match_mailbox_owner: nothing for an intern", rpc(JORDAN, "match_mailbox_owner", p_display_name="Casey Intern", p_email=None)[1] in (None, ""))
+    check("person_tz: another team's zone is not returned to an intern (default), own is",
+          rpc(JORDAN, "person_tz", p_profile=uid(CASEY))[1] == "America/Denver")
+    check("my_team_ids, get_questionnaire_buyer_ids and is_team_lead are closed to anon", all(anon_rpc(f, a)[0] in fails for f, a in [("my_team_ids", {"uid": uid(CASEY)}), ("get_questionnaire_buyer_ids", {}), ("is_team_lead", {})]))
+    code, _ = api(JORDAN, "POST", "/dials", {"list_id": lid_c, "created_by": uid(JORDAN), "company_name": "R4 intruder"})
+    check("an intern cannot add a dial to another person's list", code in fails, code)
+    q(f"delete from dials where list_id='{lid_c}'"); q(f"delete from dial_lists where id='{lid_c}'")
+    # search_path pinned on the 19
+    pinned = q("select count(*) n from pg_proc where pronamespace='public'::regnamespace and prosecdef and proname in ('is_admin','is_team_lead','is_team_lead_of','log_shared_client_event','get_client_full_name','handle_new_user','get_buyer_progress_summary','update_client_event') and not exists (select 1 from unnest(coalesce(proconfig, '{}')) c where c like 'search_path=%')")[0]["n"]
+    check("the definer functions on the advisor's list have a pinned search_path", pinned == 0, pinned)
+    # storage
+    b = q("select file_size_limit, allowed_mime_types from storage.buckets where id='avatars'")[0]
+    check("avatars bucket: images only, 2 MB", b["file_size_limit"] == 2097152 and b["allowed_mime_types"] == ["image/*"], b)
+    check("email attachment storage policy: signed-in only, includes the owner's team lead",
+          q("select count(*) n from pg_policies where policyname='email_attachments_storage_select' and roles = '{authenticated}' and qual like '%is_team_lead_of(ea.owner_id)%'")[0]["n"] == 1)
+    # edge function: schedule-intro-call (a Saturday date, so even a connected Calendly books nothing)
+    body = {"client_id": c_jordan, "client_name": "R4", "client_email": f"r4-{TAG}@example.com", "date": "2026-12-05", "time": "10:00", "timezone": "America/Denver"}
+    check("schedule-intro-call: the anon key alone is refused", http("POST", URL + "/functions/v1/schedule-intro-call", body, ah)[0] == 401)
+    check("schedule-intro-call: another team's lead is refused", fn_user("schedule-intro-call", body, LEAD_B)[0] == 403)
+    check("schedule-intro-call: another intern is refused", fn_user("schedule-intro-call", body, CASEY)[0] == 403)
+    check("schedule-intro-call: no client / dial named is refused", fn_user("schedule-intro-call", {k: v for k, v in body.items() if k != "client_id"}, JORDAN)[0] == 400)
+    code, res = fn_user("schedule-intro-call", body, JORDAN)
+    check("schedule-intro-call: the owner passes the check (not connected, or outside bookable hours)", code in (200, 400) and "error" in res, (code, res))
+    code, res = fn_user("schedule-intro-call", body, LEAD_A)
+    check("schedule-intro-call: the owner's team lead passes the check", code in (200, 400), (code, res))
+    code, res = fn_user("schedule-intro-call", body, ADMIN)
+    check("schedule-intro-call: an admin passes the check", code in (200, 400), (code, res))
+    q(f"delete from client_events where client_id in ('{c_jordan}','{c_taylor}','{c_jonah}')"); q(f"delete from clients where id in ('{c_jordan}','{c_taylor}','{c_jonah}')")
+    # sign-up is closed; admin-created accounts and every existing login still work
+    code, res = http("POST", URL + "/auth/v1/signup", {"email": f"r4-signup-{TAG}@example.com", "password": "Sup3r-Secret-Pw!"}, ah)
+    check("public sign-up is off", code in (400, 403, 422) and "signup" in json.dumps(res).lower(), (code, res))
+    code, res = fn_user("admin-create-account", {"full_name": f"R4 Made {TAG}", "phone": "", "email": f"r4-made-{TAG}@example.com", "password": "Made-By-Admin-9z!"}, ADMIN)
+    new_id = (res or {}).get("user_id") or (res or {}).get("id") or ((res or {}).get("user") or {}).get("id") if isinstance(res, dict) else None
+    new_id = new_id or (q(f"select id from profiles where email='r4-made-{TAG}@example.com'") or [{}])[0].get("id")
+    check("admin-create-account still works with sign-up closed (profile row created)", code == 200 and new_id and q(f"select role from profiles where id='{new_id}'")[0]["role"] == "intern", (code, str(res)[:150]))
+    c2, r2 = http("POST", URL + "/auth/v1/token?grant_type=password", {"email": f"r4-made-{TAG}@example.com", "password": "Made-By-Admin-9z!"}, {"apikey": ANON})
+    check("...and that new account can sign in", c2 == 200 and r2.get("access_token"), (c2, str(r2)[:100]))
+    for role, team in [("team_lead", None), ("independent_lead", None), ("admin", None)]:
+        code, _ = api(ADMIN, "PATCH", f"/profiles?id=eq.{new_id}", {"role": role})
+        check(f"an admin can still set a new account's role to {role}", code == 200 and q(f"select role from profiles where id='{new_id}'")[0]["role"] == role, code)
+    check("every role can still sign in", all(login(e) for e in (ADMIN, LEAD_A, LEAD_B, CALEB, JORDAN)))
+    if new_id:
+        code, res = fn_user("admin-delete-account", {"user_id": new_id}, ADMIN)
+        check("admin-delete-account still works", code == 200, (code, str(res)[:150]))
+    q(f"delete from profiles where email like 'r4-made-{TAG}%'")
+
+    print("-- 14. round 4: email")
+    sbx = q(f"select id from email_accounts where owner_id='{uid(CALEB)}' order by email_address limit 1")[0]["id"]
+    def inbound4(frm, subject, body, auto=False, thread=None):
+        cols = ["account_id", "message_id", "direction", "from_address", "subject", "body_text", "snippet", "sent_at", "to_addresses", "is_read", "is_auto_reply"]
+        vals = [f"'{sbx}'", lit(mid()), "'inbound'", lit(frm), lit(subject), lit(body), lit(body[:150]), "now()", "'[]'", "false", str(auto).lower()]
+        if thread: cols.append("thread_id"); vals.append(lit(thread))
+        q(f"insert into email_messages ({', '.join(cols)}) values ({', '.join(vals)}) returning id"); 
+    def lead(tag, dom=None):
+        em = f"r4-{tag}-{TAG}@{dom or f'r4{tag}{TAG}.hardtest.org'}"; seed_mv(em, "ok")
+        lid = new_list(CALEB, [dict(email=em, **COPY)]); activate(CALEB, lid, "2026-12-10")
+        q(f"update dials set sender_account_id='{sbx}', email_1_message_id='<hard-sent-r4-{tag}>' where list_id='{lid}'")
+        return em, lid
+    st = lambda em: q(f"select seq_state s from dials where email='{em}'")[0]["s"]
+    msg_of = lambda em: q(f"select is_auto_reply a, is_read r from email_messages where from_address={lit(em)} order by created_at desc limit 1")[0]
+    def tasks(em): return q(f"select count(*) n from sequence_tasks t join dials d on d.id=t.dial_id where d.email={lit(em)} and t.kind='reply'")[0]["n"]
+    check("email_is_auto_reply: body phrases alone never classify (only the subject does)",
+          not q("select email_is_auto_reply('a@b.co','Re: your note','I am out of the office until Monday. Automatic reply.') f")[0]["f"]
+          and q("select email_is_auto_reply('a@b.co','Automatic reply: your note','x') f")[0]["f"])
+    em, _ = lead("ooo-yes")
+    inbound4(em, "Re: quick question", "Hi, I'm out of the office this week but yes, I'm interested. Call me Tuesday")
+    check("a person who is out of the office but interested is a reply: sequence stops, reply task, unread", st(em) == "replied" and tasks(em) == 1 and msg_of(em) == {"a": False, "r": False}, (st(em), tasks(em), msg_of(em)))
+    em, _ = lead("ooo-stop")
+    inbound4(em, "Re: quick question", "Not interested. Please stop emailing me. I am currently out of the office until the 10th.")
+    check("an out-of-office mention does not hide a stop request: the address is suppressed", q(f"select count(*) n from suppressed_emails where email={lit(em)}")[0]["n"] == 1 and st(em) != "active", st(em))
+    em, _ = lead("hdr-stop")
+    inbound4(em, "Re: quick question", "Please remove me from your list.", auto=True)
+    check("stop wording wins even over an auto-reply header", q(f"select count(*) n from suppressed_emails where email={lit(em)}")[0]["n"] == 1 and msg_of(em)["a"] is False)
+    em, _ = lead("hdr-ok")
+    inbound4(em, "Re: quick question", "Thanks for your message. I will respond when I return.", auto=True)
+    check("a header-flagged auto-reply with plain wording keeps the sequence going, creates no task, and arrives read", st(em) == "active" and tasks(em) == 0 and msg_of(em) == {"a": True, "r": True}, (st(em), msg_of(em)))
+    em, _ = lead("subj")
+    inbound4(em, "Out of Office: quick question", "I am away.")
+    check("an Out of Office subject is an auto-reply", st(em) == "active" and msg_of(em)["a"] is True)
+    em, _ = lead("body-only")
+    inbound4(em, "Re: quick question", "I am out of the office until Monday, will get back to you.")
+    check("body wording alone is a normal reply (it is from the lead's address)", st(em) == "replied" and msg_of(em)["a"] is False, (st(em), msg_of(em)))
+    # bounces: a delay is not a failure; a first soft bounce retries once
+    em, _ = lead("soft")
+    mdn = "mailer-daemon@hardtest-mail.example"
+    inbound4(mdn, "Delivery Status Notification (Delay)", f"Final-Recipient: rfc822; {em}\nThe message is delayed. We will keep trying.")
+    d = q(f"select seq_state, soft_bounces, bounced_at from dials where email={lit(em)}")[0]
+    check("a Delay notice changes nothing", d["seq_state"] == "active" and d["soft_bounces"] == 0 and d["bounced_at"] is None, d)
+    inbound4(mdn, "Undelivered Mail Returned to Sender", f"Final-Recipient: rfc822; {em}\n452 4.2.2 mailbox full for {em}")
+    d = q(f"select seq_state, soft_bounces, bounce_kind from dials where email={lit(em)}")[0]
+    check("a first soft bounce (mailbox full) is noted but the next email still gets a try", d == {"seq_state": "active", "soft_bounces": 1, "bounce_kind": "soft"}, d)
+    inbound4(mdn, "Undelivered Mail Returned to Sender", f"Final-Recipient: rfc822; {em}\n452 4.2.2 mailbox full for {em}")
+    check("a second soft bounce stops the sequence and now counts toward the bounce guard", q(f"select seq_state s, soft_bounces n from dials where email={lit(em)}")[0] == {"s": "bounced", "n": 2})
+    dom = f"sys{TAG}.hardtest.org"
+    em, _ = lead("sysmail", dom)
+    inbound4(f"no-reply@{dom}", "Your message was quarantined", "A message to your colleague was held by the security gateway.")
+    check("system mail (no-reply@) from the lead's company domain is not a reply", st(em) == "active" and tasks(em) == 0, (st(em), tasks(em)))
+    inbound4(f"assistant@{dom}", "Re: quick question", "Passing this to him.")
+    check("...while a real person at that company still is", st(em) == "replied")
+    # bounce window reset on resume
+    bx, _ = tmp_box(OWNER, f"rs4-{uuid.uuid4().hex[:5]}.example")
+    q(f"update email_accounts set send_paused_reason='Auto-paused: bounce rate 30% (3 of 10 sends bounced)', bounce_check_from='2020-01-01' where id='{bx}'")
+    q(f"update email_accounts set send_paused_reason=null where id='{bx}'")
+    check("clearing a mailbox pause (any path) restarts its bounce window", q(f"select bounce_check_from > now() - interval '1 minute' f from email_accounts where id='{bx}'")[0]["f"] is True)
+    # campaigns screen: list pause shows, resume works; partly launched shows Running and can be paused
+    leads = [dict(email=f"r4-camp{i}-{TAG}@example.com", **COPY) for i in range(3)]
+    for l in leads: seed_mv(l["email"], "ok")
+    lid = new_list(CALEB, leads, name=f"TEST-HARD {TAG} r4 camp"); gate(CALEB, lid)
+    camp = lambda: next((c for c in rpc(ADMIN, "admin_campaigns", p_fresh=True)[1] if c["list_id"] == lid), None)
+    q(f"update dial_lists set send_paused_reason='Auto-paused: bounce rate 33.3% (3 of 9 sends bounced)' where id='{lid}'")
+    c = camp()
+    check("Campaigns: a list the bounce guard paused shows Paused with the reason and numbers", c and c["status"] == "paused" and c["bounce_paused"] is True and "3 of 9" in (c["paused_reason"] or ""), c and (c["status"], c["paused_reason"]))
+    code, res = rpc(ADMIN, "campaign_resume", p_list=lid)
+    row = q(f"select send_paused_reason r, bounce_check_from > now() - interval '1 minute' f from dial_lists where id='{lid}'")[0]
+    check("...and Resume clears it and restarts the bounce window", code in (200, 204) and row["r"] is None and row["f"] is True, (code, res, row))
+    check("Resume on something that is not paused still says so", rpc(ADMIN, "campaign_resume", p_list=lid)[0] in (400, 409, 500))
+    q(f"update dials set seq_state='active', seq_day0='2026-12-10' where id=(select id from dials where list_id='{lid}' order by created_at limit 1)")
+    c = camp()
+    check("Campaigns: a partly launched campaign shows Running with x of y started", c and c["status"] == "live" and c["counts"]["started"] == 1 and c["counts"]["ready"] == 2, c and (c["status"], c["counts"]))
+    code, _ = rpc(ADMIN, "campaign_pause", p_list=lid)
+    check("...and can be paused", code in (200, 204) and camp()["status"] == "paused")
+    # do not email
+    code, res = rpc(ADMIN, "suppress_many", p_text="gmail.com yahoo.com foo.bar john.smith", p_reason=f"r4{TAG}")
+    check("suppress_many refuses free-mail domains and made-up domains", code == 200 and res["domains"] == 0 and res["refused"] == ["gmail.com", "yahoo.com"] and set(res["skipped"]) == {"foo.bar", "john.smith"}, (code, res))
+    check("...and gmail.com is not suppressed", q("select is_suppressed('anyone@gmail.com') f")[0]["f"] is False)
+    cdom = f"r4co{TAG}.hardtest.org"
+    q(f"update dials set email='r4-camp1-{TAG}@{cdom}' where list_id='{lid}' and email like 'r4-camp1-%'")
+    codep, pv = rpc(ADMIN, "suppress_preview", p_text=f"{cdom} gmail.com")
+    check("suppress_preview: counts the leads a company domain will move and lists the refused ones", codep == 200 and pv["domains"] == [{"domain": cdom, "leads": 1}] and pv["refused"] == ["gmail.com"], pv)
+    check("suppress_preview / suppress_many are admin only", rpc(JORDAN, "suppress_preview", p_text="x.com")[0] != 200 and rpc(JORDAN, "suppress_many", p_text="x.com")[0] != 200)
+    rpc(ADMIN, "suppress_many", p_text=f"r4pct{TAG}@example.com", p_reason=f"r4 100% sure_{TAG}")
+    n_all = rpc(ADMIN, "suppression_list", p_search="%", p_limit=5)[1]["total"]; n_lit = rpc(ADMIN, "suppression_list", p_search="100% sure_", p_limit=5)[1]["total"]
+    check("suppression search treats % and _ as plain characters", n_all <= 1 and n_lit == 1, (n_all, n_lit))
+    check("start_emails takes a per-list lock (two launches at once cannot double count)", q("select pg_get_functiondef('public.start_emails(uuid,integer,uuid[])'::regprocedure) like '%pg_advisory_xact_lock%' f")[0]["f"] is True)
+    q(f"delete from suppressed_emails where email like '%{TAG}%' or reason like '%{TAG}%'"); q(f"delete from suppressed_domains where reason like '%{TAG}%' or domain like '%{TAG}%'")
+    q(f"delete from email_messages where from_address like '%{TAG}%' or from_address like '%hardtest-mail.example'")
+    q(f"delete from email_verifications where email like 'r4-%{TAG}%'")
+
+
 if __name__ == "__main__":
     ok = True
     try:
-        run()
+        if "round4" in sys.argv: round4()   # just the round-4 section (fast re-run while fixing)
+        else: run(); round4()
     except Exception:
         traceback.print_exc(); ok = False
     finally:

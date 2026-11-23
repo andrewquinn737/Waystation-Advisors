@@ -36,7 +36,8 @@ export function resultSentence(r) {
   if (r.held_for_copy) s += ` ${r.held_for_copy} need edits.`;
   if (r.remaining_ready) s += ` ${r.remaining_ready} still ready.`;
   if (r.backup_total) s += ` In this list ${r.backup_total} ${r.backup_total === 1 ? "lead is" : "leads are"} calls only${r.backup_no_email ? ` (${r.backup_no_email} with no email address)` : ""}.`;
-  if (started) s += r.est_days_to_send_firsts > 1 ? ` First emails finish going out in about ${r.est_days_to_send_firsts} business days at this owner's mailbox capacity.` : " First emails go out today or the next business day.";
+  const first = r.first_send_day ? ymd(r.first_send_day) : "";
+  if (started) s += r.est_days_to_send_firsts > 1 ? ` First emails start ${first || "the next business day"} and finish in about ${r.est_days_to_send_firsts} business days at this owner's mailbox capacity.` : ` First emails go out ${first ? "on " + first : "today or the next business day"}.`;
   return s;
 }
 
@@ -49,7 +50,7 @@ function previewHTML(p, owner) {
   else {
     const dom = (p.domains || []).filter((d) => d.limited);
     lines.push(`<p>Sends from <b>${plural(boxes.length, MANDATE[p.mandate] ? MANDATE[p.mandate] + " mailbox" : "mailbox", MANDATE[p.mandate] ? MANDATE[p.mandate] + " mailboxes" : "mailboxes")}</b>, up to <b>${p.day_capacity} a day</b> in all, weekdays 8:30am to 5pm ${esc(p.timezone || "")}.</p>
-      <ul class="cp-det-boxes">${boxes.map((m) => `<li>${esc(m.address)} <span class="ad-muted">${m.cap} a day${m.reason ? ", " + esc(m.reason) : ""}</span></li>`).join("")}</ul>
+      <ul class="cp-det-boxes">${boxes.map((m) => `<li>${esc(m.address)} <span class="ad-muted">${m.cap} a day${m.reason ? (new RegExp("^Daily limit " + m.cap + "$").test(m.reason) ? " (limit set to " + m.cap + ")" : ", " + esc(m.reason)) : ""}</span></li>`).join("")}</ul>
       ${dom.length ? `<p class="ad-muted">${dom.map((d) => `${esc(d.domain)} is capped at ${d.domain_cap} a day across its ${d.mailboxes} mailboxes`).join("; ")}.</p>` : ""}`);
     if (p.would_send > 0 && p.finish_on) lines.push(`<p>First emails start <b>${esc(ymd(p.first_send_day))}</b>${p.days_to_send_firsts > 1 ? ` and finish about <b>${esc(ymd(p.finish_on))}</b>` : " and are all out that day"}. Follow-ups go out on their own schedule after that.</p>`);
   }
@@ -67,7 +68,8 @@ export function openLaunch(c, onDone) {
   const q = (s) => sheet.querySelector(s), close = () => { sheet.remove(); document.removeEventListener("keydown", onKey); };
   const onKey = (e) => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", onKey);
-  sheet.addEventListener("click", (e) => { if (e.target === sheet) close(); });
+  const openedAt = Date.now();   // a double click on Launch must not land on the backdrop and close the sheet
+  sheet.addEventListener("click", (e) => { if (e.target === sheet && Date.now() - openedAt > 500) close(); });
   q("#adCancel").onclick = close;
   rpc1("campaign_launch_preview", { p_list: c.list_id }).then(({ data, error }) => {
     if (!q("#adPrev")) return;

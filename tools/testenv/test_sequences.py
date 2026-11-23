@@ -94,6 +94,7 @@ def cleanup():
     q("delete from scheduled_emails where account_id in (select id from email_accounts where label='TEST-TEMP-BOX')")
     q("delete from email_accounts where label='TEST-TEMP-BOX'")
     q("delete from email_verifications where source='test' or email like '%@example.com'")
+    q("delete from suppressed_emails where email like 'pat%@example.com' or (source = 'bounce' and email = any (array[" + ",".join(lit(x) for x in SINKS) + "]))")   # the bounce test now hits a real hard bounce ("failed permanently"); do not carry it into the next run
     q("update email_accounts set send_paused_reason=null where send_paused_reason in ('test pause', 'test isolation')")
     q(f"update profiles set timezone = null where id = '{uid(GAVIN)}'")
     q(f"update profiles set timezone = 'America/Denver' where id = '{uid(CALEB)}'")

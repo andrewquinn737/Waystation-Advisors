@@ -9,7 +9,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const MANDATE = { ma: "M&A", data: "Data" };
 const CHIP = { draft: "Draft", ready: "Ready to launch", live: "Running", paused: "Paused", done: "Finished" };
-let camps = [], showDone = false;
+let camps = [], showDone = false, loadedAt = null;
 
 function msg(text, ok = false) { const el = $("cpMsg"); el.textContent = text || ""; el.classList.toggle("hidden", !text); el.classList.toggle("ok", ok); }
 
@@ -21,10 +21,16 @@ export function initCampaigns() {
 }
 // Read the cached stats first (fast), then ask the server to refresh them in the background and redraw only if something changed.
 async function load() {
-  $("cpList").innerHTML = `<p class="ad-empty">Loading...</p>`;
+  if (!camps.length) $("cpList").innerHTML = `<p class="ad-empty">Loading...</p>`;
   const { data, error } = await supabase.rpc("admin_campaigns", { p_fresh: false });
-  if (error) { $("cpList").innerHTML = ""; msg("Couldn't load campaigns: " + error.message + " "); return retryLink(); }
-  msg(""); camps = data || []; render();
+  if (error) {
+    // keep what was loaded: a dropped connection must not wipe the list
+    const offline = /fetch|network|offline/i.test(error.message || "") || navigator.onLine === false;
+    if (camps.length) msg(`${offline ? "You're offline" : "Couldn't refresh"}. Showing what was loaded at ${loadedAt?.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. `);
+    else { $("cpList").innerHTML = ""; msg(offline ? "You're offline. Check your connection. " : "Couldn't load campaigns. Try again. "); }
+    return retryLink();
+  }
+  msg(""); camps = data || []; loadedAt = new Date(); render();
   supabase.rpc("admin_campaigns", { p_fresh: true }).then(({ data: fresh, error: e2 }) => {
     if (e2 || !fresh || !$("cpList") || JSON.stringify(fresh) === JSON.stringify(camps)) return;
     camps = fresh; if (!menuEl) render();
@@ -45,9 +51,10 @@ function hint(c) {
   const n = c.counts;
   if (c.status === "done") return "";
   if (!c.mailboxes) return `<span class="warn">${esc(c.owner || "The owner")} has no sending mailbox yet. Add one under Email accounts before launching.</span>`;
-  if (c.status === "paused") return `<span class="warn">Paused${c.paused_reason ? ": " + esc(c.paused_reason) : ""}. Nothing is sent until you resume.</span>`;
+  if (c.status === "paused") return `<span class="warn">${c.bounce_paused ? "Paused: " + esc(String(c.paused_reason || "bounce rate").replace(/^Auto-paused:\s*/i, "")) : "Paused" + (c.paused_reason ? ": " + esc(c.paused_reason) : "")}. Nothing is sent until you resume.</span>`;
   if (c.status === "draft" && !c.has_spintax && !n.ready && !n.need_fix) return `No emails yet. Design them in Claude.`;
-  if (c.status === "ready") return c.launched_at ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "email is", "emails are")} ready to launch.`;
+  if (n.started > 0 && n.ready > 0) return n.copy_changed > 0 ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "more email is", "more emails are")} ready. ${n.active} running.`;
+  if (c.status === "ready") return `${plural(n.ready, "email is", "emails are")} ready to launch.`;
   return "";
 }
 function row(c) {
@@ -60,7 +67,7 @@ function row(c) {
   const note = [hint(c), held].filter(Boolean).join(" ");
   return `<article class="cp-row" data-id="${esc(c.list_id)}">
     <div class="cp-name"><b title="${esc(c.name || "")}">${esc(c.name || "(untitled)")}</b><span>${esc(sub)}</span></div>
-    <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span></div>
+    <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span>${c.status === "live" && n.ready > 0 ? `<span class="cp-sub">${n.started} of ${n.started + n.ready + n.need_fix} started</span>` : ""}</div>
     ${statCells(n)}
     <div class="cp-act${pick ? "" : " cp-act-solo"}">${pick ? `<button type="button" class="btn small" data-a="${pick[0]}"${pick[2] ? ` disabled title="Add a sending mailbox under Email accounts first"` : ""}>${pick[1]}</button>` : "<span></span>"}
       <button type="button" class="cp-more" data-menu aria-label="More actions" aria-haspopup="menu" aria-expanded="false">&#8943;</button></div>

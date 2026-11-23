@@ -132,6 +132,8 @@ def _messages(b):
     check("Messages: no page errors", not clean_errs(errs), clean_errs(errs)[:3])
     ctx.close()
     subprocess.run(["python3", "copy_live_to_test.py", "--tables", "email_messages"], capture_output=True)   # restore the copied rows
+    # the copy runs with triggers off and live has no is_system flags yet: flag the copied bounces like the trigger / backfill would, or the Inbox regression check sees them
+    q("update email_messages set is_system = true, system_kind = email_system_kind(from_address, subject) where direction='inbound' and is_system=false and email_system_kind(from_address, subject) is not null")
 
 def deleted_tabs(b):
     print("-- H. Deleted tabs: restore + purge")

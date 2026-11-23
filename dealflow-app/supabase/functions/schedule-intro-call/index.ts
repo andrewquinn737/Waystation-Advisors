@@ -16,9 +16,10 @@
 //
 // Request body (JSON), sent by the frontend:
 //   {
+//     client_id | dial_id: uuid   (the client / dial the call is for; the caller must own it, lead its owner, or be an admin)
 //     client_name: string,
 //     client_email: string,
-//     intern_email: string,
+//     (intern_email is ignored: the guest is always the signed-in caller's own profile email)
 //     date: "YYYY-MM-DD",
 //     time: "HH:MM"       (24-hour, local to `timezone`),
 //     timezone: string    (IANA zone, e.g. "America/New_York"),
@@ -97,6 +98,43 @@ function isWithinBookableHours(utcDate: Date): boolean {
   return isWeekday && totalMin >= 8 * 60 && totalMin <= 21 * 60 + 30;
 }
 
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/;
+// Best-effort per-person limit (instances are short lived, so this stops a loop, not a determined abuser; Calendly has its own limits).
+const hits = new Map<string, number[]>();
+function limited(uid: string): boolean {
+  const now = Date.now(), recent = (hits.get(uid) || []).filter((t) => now - t < 60_000);
+  recent.push(now); hits.set(uid, recent);
+  return recent.length > 8;
+}
+
+// The caller must be a signed-in person (not just the public anon key) who owns the client / dial, leads its owner, or is an admin.
+async function authorize(req: Request, body: Record<string, unknown>): Promise<{ email: string | null } | Response> {
+  const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) return jsonResponse({ error: "Sign in first." }, 401);
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const { data: u, error: ue } = await admin.auth.getUser(jwt);
+  if (ue || !u?.user) return jsonResponse({ error: "Your session isn't valid. Please sign in again." }, 401);
+  const { data: me } = await admin.from("profiles").select("id, role, email, team_id").eq("id", u.user.id).maybeSingle();
+  if (!me) return jsonResponse({ error: "No account found for this login." }, 403);
+  const clientId = typeof body.client_id === "string" ? body.client_id : "", dialId = typeof body.dial_id === "string" ? body.dial_id : "";
+  if (!UUID.test(clientId) && !UUID.test(dialId)) return jsonResponse({ error: "client_id or dial_id is required." }, 400);
+  let ownerId: string | null = null;
+  if (UUID.test(clientId)) ownerId = (await admin.from("clients").select("created_by").eq("id", clientId).maybeSingle()).data?.created_by ?? null;
+  else ownerId = (await admin.from("dials").select("created_by").eq("id", dialId).maybeSingle()).data?.created_by ?? null;
+  if (!ownerId) return jsonResponse({ error: "That client was not found." }, 404);
+  let ok = ownerId === me.id || me.role === "admin";
+  if (!ok && me.role === "team_lead") {
+    const { data: owner } = await admin.from("profiles").select("team_id, role").eq("id", ownerId).maybeSingle();
+    const { data: teams } = await admin.rpc("my_team_ids", { uid: me.id });
+    ok = !!owner?.team_id && ["intern", "independent_lead"].includes(owner.role) && Array.isArray(teams) && teams.includes(owner.team_id);
+  }
+  if (!ok) return jsonResponse({ error: "You can only schedule calls for your own clients." }, 403);
+  if (limited(me.id)) return jsonResponse({ error: "Too many requests. Wait a minute and try again." }, 429);
+  return { email: me.email || null };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: CORS_HEADERS });
@@ -104,6 +142,23 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
+
+  let body: {
+    client_id?: string;
+    dial_id?: string;
+    client_name?: string;
+    client_email?: string;
+    date?: string;
+    time?: string;
+    timezone?: string;
+  };
+  try {
+    body = await req.json();
+  } catch {
+    return jsonResponse({ error: "Invalid request body." }, 400);
+  }
+  const who = await authorize(req, body as Record<string, unknown>);
+  if (who instanceof Response) return who;
 
   // Credentials: edge-function env secrets first, else the ones an admin saved under Admin > Settings > Connect Calendly
   // (app_secrets via the calendly_connect RPC). Automatic booking is simply "off" until one of them exists.
@@ -126,22 +181,9 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  let body: {
-    client_name?: string;
-    client_email?: string;
-    intern_email?: string;
-    date?: string;
-    time?: string;
-    timezone?: string;
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return jsonResponse({ error: "Invalid request body." }, 400);
-  }
-
-  const { client_name, client_email, intern_email, date, time, timezone } = body;
-  if (!client_email || !date || !time || !timezone) {
+  const { client_name, client_email, date, time, timezone } = body;
+  const intern_email = who.email;   // never taken from the request
+  if (!client_email || !EMAIL.test(client_email) || !date || !time || !timezone) {
     return jsonResponse({ error: "Missing required fields (client email, date, time, or time zone)." }, 400);
   }
 

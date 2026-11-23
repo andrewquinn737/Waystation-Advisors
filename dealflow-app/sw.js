@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v124";
+const CACHE = "waystation-shell-v125";
 // Every page, script and stylesheet is precached (a page whose module is missing offline used to hang on its skeleton for good).
 const SHELL = [
   "/",
@@ -15,7 +15,7 @@ const SHELL = [
   "/js/admin.js", "/js/adminAccounts.js", "/js/adminCalendly.js", "/js/adminCampaigns.js",
   "/js/adminLaunch.js", "/js/adminOnboarding.js", "/js/adminSettings.js", "/js/adminSuppression.js", "/js/advancedSettings.js", "/js/aiChat.js",
   "/js/aiChatSetup.js", "/js/auth.js", "/js/autodial.js", "/js/callAudio.js",
-  "/js/callPanel.js", "/js/callRecordings.js", "/js/callSession.js", "/js/callTranscript.js",
+  "/js/callLeave.js", "/js/callPanel.js", "/js/callRecordings.js", "/js/callSession.js", "/js/callTranscript.js",
   "/js/callbackBanners.js", "/js/claudeConnect.js", "/js/claudeHelp.js", "/js/clientForm.js",
   "/js/clientCalls.js", "/js/clients.js", "/js/config.js", "/js/contactIcons.js", "/js/copyCommon.js",
   "/js/copyGate.js", "/js/copyLint.js", "/js/copyReview.js", "/js/copyReviewScreen.js",
@@ -122,7 +122,14 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if ("focus" in client) return client.focus();
+        // an open window goes to the notification's own link (e.g. the client Timeline), not just to the front
+        if ("focus" in client) {
+          return client.focus().then((c) => {
+            const w = c || client;
+            try { if (w.navigate && new URL(targetUrl, self.location.origin).href !== w.url) return w.navigate(targetUrl).catch(() => w.postMessage({ type: "open-url", url: targetUrl })); } catch { /* fall through */ }
+            try { w.postMessage({ type: "open-url", url: targetUrl }); } catch { /* ignore */ }
+          });
+        }
       }
       if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })

@@ -278,13 +278,13 @@ def round3(b):
         ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, "admin")
         p.goto(BASE + "admin.html#suppression"); p.wait_for_selector("#supAdd", timeout=15000); p.wait_for_timeout(1500)
         addr = f"r3-ui-{__import__('uuid').uuid4().hex[:6]}@testr3.example"
-        p.fill("#supText", addr + "\nr3-ui.testr3.example"); p.fill("#supReason", "asked by phone (test)"); p.click("#supAdd"); p.wait_for_timeout(1500)
+        p.fill("#supText", addr + "\nr3-ui.hardtest.org"); p.fill("#supReason", "asked by phone (test)"); p.click("#supAdd"); p.wait_for_selector("[data-y]", timeout=5000); p.click("[data-y]"); p.wait_for_timeout(1500)   # round 4: a whole company asks first
         check("Admin > Do not email: adding an address and a domain works and shows reason + date", addr in p.inner_text("#supList") and "asked by phone" in p.inner_text("#supList") and re.search(r"[A-Z][a-z]{2} \d+, 20\d\d", p.inner_text("#supList")), p.inner_text("#supMsg"))
         p.fill("#supSearch", addr); p.wait_for_timeout(900)
         check("Admin > Do not email: search narrows the list", p.locator(".sup-row").count() == 1)
         p.click(".sup-row .btn"); p.wait_for_selector("[data-y]", timeout=5000); p.click("[data-y]"); p.wait_for_timeout(1200)
         check("Admin > Do not email: remove (with a confirm) takes it off", sb.test_sql(f"select count(*) n from suppressed_emails where email='{addr}'")[0]["n"] == 0)
-        sb.test_sql("delete from suppressed_domains where domain='r3-ui.testr3.example'")
+        sb.test_sql("delete from suppressed_domains where domain='r3-ui.hardtest.org'")
         # review paging: 120 drafts, 50 at a time
         rl = sb.test_sql(f"insert into dial_lists(name,dial_type,status,created_by,mandate,sort_order) values ('TEST-R3 review','seller','current','{adm}','ma',902) returning id")[0]["id"]
         sb.test_sql(f"""insert into dials(list_id,created_by,company_name,full_name,email,sequence,seq_state,email_subject,email_1,email_2)
@@ -326,9 +326,121 @@ def round3(b):
         sb.test_sql("delete from call_status_changes where company_name like 'TEST-R3 %'")
     print()
 
+def round4(b):
+    """Round-4 review fixes: call bar vs the card (375 + desktop), state select with 2-letter codes, intro revert keeps the callback time,
+    leave-mid-call guard, Do-not-email free-mail refusal, Campaigns pause / partly launched, CSV formula escaping. Test data is TEST-R4, removed at the end."""
+    print("-- round 4 review fixes")
+    adm = sb.test_sql("select id from profiles where full_name='Test Admin'")[0]["id"]
+    lid = None
+    try:
+        lid = sb.test_sql(f"insert into dial_lists(name,dial_type,status,created_by,mandate,sort_order) values ('TEST-R4 list','seller','current','{adm}','ma',902) returning id")[0]["id"]
+        mk = lambda name, state, extra="": sb.test_sql(f"insert into dials(list_id,created_by,company_name,full_name,email,mobile_phone,city,state,industry,contact_status{extra[0] if extra else ''}) values ('{lid}','{adm}','{name}','Rae {name[-2:]}','r4{name[-2:].lower()}@testr4.example','(801) 555-0140','Provo',{state},'Plumbing','uncontacted'{extra[1] if extra else ''}) returning id")[0]["id"]
+        d_ut = mk("TEST-R4 Co UT", "'UT'"); d_on = mk("TEST-R4 Co ON", "'Ontario'"); d_cb = mk("TEST-R4 Co CB", "'Utah'")
+        for vp, nm in [({"width": 1280, "height": 900}, "desktop"), ({"width": 375, "height": 740}, "375")]:
+            ctx = b.new_context(viewport=vp); errs = []; p = new_page(ctx, errs); login(p, "admin")
+            p.goto(BASE + "dials.html"); p.wait_for_selector(".dial-tab", timeout=15000)
+            if not p.query_selector(f'.dial-tab[data-id="{lid}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
+            if p.query_selector(f'.dial-tab[data-id="{lid}"]:not(.active)'): p.click(f'.dial-tab[data-id="{lid}"]:not(.active)')
+            p.wait_for_timeout(2500)
+            p.locator(".dh-row", has_text="TEST-R4 Co UT").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+            # in-call bar open with the card: More, the last outcome and Save can be scrolled to and are not under the bar
+            p.evaluate("""async () => { const m = await import('/js/callPanel.js'); window.__pnl = m.openCallPanel({ name: 'X', onHangup() {}, onOutcome: async () => true, onNext() {}, outcomes: [["a", "A"]] }); window.__pnl.ended('Call ended'); }""")
+            p.wait_for_timeout(300)
+            has = p.evaluate("document.body.classList.contains('has-call-bar') && parseInt(getComputedStyle(document.documentElement).getPropertyValue('--call-bar-h')) > 60")
+            check(f"Calls ({nm}): the open call bar gives popups bottom room (class + bar height variable)", has)
+            chips_hidden = p.evaluate("[...document.querySelectorAll('.call-panel .call-outcome-chip')].every(x => x.offsetParent === null)")
+            check(f"Calls ({nm}): with the card open the bar does not repeat the outcome buttons", chips_hidden)
+            p.click(".dial-more summary", timeout=5000)   # Playwright refuses to click when the bar intercepts the pointer
+            p.evaluate("document.querySelector('#dialModalBackdrop').scrollTo(0, 99999)")
+            r = p.evaluate("""() => { const bar = document.querySelector('.call-panel').getBoundingClientRect(); const last = [...document.querySelectorAll('#dialModalBackdrop .dial-modal > *')].filter(x => x.offsetParent).pop().getBoundingClientRect(); return { barTop: bar.top, lastBottom: last.bottom }; }""")
+            check(f"Calls ({nm}): scrolled to the end, the card's last block ends above the bar", r["lastBottom"] <= r["barTop"] + 1, r)
+            p.evaluate("window.__pnl.close()")
+            check(f"Calls ({nm}): closing the bar removes the room again", not p.evaluate("document.body.classList.contains('has-call-bar')"))
+            # state: a 2-letter code shows its full name, and Save keeps it
+            p.click("#dialEditBtn"); p.wait_for_selector("#d_state", timeout=5000)
+            check(f"Calls ({nm}): the edit form shows 'Utah' selected for a stored 'UT'", p.input_value("#d_state") == "UT" and p.eval_on_selector("#d_state", "s => s.options[s.selectedIndex].text") == "Utah", p.input_value("#d_state"))
+            p.fill("#d_industry", "Plumbing and HVAC"); p.click("#dialSaveBtn"); p.wait_for_timeout(1500)
+            row = sb.test_sql(f"select state, industry from dials where id='{d_ut}'")[0]
+            check(f"Calls ({nm}): Save on a dial stored as 'UT' keeps it exactly as 'UT' (never null, not rewritten)", row["state"] == "UT" and row["industry"] == "Plumbing and HVAC", row)
+            sb.test_sql(f"update dials set state='UT' where id='{d_ut}'")
+            p.keyboard.press("Escape") if False else None
+            ctx.close()
+        # an unmatched stored state survives an edit
+        ctx = b.new_context(viewport={"width": 1280, "height": 900}); p = new_page(ctx, []); login(p, "admin")
+        p.goto(BASE + "dials.html"); p.wait_for_selector(".dial-tab", timeout=15000)
+        if not p.query_selector(f'.dial-tab[data-id="{lid}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
+        if p.query_selector(f'.dial-tab[data-id="{lid}"]:not(.active)'): p.click(f'.dial-tab[data-id="{lid}"]:not(.active)')
+        p.wait_for_timeout(2500)
+        p.locator(".dh-row", has_text="TEST-R4 Co ON").first.click(); p.wait_for_selector("#dialEditBtn", timeout=8000); p.click("#dialEditBtn"); p.wait_for_selector("#d_state")
+        p.fill("#d_city", "Toronto"); p.click("#dialSaveBtn"); p.wait_for_timeout(1500)
+        check("Calls: a state that is not in the list ('Ontario') is kept when the dial is edited", sb.test_sql(f"select state s from dials where id='{d_on}'")[0]["s"] == "Ontario")
+        # intro revert restores the callback time and the time step is prefilled from it
+        cb = sb.test_sql(f"update dials set contact_status='busy_callback', callback_user_id='{adm}' where id='{d_cb}' returning 1")
+        sb.test_sql(f"update dials set callback_at=date_trunc('hour', now()) + interval '3 days 15 hours 30 minutes', callback_defaulted=false where id='{d_cb}'")
+        want = sb.test_sql(f"select callback_at a from dials where id='{d_cb}'")[0]["a"]
+        p.goto(BASE + f"dials.html?dial={d_cb}"); p.wait_for_timeout(3500)
+        p.wait_for_selector(".dial-outcome", timeout=8000)
+        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
+        p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeDateInput", state="visible", timeout=8000); p.wait_for_timeout(500)
+        check("Calls: the intro time step is prefilled with the date of the callback time the owner gave", bool(p.input_value("#introCallTimeDateInput")), p.input_value("#introCallTimeDateInput"))
+        p.click("#introCallTimeCancelBtn") if p.query_selector("#introCallTimeCancelBtn") else p.keyboard.press("Escape"); p.wait_for_timeout(1800)
+        row = sb.test_sql(f"select contact_status s, callback_at a, callback_defaulted d from dials where id='{d_cb}'")[0]
+        check("Calls: cancelling the intro flow puts back the status AND the original callback time (not the default)", row["s"] == "busy_callback" and row["a"] == want and row["d"] is False, (row, want))
+        ctx.close()
+        # leave-mid-call guard (the shared helper the call session installs)
+        ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        p.goto(BASE + "profile.html"); p.wait_for_timeout(1500)
+        out = p.evaluate("""async () => { const m = await import('/js/callLeave.js'); let rows = 0, hung = 0, fin = false;
+            const rm = m.installLeaveGuard({ isFinished: () => fin, hangup: () => hung++, closeRow: () => rows++ });
+            const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); const prompted = e.defaultPrevented;
+            window.dispatchEvent(new Event('pagehide')); const afterHide = { rows, hung };
+            fin = true; const e2 = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e2);
+            rm(); return { prompted, afterHide, quietWhenDone: !e2.defaultPrevented }; }""")
+        check("Leaving mid-call: the browser is asked to confirm; the page going closes the call row and hangs up; nothing once the call is over", out["prompted"] and out["afterHide"] == {"rows": 1, "hung": 1} and out["quietWhenDone"], out)
+        p.evaluate("""async () => { const m = await import('/js/callLeave.js'); window.__rows = 0; window.__rm = m.installLeaveGuard({ isFinished: () => false, hangup() {}, closeRow: () => window.__rows++ });
+            const a = document.createElement('a'); a.href = 'dials.html'; a.id = 'r4link'; a.textContent = 'go'; document.body.appendChild(a); }""")
+        p.click("#r4link"); p.wait_for_timeout(400)
+        check("Leaving mid-call: tapping an in-app link asks 'End the call?' first", "End the call?" in p.inner_text("body") and "profile.html" in p.url, p.url)
+        p.click("[data-n]"); p.wait_for_timeout(300)
+        check("...Cancel keeps the call and the page", "profile.html" in p.url and p.evaluate("window.__rows") == 0)
+        p.evaluate("window.__rm()")
+        ctx.close()
+        # Do not email + Campaigns + CSV formulas
+        ctx = b.new_context(viewport={"width": 1280, "height": 900}); errs = []; p = new_page(ctx, errs); login(p, "admin")
+        p.goto(BASE + "admin.html"); p.wait_for_timeout(1500)
+        p.click("text=Do not email"); p.wait_for_selector("#supText", timeout=8000)
+        p.fill("#supText", "gmail.com"); p.click("#supAdd"); p.wait_for_timeout(1500)
+        txt = p.inner_text("#supMsg")
+        check("Do not email: a bare free-mail domain is refused with a clear message", "free-mail" in txt and "individual addresses" in txt and sb.test_sql("select is_suppressed('x@gmail.com') f")[0]["f"] is False, txt)
+        p.fill("#supText", "foo.bar"); p.click("#supAdd"); p.wait_for_timeout(1500)
+        check("Do not email: a made-up domain is not accepted", "not recognised" in p.inner_text("#supMsg"), p.inner_text("#supMsg"))
+        cdom = "r4confirm.hardtest.org"
+        sb.test_sql(f"update dials set email='r4co@{cdom}', sequence='email5', seq_state='awaiting_copy' where id='{d_ut}'")
+        p.fill("#supText", cdom); p.fill("#supReason", "TEST-R4"); p.click("#supAdd"); p.wait_for_timeout(1200)
+        shown = "Block whole companies?" in p.inner_text("body") and "1 lead will move to backup" in p.inner_text("body")
+        check("Do not email: a company domain asks first and says how many leads move", shown, p.inner_text("body")[:200])
+        p.click("[data-n]"); p.wait_for_timeout(500)
+        check("...and Cancel adds nothing", sb.test_sql(f"select count(*) n from suppressed_domains where domain='{cdom}'")[0]["n"] == 0)
+        sb.test_sql(f"delete from suppressed_domains where domain='{cdom}'")
+        csv = p.evaluate("""() => { const q = (v) => { let t = String(v ?? ''); if (/^[=+\\-@\\t\\r]/.test(t) && !/^-?\\d+(\\.\\d+)?$/.test(t)) t = "'" + t; return t; }; return ['=HYPERLINK("x")', '+1', '@a', '-5', 'Jane', '-cmd'].map(q); }""")
+        check("CSV export: cells starting = + - @ get a leading apostrophe; plain negative numbers do not", csv == ["'=HYPERLINK(\"x\")", "'+1", "'@a", "-5", "Jane", "'-cmd"], csv)
+        ctx.close()
+        # 375: admin tab strip has room between labels
+        ctx = b.new_context(viewport={"width": 375, "height": 800}); p = new_page(ctx, []); login(p, "admin")
+        p.goto(BASE + "admin.html"); p.wait_for_timeout(1500)
+        gaps = p.evaluate("""() => { const a = [...document.querySelectorAll('.ad-tabs a')].map(x => x.getBoundingClientRect()); const g = []; for (let i = 1; i < a.length; i++) g.push(Math.round(a[i].left - a[i-1].right)); return { g, w: document.documentElement.scrollWidth }; }""")
+        check("Admin tabs at 375: labels do not touch and the page does not scroll sideways", all(x >= 0 for x in gaps["g"]) and gaps["w"] <= 376, gaps)
+        ctx.close()
+    finally:
+        if lid:
+            sb.test_sql(f"delete from dials where list_id='{lid}'"); sb.test_sql(f"delete from dial_lists where id='{lid}'")
+        sb.test_sql("delete from suppressed_domains where reason='TEST-R4'")
+
 def run():
     with sync_playwright() as pw:
         b = pw.chromium.launch(channel="chrome", headless=True)
+        if "round4" in sys.argv:   # just the round-4 checks (fast re-run while fixing)
+            round4(b); b.close(); print(f"\n{sum(results)}/{len(results)} passed"); return
         for role in USERS:
             ctx = b.new_context(viewport={"width": 1100, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, role)
             for pg in ["profile", "clients", "dials", "messages"] + (["admin"] if role == "admin" else []):
@@ -359,6 +471,7 @@ def run():
         round1(b)
         round2(b)
         round3(b)
+        round4(b)
         b.close()
     print(f"\n{sum(results)}/{len(results)} passed")
 run()

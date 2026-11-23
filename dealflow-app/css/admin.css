@@ -202,3 +202,11 @@ a.btn#adOpen { text-decoration: none; }
 .cp-steps th:first-child, .cp-steps td:first-child { text-align: left; }
 .cp-fine { font-size: 11.5px; margin: 6px 0 0; }
 @media (max-width: 420px) { .cp-name { grid-column: 1 / -1; } .cp-status { grid-column: 1 / -1; justify-self: start; } }
+
+/* round 4 */
+@media (max-width: 720px) { .ad-tabs { overflow-x: auto; scrollbar-width: none; } .ad-tabs::-webkit-scrollbar { display: none; } .ad-tabs a { flex: 0 0 auto; padding: 10px 11px; font-size: 13px; } }
+.cp-status { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.cp-sub { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 999px) { .cp-name { padding-right: 52px; } .cp-row:not(:has(.cp-act-solo)) .cp-name { padding-right: 0; } }
+.cp-det-boxes { margin-bottom: 10px; }
+.cp-prev p:last-child, .cp-prev ul + p { margin-top: 10px; }

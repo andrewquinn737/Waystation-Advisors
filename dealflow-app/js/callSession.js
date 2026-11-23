@@ -12,6 +12,8 @@ import { openCallPanel } from "./callPanel.js";
 import { startCallAudio } from "./callAudio.js";
 import { startTranscript } from "./callTranscript.js";
 import { startRecorder, holdRecording } from "./callRecordings.js";
+import { installLeaveGuard } from "./callLeave.js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
 const TELNYX_SDK = "https://cdn.jsdelivr.net/npm/@telnyx/webrtc@2.27.10/lib/bundle.mjs";
 let active = false;
@@ -96,6 +98,22 @@ export async function startCall(opts) {
     onDtmf: (d) => { try { call?.dtmf(d); } catch { /* call not connected yet */ } },
   });
 
+
+  // Leaving the page mid-call (Back, a nav tap, closing the tab) used to drop the call silently and leave its row open forever.
+  // Now: the browser asks first; a tap on an in-app link asks "End the call?"; and if the page goes anyway the call row is closed
+  // (end time, answered, length, end_reason = left_page). The dial gets no outcome, so it simply stays in the queue.
+  let accessToken = null;
+  supabase.auth.getSession().then(({ data }) => { accessToken = data?.session?.access_token || null; }).catch(() => {});
+  const closeRow = () => {
+    if (!callId || !accessToken) return;
+    const now = new Date();
+    const patch = { ended_at: now.toISOString(), answered: !!answeredAt, end_reason: "left_page" };
+    if (answeredAt) patch.duration_sec = Math.max(0, Math.round((now - answeredAt) / 1000));
+    fetch(`${SUPABASE_URL}/rest/v1/calls?id=eq.${callId}`, { method: "PATCH", keepalive: true,
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + accessToken, "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify(patch) }).catch(() => {});
+  };
+  const removeLeaveGuards = installLeaveGuard({ isFinished: () => finished, hangup: () => call?.hangup(), closeRow });
+
   // Plays the call's incoming audio. Safe to call repeatedly: it (re)attaches the stream if it changed,
   // restarts playback if the browser paused it, and follows tracks that get added late.
   const attachRemote = (c) => {
@@ -118,6 +136,7 @@ export async function startCall(opts) {
     remoteAudio.srcObject = null; remoteAudio.remove();
     clearInterval(guard); guard = null;
     document.removeEventListener("visibilitychange", onVis); document.removeEventListener("visibilitychange", onVisWake); clearTimeout(micTimer);
+    removeLeaveGuards();
     active = false;
   };
   // The phone or browser can silence the microphone mid-call (another app or notification grabbing audio, a

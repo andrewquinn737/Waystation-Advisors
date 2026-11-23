@@ -764,7 +764,8 @@ export function wireReportsPopup({ profile, isAdminSync, els, escapeHtml }) {
   els.reportsTableWrap.addEventListener("click", (e) => {
     if (e.target.closest("#reportsAccountsInlineBtn")) { els.reportsAccountsVisibleBtn.click(); return; }
     if (!e.target.closest("#reportsCsvBtn") || !lastTableData?.columns?.length) return;
-    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    // spreadsheet formula injection: a name like =HYPERLINK(...) must open as text (plain negative numbers stay numbers)
+    const q = (v) => { let t = String(v ?? ""); if (/^[=+\-@\t\r]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
     const csv = [lastTableData.columns, ...lastTableData.rows].map((r) => r.map(q).join(",")).join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));

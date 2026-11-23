@@ -1,7 +1,7 @@
 import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
-import { STATES, escapeHtml, defaultClient } from "./clientForm.js";
+import { STATES, escapeHtml, defaultClient, stateOptionsHTML } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { buildSmsHref, rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import {
@@ -662,7 +662,7 @@ function placeCall(dial, phone, method) {
     onOutcome: async (status) => {
       if (!(currentDial?.id === dial.id && dialMode === "view")) return false;
       if (status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" && introInfoMissing(dial)) return false;
-      introRevert = status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? { id: dial.id, status: dial.contact_status || "uncontacted" } : null;
+      introRevert = status === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? snapIntro(dial) : null;
       const saved = !!(await updateDialStatus(status));
       if (!saved) return false;
       if (status === "intro_call_scheduled") handleScheduleIntroCallFromDial(dial);
@@ -814,7 +814,7 @@ async function flushCallNotes() {
   if (val === (currentDial.call_notes || null)) return true;
   const { error } = await supabase.from("dials").update({ call_notes: val }).eq("id", currentDial.id);
   if (error) {
-    setNotesStatus(false, `Note not saved (${friendlyMsg(error) || "no connection"}). Tap outside the box to try again.`);
+    setNotesStatus(false, `Note not saved (${(friendlyMsg(error) || "no connection").replace(/\s*(and )?press Retry\.?/i, "").replace(/\.$/, "")}). Tap outside the box to try again.`);
     return false;
   }
   currentDial.call_notes = val;
@@ -939,6 +939,7 @@ function renderTabs() {
   els.dialTabs.appendChild(els.addTabBtn);
   updateArchiveMenuVisibility();
   loadDials();
+  if (!window.__staleCallsSwept) { window.__staleCallsSwept = true; supabase.rpc("close_my_stale_calls").then(() => {}, () => {}); }   // a call row left open by a closed page / dead phone is closed here (once the call is 2h old)
 }
 
 // The tab options menu (#dialTabArchiveMenu, plus its Transfer/Client
@@ -2640,6 +2641,7 @@ function resolveEmailSubject(dial) {
 // narrower scope than this dial-level change.
 function buildDialViewHTML(dial) {
   return `
+    ${dial.mobile_phone || dial.company_phone ? "" : `<div class="help-text">No phone number. Tap the pencil to add one.</div>`}
     ${dialCallButtonsHTML(dial)}
     ${outcomeButtonsHTML(dial)}
     ${dial.email ? rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial)) : ""}
@@ -2703,12 +2705,12 @@ function wireOutcomeButtons() {
     const target = autodialTarget(value); // the Autodial setting (if on) still picks its own next company
     if (target) primeAudio();
     // Remember where the dial was, so backing out of the "Confirm the scheduled time" step can put it back.
-    introRevert = value === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? { id: dial.id, status: dial.contact_status || "uncontacted" } : null;
+    introRevert = value === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? snapIntro(dial) : null;
     const saved = await updateDialStatus(value);
     if (!saved) { // error shown by updateDialStatus; re-enable the buttons, then put the error back (the re-render clears it)
       const why = els.dialModalError.textContent;
       renderDialModal();
-      els.dialModalError.textContent = `The outcome was not saved. Nothing changed, so tap it again.${why ? ` (${friendlyMsg(why)})` : ""}`;
+      els.dialModalError.textContent = `The outcome was not saved. Nothing changed, so tap it again.${why ? ` (${friendlyMsg(why).replace(/\s*(and )?press Retry\.?/i, "")})` : ""}`;
       els.dialModalError.classList.remove("hidden");
       els.dialModalError.scrollIntoView({ block: "nearest" });
       return;
@@ -2817,8 +2819,7 @@ function buildDialEditHTML(dial) {
       <div>
         <label for="d_state">State</label>
         <select id="d_state">
-          <option value="">Select a state...</option>
-          ${STATES.map((s) => `<option value="${s}" ${dial.state === s ? "selected" : ""}>${s}</option>`).join("")}
+          ${stateOptionsHTML(dial.state)}
         </select>
       </div>
     </div>
@@ -2847,6 +2848,7 @@ function collectDialFormData() {
   const data = {
     full_name: document.getElementById("d_full_name").value.trim() || null,
     city: document.getElementById("d_city").value.trim() || null,
+    // the select always carries the stored value (code mapped to its name, or an unmatched value as its own option), so null only means "cleared on purpose"
     state: document.getElementById("d_state").value || null,
     email: document.getElementById("d_email").value.trim() || null,
     mobile_phone: document.getElementById("d_mobile_phone").value.trim() || null,
@@ -3618,7 +3620,10 @@ async function createClientRecordFromDial(dial) {
 // on Confirm re-runs every still-attached one, each independently creating
 // its own client + intro_call event for what was really only one booking.
 let introCallTimeConfirmCleanup = null;
-let introRevert = null; // { id, status }: the dial's status before "Intro call booked" was tapped
+let introRevert = null; // { id, status, callback_*}: the dial's status AND callback time before "Intro call booked" was tapped (the status flip clears the callback)
+function snapIntro(dial) {
+  return { id: dial.id, status: dial.contact_status || "uncontacted", callback_at: dial.callback_at || null, callback_user_id: dial.callback_user_id || null, callback_defaulted: dial.callback_defaulted ?? null };
+}
 
 // "Intro call booked" was tapped but no time was saved (time step cancelled, or the chooser closed): put the dial back to what it was.
 // The dials_intro_booked trigger removes the placeholder client when the status leaves "Accepted intro call".
@@ -3627,12 +3632,15 @@ async function revertIntroStatus(dialArg) {
   introRevert = null;
   const dial = dialArg || (back && (dials.find((d) => d.id === back.id) || (currentDial?.id === back.id ? currentDial : null)));
   if (!back || !dial || back.id !== dial.id || dial.contact_status !== "intro_call_scheduled") return;
-  const { error } = await supabase.from("dials").update({ contact_status: back.status }).eq("id", dial.id);
+  // restore the promised callback time in the same update (the status flip had cleared it, and a time was agreed with the owner)
+  const restore = { contact_status: back.status };
+  if (back.callback_at) Object.assign(restore, { callback_at: back.callback_at, callback_user_id: back.callback_user_id, callback_defaulted: back.callback_defaulted ?? false });
+  const { error } = await supabase.from("dials").update(restore).eq("id", dial.id);
   if (error) return showToast("The status could not be set back. Change it from the outcome buttons.", "bad");
-  dial.contact_status = back.status;
-  const idx = dials.findIndex((d) => d.id === dial.id); if (idx !== -1) dials[idx].contact_status = back.status;
-  if (currentDial?.id === dial.id) currentDial.contact_status = back.status;
+  const idx = dials.findIndex((d) => d.id === dial.id);
+  for (const target of [dial, idx !== -1 ? dials[idx] : null, currentDial?.id === dial.id ? currentDial : null]) if (target) Object.assign(target, restore);
   renderDialModal(); renderDialsTable();
+  window.dispatchEvent(new Event("callbacks-changed"));
   showToast("No time was saved, so the intro call is not booked.");
 }
 
@@ -3655,8 +3663,9 @@ function openIntroCallTimeConfirmModal(dial, { onConfirmed, manualIntro = false 
   dateInput.value = "";
   // Prefill what we already know: a callback time the owner agreed to (only when it is still ahead). The rep confirms or changes it.
   let guess = "";
-  if (dial.callback_at && Date.parse(dial.callback_at) > Date.now()) {
-    const cb = new Date(dial.callback_at), pad2 = (n) => String(n).padStart(2, "0");
+  const cbAt = introRevert?.id === dial.id && introRevert.callback_at ? introRevert.callback_at : dial.callback_at;   // captured before the status flip cleared it
+  if (cbAt && Date.parse(cbAt) > Date.now()) {
+    const cb = new Date(cbAt), pad2 = (n) => String(n).padStart(2, "0");
     const mins = Math.round((cb.getHours() * 60 + cb.getMinutes()) / 30) * 30;
     if (mins >= 7 * 60 && mins <= 19 * 60) { dateInput.value = `${cb.getFullYear()}-${pad2(cb.getMonth() + 1)}-${pad2(cb.getDate())}`; guess = `${pad2(Math.floor(mins / 60))}:${pad2(mins % 60)}`; }
   }

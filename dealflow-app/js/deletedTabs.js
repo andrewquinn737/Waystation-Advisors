@@ -344,6 +344,7 @@ export function wireDeletedTabsPopup({ menuBtn, closePageHeaderMenu, escapeHtml 
     if (e.key !== "Escape" || el.modal.classList.contains("hidden")) return;
     if (!el.purgeModal.classList.contains("hidden")) el.purgeModal.classList.add("hidden");
     else if (!el.reassignModal.classList.contains("hidden")) el.reassignModal.classList.add("hidden");
+    else el.closeBtn.click();
   });
   el.closeBtn.addEventListener("click", () => {
     loadToken++;

@@ -38,7 +38,7 @@ function callbackText(iso) {
 }
 
 export function initDialsHome({ profile, getList, getDials, openCard, isSheet, isHidden, rowIcons, wireIcons, loadFailed, loadFailedHtml }) {
-  let tasks = [], taskDials = [], followErr = "", firstLoadDone = false, queue = null, queueErr = false;
+  let tasks = [], taskDials = [], followErr = "", firstLoadDone = false, slowLoad = false, queue = null, queueErr = false;
   let nextByDial = new Map(); // dial_id -> its next upcoming step (for group 8 "In sequence")
   let emptyText = "You're all caught up.", groups = [], allLists = false, otherCount = 0; // follow-ups from other tabs are hidden unless allLists
   const tz = validTz(profile?.timezone) ? profile.timezone : TZ;
@@ -122,6 +122,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     return GROUPS.map((g, i) => {
       const items = buckets[i], sort = SORT[g.n] === undefined ? byName : SORT[g.n];
       if (sort) items.sort(sort); // groups 1-2 keep the task order (replies first, then oldest due)
+      if (g.n === 3) { const nop = (x) => (!x.d.mobile_phone && !x.d.company_phone ? 1 : 0); items.sort((a, b) => nop(a) - nop(b)); } // companies with no phone number go last (stable)
       return { ...g, items };
     }).filter((g) => g.items.length);
   }
@@ -155,6 +156,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       const c = callbackText(d.callback_at);
       bits.push(`${c.missed ? "Missed · " : ""}${esc(c.text)}`);
     }
+    if (g.n === 3 && !d.mobile_phone && !d.company_phone) bits.unshift("No phone number");
     const done = t ? actionHtml(t, d) : "";
     const icons = done || !rowIcons ? "" : rowIcons(d);
     return `<div class="mobile-card clickable-row dh-row dh-g${g.n}" role="button" tabindex="0" data-d="${esc(d.id)}">
@@ -212,11 +214,11 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     // The list itself could not be loaded: this is a Retry state, whatever the follow-ups finish doing later.
     if (loadFailed && loadFailed()) { w.innerHTML = loadFailedHtml(); return; }
     // Until the follow-ups are in, groups 1-2 are unknown: show the skeleton instead of a sheet that then jumps (unless there is no list at all).
-    if (!firstLoadDone && getList()) { w.innerHTML = skeletonSheetHtml(); return; }
+    if (!firstLoadDone && !slowLoad && getList()) { w.innerHTML = skeletonSheetHtml(); return; }
     groups = buildGroups();
-    const err = followErr ? `<div class="dh-empty">${esc(followErr)} <button type="button" class="dh-link" data-retry>Retry</button></div>` : "";
+    const err = followErr ? `<div class="dh-empty">${esc(followErr)} <button type="button" class="dh-link" data-retry>Retry</button></div>` : !firstLoadDone ? `<div class="dh-empty" aria-live="polite">Loading follow-ups...</div>` : "";
     const scope = otherCount || allLists ? `<div class="dh-scope">${allLists ? "Follow-ups from all your lists" : `${otherCount} follow-up${otherCount === 1 ? "" : "s"} due in other lists`} <button type="button" class="dh-link" data-scope>${allLists ? "Only this tab" : "Show all lists"}</button></div>` : "";
-    w.innerHTML = err + scope + (groups.length ? groups.map(sectionHtml).join("") : followErr ? "" : `<div class="dh-empty dh-done">${esc(emptyText)}</div>`);
+    w.innerHTML = err + scope + (groups.length ? groups.map(sectionHtml).join("") : followErr || !firstLoadDone ? "" : `<div class="dh-empty dh-done">${esc(emptyText)}</div>`);
     mountRows(w);
   }
   // Order of the rows on screen (prev/next in the company card follows it).
@@ -287,6 +289,6 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   };
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadFollowups(); loadQueue(); } });
   loadFollowups(); loadQueue();
-  setTimeout(() => { if (!firstLoadDone) { firstLoadDone = true; if (isSheet()) renderSheet(); } }, 6000); // never leave the skeleton up for good
+  setTimeout(() => { if (!firstLoadDone) { slowLoad = true; if (isSheet()) renderSheet(); } }, 3000); // slow follow-ups: show the companies now with a "Loading follow-ups..." line instead of a blank skeleton
   return api;
 }

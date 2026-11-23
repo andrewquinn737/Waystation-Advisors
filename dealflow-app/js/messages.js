@@ -862,7 +862,7 @@ async function openThread(threadId) {
       ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [], liveById[m.id])).join("")}
       <div class="thread-detail-actions">
         <button type="button" class="btn secondary" id="threadBackBtn">Back</button>
-        ${canReply || internQuickReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">Reply</button>` : ""}
+        ${canReply || internQuickReply ? `<button type="button" class="btn secondary" id="threadReplyBtn">${canReply && isAdmin && !acct?.mine ? `Reply as ${escapeHtml(acct?.email_address || "this mailbox")}` : "Reply"}</button>` : readOnly && acct ? `<span class="help-text">Only ${escapeHtml(ownerFirstName(acct))} can reply from this mailbox.</span>` : ""}
       </div>
     </div>
   `;
@@ -1007,7 +1007,7 @@ function attachmentDisplayName(a) {
 
 function threadMessageHTML(m, atts, live) {
   const date = new Date(m.sent_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const fromLabel = m.direction === "outbound" ? `${m.from_name || m.from_address} (you)` : m.from_name || m.from_address;
+  const fromLabel = m.direction === "outbound" ? `${m.from_name || m.from_address}${acctById(m.account_id)?.mine ? " (you)" : ""}` : m.from_name || m.from_address;
   const fromClickable = m.direction === "outbound" ? "" : ` data-participant-address="${escapeHtml(m.from_address)}"`;
   const toEntries = m.to_addresses || [];
   const toLabel = toEntries
@@ -1107,7 +1107,7 @@ function renderComposeAttachments() {
 
 function openCompose({ mode, accountId, to, subject, body, inReplyTo, threadId }) {
   // Sending needs one of YOUR OWN connected mailboxes (Profile -> Edit).
-  if (!accounts.some((a) => a.mine)) {
+  if (!accounts.some((a) => a.mine) && !(isAdmin && accountId)) {   // an admin may answer from the mailbox the thread belongs to
     showConnectEmailNotice();
     return;
   }

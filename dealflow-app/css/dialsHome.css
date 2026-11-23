@@ -69,7 +69,9 @@
 /* Touch: 44px hit areas without changing how things look (icons get an invisible vertical halo; header icons and tab pills grow). */
 @media (pointer: coarse), (max-width: 720px) {
   .dh .contact-action-btn, #dialsTableWrap .contact-action-btn { position: relative; }
-  .dh .contact-action-btn::after, #dialsTableWrap .contact-action-btn::after { content: ""; position: absolute; inset: -8px -3px; }
+  /* 40 x 44 touch area around each 28px icon (gap widened so neighbouring areas do not overlap: a stray tap must not text or email instead of calling) */
+  .dh .contact-actions, #dialsTableWrap .contact-actions { gap: 12px; }
+  .dh .contact-action-btn::after, #dialsTableWrap .contact-action-btn::after { content: ""; position: absolute; inset: -8px -6px; }
   .dial-tab { min-height: 44px; }
 }
 .dh-scope { font-size: 13px; color: var(--text-muted); padding: 2px 4px 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; }
