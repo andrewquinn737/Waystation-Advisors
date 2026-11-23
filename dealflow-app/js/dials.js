@@ -677,6 +677,18 @@ function placeCall(dial, phone, method) {
       else if (target) setTimeout(() => runAutodial(target), 0);
       return true;
     },
+    // Autodial on: a call nobody picked up is logged as "No answer" by itself, then Autodial carries on (a mobile is rung a
+    // second time first). A voicemail greeting counts as answered, so those still wait for the caller to pick the outcome.
+    onNoAnswer: () => {
+      if (!profile.autodial_enabled) return;
+      setTimeout(async () => {
+        if (!(currentDial?.id === dial.id && dialMode === "view") || isCallActive()) return; // the caller already moved on
+        const target = autodialTarget("no_response");
+        if (!(await updateDialStatus("no_response"))) return; // error is shown on the card; the caller picks it by hand
+        showToast("No answer. Marked as No answer.");
+        if (target) runAutodial(target);
+      }, 1500);
+    },
     onNext: () => { const t = nextCompanyTarget(); if (t?.dial) { primeAudio(); runAutodial(t); } else showNotice("Nothing more is due. Check Callbacks, or pick another list.", { title: "Next company" }); },
   });
 }

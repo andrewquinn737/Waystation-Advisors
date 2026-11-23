@@ -62,7 +62,7 @@ function explainFallback(why) {
   showNotice(why.msg, { title: "This call used your phone's dialer" });
 }
 
-// opts: { dial, phone, method ('mobile'|'company'), profile, onDialed(), onSummary(callId), fallbackTel(phone) }
+// opts: { dial, phone, method ('mobile'|'company'), profile, onDialed(), onSummary(callId), fallbackTel(phone), onNoAnswer() }
 export async function startCall(opts) {
   const { dial, phone, method, profile } = opts;
   if (active) { showNotice("You're already on a call. Hang up first.", { title: "Call in progress" }); return; }
@@ -85,7 +85,7 @@ export async function startCall(opts) {
   // Created inside the tap so iOS lets the audio run.
   let ctx = null, mic = null, client = null, call = null, wake = null, transcript = null, stopAudio = null;
   let callId = null, transcribe = false, answeredAt = null, finished = false, ringing = false, recorder = null;
-  try { ctx = primed && primed.state !== "closed" ? primed : new AudioContext({ sampleRate: 16000 }); primed = null; await ctx.resume(); } catch { ctx = null; }
+  try { ctx = primed && primed.state !== "closed" ? primed : new AudioContext({ sampleRate: 16000 }); primed = null; await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 1500))]); } catch { ctx = null; } // never hang on resume (a call Autodial starts without a tap)
   const remoteAudio = Object.assign(document.createElement("audio"), { autoplay: true });
   remoteAudio.setAttribute("playsinline", "");
   document.body.appendChild(remoteAudio);
@@ -343,7 +343,9 @@ export async function startCall(opts) {
         // Ended without ever ringing or being answered = the call never got out (phone service problem, number
         // refused). Say so and offer the phone's own dialer instead of calling it "No answer".
         if (!answeredAt && !ringing && !finished) { await notConnected(c); return; }
-        finish(answeredAt ? "Call ended" : "No answer");
+        const unanswered = !answeredAt && !finished;
+        await finish(answeredAt ? "Call ended" : "No answer");
+        if (unanswered) opts.onNoAnswer?.(); // rang out (or the caller gave up while it rang): nobody picked up
       }
     });
     client.connect();

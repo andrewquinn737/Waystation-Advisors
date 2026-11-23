@@ -30,5 +30,13 @@ for (const f of ["dials.html", "clients.html", "profile.html"]) {
   const h = fs.readFileSync(path.join(dir, "..", f), "utf8");
   check(`${f}: About us email row is hidden`, /id="aboutUsEmailRow" hidden>/.test(h));
 }
+const cs = fs.readFileSync(path.join(dir, "callSession.js"), "utf8");
+check("a call that rang out (never answered) reports No answer after it is logged", /const unanswered = !answeredAt && !finished;\s*await finish\([^)]*\);\s*if \(unanswered\) opts\.onNoAnswer\?\.\(\)/.test(cs));
+check("a call that never got out is NOT treated as No answer", cs.indexOf("notConnected(c); return;") < cs.indexOf("const unanswered"));
+check("starting a call never hangs waiting for audio (Autodial starts calls without a tap)", /Promise\.race\(\[ctx\.resume\(\)/.test(cs));
+const na = src.slice(src.indexOf("onNoAnswer: () => {"), src.indexOf("onNext: () =>"));
+check("No answer is set automatically only with Autodial on", /if \(!profile\.autodial_enabled\) return;/.test(na));
+check("auto No answer is skipped if the caller already moved on", /currentDial\?\.id === dial\.id/.test(na) && /isCallActive\(\)/.test(na));
+check("auto No answer saves the status, then runs Autodial (second mobile ring first)", na.indexOf('autodialTarget("no_response")') < na.indexOf('updateDialStatus("no_response")') && na.indexOf('updateDialStatus("no_response")') < na.indexOf("runAutodial(target)"));
 console.log(`${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);
