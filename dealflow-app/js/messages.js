@@ -772,10 +772,18 @@ function renderThreadList() {
         renderThreadList();
         return;
       }
-      openThread(id);
+      try { history.pushState({ wsThread: id }, ""); } catch { /* history is a convenience */ }   // browser Back (and a phone's swipe-back) returns to the list
+      openThread(id).then(() => document.querySelector(".thread-detail-subject")?.focus({ preventScroll: true }));
     });
   });
 }
+// Back / swipe-back from an open conversation goes to the list, not out of the Inbox
+window.addEventListener("popstate", () => {
+  if (!detailThreadId) return;
+  const id = detailThreadId;
+  exitDetail();
+  loadThreadList().then(() => document.querySelector(`.message-thread-row[data-thread-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
+});
 
 // ---------------------------------------------------------------------------
 // Thread detail
@@ -861,7 +869,7 @@ async function openThread(threadId) {
     <div class="thread-detail">
       ${readOnly ? `<div class="readonly-banner">Viewing ${escapeHtml(ownerFirstName(acct))}'s inbox (read-only)</div>` : ""}
       ${showChip || seq ? `<div style="margin-bottom:6px;">${showChip ? `<span class="message-mailbox-chip">${escapeHtml(acct.email_address)}</span>` : ""}${seq ? `<span class="message-seq-badge ${seq.replied ? "replied" : ""}">${escapeHtml(seq.label)}</span>` : ""}</div>` : ""}
-      <h2 class="thread-detail-subject">${escapeHtml(msgs.find((m) => m.subject)?.subject || "(no subject)")}</h2>
+      <h2 class="thread-detail-subject" tabindex="-1">${escapeHtml(msgs.find((m) => m.subject)?.subject || "(no subject)")}</h2>
       ${msgs.map((m) => threadMessageHTML(m, attachmentsByMessage[m.id] || [], liveById[m.id])).join("")}
       <div class="thread-detail-actions">
         <button type="button" class="btn secondary" id="threadBackBtn">Back</button>
@@ -871,8 +879,10 @@ async function openThread(threadId) {
   `;
 
   document.getElementById("threadBackBtn").addEventListener("click", () => {
+    if (history.state?.wsThread) { history.back(); return; }   // popstate above returns to the list and restores focus
+    const id = detailThreadId;
     exitDetail();
-    loadThreadList();
+    loadThreadList().then(() => document.querySelector(`.message-thread-row[data-thread-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
   });
   const replyBtn = document.getElementById("threadReplyBtn");
   if (replyBtn && internQuickReply) {

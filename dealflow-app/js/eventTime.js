@@ -156,6 +156,11 @@ export function zonedTimeToUtcIso(dateStr, timeStr, timeZone) {
 // device zone, so reopening an event for editing shows the date the creator
 // actually picked even if the two are in different timezones.
 export function dateStrInZone(iso, timeZone) {
-  const dtf = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
-  return dtf.format(new Date(iso)); // en-CA formats as YYYY-MM-DD directly
+  try {
+    const dtf = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    return dtf.format(new Date(iso)); // en-CA formats as YYYY-MM-DD directly
+  } catch {
+    // a stored zone that is not a real IANA zone must not stop the Edit event window opening: read the date in the editor's own zone
+    return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  }
 }

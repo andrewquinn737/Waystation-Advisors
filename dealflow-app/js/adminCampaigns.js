@@ -40,7 +40,7 @@ async function load() {
 function retryLink() { const el = $("cpMsg"), b = document.createElement("button"); b.type = "button"; b.className = "ad-link"; b.textContent = "Retry"; b.onclick = load; el.appendChild(b); }
 
 const STATS = [["emails_sent", "Emails sent"], ["contacted", "Companies emailed", "Emailed"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
-const statCells = (n) => STATS.map(([k, label, short]) => { const v = n[k] ?? 0; return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${short || label}</span></div>`; }).join("");
+const statCells = (n) => STATS.map(([k, label, short]) => { const v = k === "emails_sent" ? Math.max(n.emails_sent ?? 0, n.contacted ?? 0) : (n[k] ?? 0); return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${short || label}</span></div>`; }).join("");
 export const designPrompt = (c) => `Use the Waystation CRM connector: design_campaign for list ${c.name} (list_id ${c.list_id})`;
 
 function totals(list) {
@@ -69,7 +69,7 @@ function row(c) {
   const pick = canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready.toLocaleString()}`, noMailbox] : paused ? ["resume", "Resume"]
     : n.need_fix > 0 ? ["review", `Review ${n.need_fix.toLocaleString()}`] : c.status === "draft" ? ["design", "Design in Claude"] : null;
   const held = n.need_fix > 0 ? `<span class="warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></span>` : "";
-  const note = [hint(c), held].filter(Boolean).join(" ");
+  const note = [hint(c), held].filter(Boolean).join(" · ");
   return `<article class="cp-row" data-id="${esc(c.list_id)}">
     <div class="cp-name"><b title="${esc(c.name || "")}">${esc(c.name || "(untitled)")}</b><span>${esc(sub)}</span></div>
     <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span>${c.status === "live" && n.ready > 0 ? `<span class="cp-sub">${n.started} of ${n.started + n.ready + n.need_fix} started</span>` : ""}</div>

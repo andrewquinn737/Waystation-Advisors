@@ -7,7 +7,7 @@
 // localhost and the GitHub Pages test copy use the TEST project. So test-branch previews never touch live
 // data, and merging this file into main cannot point production at test.
 const HOST = typeof location !== "undefined" ? location.hostname : "";
-const IS_TEST = /^waystation-advisors-[a-z0-9-]+-waystation-advisors\.vercel\.app$/.test(HOST)
+const IS_TEST = /^waystation-advisors-(?!git-main-)[a-z0-9-]+-waystation-advisors\.vercel\.app$/.test(HOST)
   || HOST === "localhost" || HOST === "127.0.0.1"
   || HOST === "andrewquinn737.github.io"; // the GitHub Pages test copy (test branch) for reps trying the new CRM
 const IS_PROD = !IS_TEST;

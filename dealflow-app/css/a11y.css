@@ -62,3 +62,4 @@ html.is-mobile-device .dh-meta { white-space: normal; overflow: visible; text-ov
   .readonly-field .rf-value a { display: inline-flex; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
 }
 @media (max-width: 720px), (pointer: coarse) { .profile-mail-box { min-height: 44px; box-sizing: border-box; } }
+#dialsSearchCloseBtn { min-width: 44px; }

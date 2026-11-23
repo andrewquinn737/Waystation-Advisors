@@ -15,8 +15,10 @@ check("mobile step with no mobile falls back to the office", sequenceNumber({ co
 check("no number = nothing to dial", sequenceNumber({}, "call") === null);
 const at = src.slice(src.indexOf("function autodialTarget("), src.indexOf("function nextCallTarget("));
 check("No answer on the first mobile try rings the same mobile again", /no_response/.test(at) && /attempt === 1/.test(at) && /attempt: 2/.test(at));
-const pc = src.slice(src.indexOf("function placeCall("), src.indexOf("function placeCall(") + 600);
-check("every call counts tries on the same number", /attempt: autoCall\.attempt \+ 1/.test(pc));
+const ct = src.slice(src.indexOf("function countCallTry("), src.indexOf("function placeCall("));
+const pc = src.slice(src.indexOf("function placeCall("), src.indexOf("function placeCall(") + 900);
+check("a call counts as a try on the same number", /attempt: autoCall\.attempt \+ 1/.test(ct));
+check("round 6: a try is counted only once the call is really placed (onDialed), never at the start of placeCall", /onDialed: \(\) => \{ countCallTry/.test(pc) && !/^[^\n]*countCallTry\(dial, phone, method\);\s*\n\s*\/\/ "Transcript/.test(pc));
 const run = src.slice(src.indexOf("function runAutodial("), src.indexOf("function handleDeleteDial("));
 check("autodial opens the card before it calls", run.indexOf("openCardFrom") > 0 && run.indexOf("openCardFrom") < run.indexOf("placeCall"));
 check("Next company and autodial share one order", /function nextCompanyTarget\(\)[\s\S]{0,120}nextCallTarget/.test(src));

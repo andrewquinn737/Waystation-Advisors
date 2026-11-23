@@ -38,7 +38,19 @@ def live_sql(sql):
 def live_get(path, raw=False):
     return _req(LIVE_TOK, f"/projects/{LIVE_REF}{path}", raw=raw)
 
+# PILOT GUARD: two real reps (Andrew Quinn, Jonah Johnson) place real calls from the TEST project. No harness code may log in as them or
+# write anything that names them. Reads (select) are allowed so their data can be checked.
+PILOT_EMAILS = ("test.andrew.quinn@example.com", "test.jonah.johnson@example.com")
+PILOT_IDS = ("49255b71-de62-45d4-a252-c0b3e2ab91e9", "18e3e191-5e10-4022-959d-f6172f7e86fa")
+def guard_pilot(*who):
+    for w in who:
+        if str(w).strip().lower() in PILOT_EMAILS or str(w).strip().lower() in PILOT_IDS or str(w).strip() in ("Andrew Quinn", "Jonah Johnson"):
+            raise PermissionError(f"pilot guard: the harness may not use the pilot account {w}")
+
 def test_sql(sql):
+    low = sql.lower()
+    if not low.lstrip().startswith(("select", "with")) and any(x in low for x in PILOT_EMAILS + PILOT_IDS):
+        raise PermissionError("pilot guard: refusing a write that names a pilot account")
     return _req(TEST_TOK, f"/projects/{TEST_REF}/database/query", {"query": sql})
 
 def test_api(path, body=None, method=None, raw=False):

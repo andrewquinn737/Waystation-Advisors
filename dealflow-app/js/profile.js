@@ -1655,7 +1655,13 @@ function handleDeleteTeam(teamId) {
 function handleDeleteAccount(memberId, memberName) {
   const textEl = document.querySelector("#confirmDeleteAccountModal .help-text");
   if (textEl) {
-    textEl.textContent = `${memberName || "Their"} clients and dials will be reassigned to you. This cannot be undone.`;
+    const who = memberName ? `${memberName}'s` : "Their";
+    const say = (mail) => { textEl.textContent = `${who} clients, dials and email sequence work will be reassigned to you. ${mail} This cannot be undone.`; };
+    say("Their email accounts are removed with the account, and so is any email already queued from them.");
+    supabase.from("email_accounts").select("id", { count: "exact", head: true }).eq("owner_id", memberId).then(({ count, error }) => {
+      if (error || count == null) return;
+      say(count ? `Their ${count} email account${count === 1 ? "" : "s"} will be removed with the account, and so will any email queued from ${count === 1 ? "it" : "them"}.` : "They have no email accounts.");
+    }).catch(() => {});
   }
   openConfirmModal(els.confirmDeleteAccountModal, "confirmDeleteAccountYesBtn", "confirmDeleteAccountNoBtn", async () => {
     const { data, error } = await supabase.functions.invoke("admin-delete-account", {

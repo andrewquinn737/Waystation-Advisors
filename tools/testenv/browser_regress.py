@@ -2,11 +2,14 @@
 Usage: python3 browser_regress.py [role ...]   roles: admin lead intern  (default all)
 Logs in per role, opens every page, records console/page errors and failed requests, and checks menu items exist."""
 import re, sys, json, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sb
 from playwright.sync_api import sync_playwright
 BASE = os.environ.get("WS_BASE", "http://localhost:5173/")
 LOG = os.path.expanduser("~/Projects/First Project/TEST_LOGINS.md")
-USERS = {"admin": "Test Admin", "lead": "Andrew Quinn", "intern": "Caleb Hong"}
+USERS = {"admin": "Test Admin", "lead": "Taylor Lead", "intern": "Caleb Hong"}
 def creds(name):
+    sb.guard_pilot(name)
     for l in open(LOG):
         if l.startswith("| " + name):
             c = [x.strip().strip("`") for x in l.split("|")]

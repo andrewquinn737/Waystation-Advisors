@@ -1455,7 +1455,7 @@ function buildTimelineHTML(events) {
         // Both start collapsed/hidden on every fresh render (see
         // wireTimelineTab, which handles the expand/collapse purely in the
         // DOM afterward, no re-render needed).
-        if (e.confirmed && eventIsMeeting(e)) {
+        if (e.confirmed && eventIsMeeting(e) && (e.details?.report || e.event_type !== "intro_call")) {
           triangleHTML = `<button type="button" class="timeline-triangle-btn" data-event-id="${e.id}" title="Show report">${TRIANGLE_SVG}</button>`;
           reportBoxHTML = `<div class="timeline-report-box hidden" data-report-for="${e.id}">${escapeHtml(e.details?.report || "(No report written)")}</div>`;
         }
@@ -1818,16 +1818,19 @@ function wireTransferOwnershipClick() {
   const input = document.getElementById("f_intern_name");
   if (!input) return;
   input.addEventListener("click", () => openTransferOwnershipPicker());
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTransferOwnershipPicker(); } });
 }
 
 async function openTransferOwnershipPicker() {
   const { data, error: loadError } = await supabase
     .from("profiles")
-    .select("id, full_name")
+    .select("id, full_name, role, team_id")
     .in("role", ["team_lead", "admin"])
     .neq("id", currentClient.created_by)
     .order("full_name", { ascending: true });
-  const options = loadError ? [] : data || [];
+  // same rule as transfer_client_ownership(): an admin, or a team lead on your own team (an admin can hand it to anyone)
+  const myTeams = new Set(teamIdsOf(profile));
+  const options = loadError ? [] : (data || []).filter((p) => isAdmin || p.role === "admin" || (p.team_id && myTeams.has(p.team_id)));
 
   const modal = els.transferOwnershipModal;
   const searchInput = els.transferOwnershipSearchInput;
@@ -1916,6 +1919,7 @@ function wireIntendedBuyerClick() {
   const input = document.getElementById("f_intended_buyer_display");
   if (!input) return; // not rendered at all for buyer clients
   input.addEventListener("click", () => openIntendedBuyerPicker());
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openIntendedBuyerPicker(); } });
 }
 
 // Same team-scoped-owned + confirmed-Contract-signed pool as
@@ -2333,7 +2337,7 @@ function openEditEventModal(eventId) {
   // stored yet) rather than the editor's own device zone — so reopening an
   // event for editing shows the date/time the creator actually picked even
   // when the editor is in a different timezone.
-  const existingTz = e.details?.timezone || defaultTimezone();
+  const existingTz = (() => { const z = e.details?.timezone; try { if (z) { new Intl.DateTimeFormat("en-US", { timeZone: z }); return z; } } catch { /* not a real zone */ } return defaultTimezone(); })();
   dateInput.value = dateStrInZone(e.event_date, existingTz);
   timeSelect.innerHTML = timeOptionsHTML();
   timeSelect.value = e.details?.time || "";

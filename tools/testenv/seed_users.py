@@ -14,19 +14,19 @@ def admin_create(email, pw, name):
         if e.code == 422:  # exists
             return sb.test_sql(f"select id from auth.users where email='{email}'")[0]["id"]
         raise RuntimeError(e.read().decode())
-sb.test_sql("insert into public.teams (name, sort_order) select x, o from (values ('Test Team A',1),('Test Team B',2)) v(x,o) where not exists (select 1 from public.teams where name=x)")
+sb.test_sql("insert into public.teams (name, sort_order) select x, o from (values ('Fixture Team A',91),('Fixture Team B',92)) v(x,o) where not exists (select 1 from public.teams where name=x)")
 teams = {r["name"]: r["id"] for r in sb.test_sql("select id, name from public.teams")}
-people = [("Test Admin", "admin", None), ("Taylor Lead", "team_lead", "Test Team A"),
-          ("Jordan Intern", "intern", "Test Team A"), ("Riley Intern", "intern", "Test Team A"),
-          ("Casey Intern", "intern", "Test Team B"),
+people = [("Test Admin", "admin", None), ("Taylor Lead", "team_lead", "Fixture Team A"),
+          ("Jordan Intern", "intern", "Fixture Team A"), ("Riley Intern", "intern", "Fixture Team A"),
+          ("Casey Intern", "intern", "Fixture Team B"),
           # real names from the hub's mailboxes (fake @example.com logins) so name-matching can be tested
-          ("Andrew Quinn", "team_lead", "Test Team A"), ("Jonah Johnson", "team_lead", "Test Team B"),
-          ("Austin Price", "team_lead", "Test Team B"),
-          ("Caleb Hong", "intern", "Test Team A"), ("Gavin Hopkinson", "intern", "Test Team A"),
-          ("Cteel Olsen", "intern", "Test Team A"), ("Jacob Farnsworth", "intern", "Test Team A"),
-          ("Yaseen Chaudhry", "intern", "Test Team A"), ("Daren Mumford", "intern", "Test Team B"),
-          ("Mikaela Harris", "intern", "Test Team B"), ("Harry Kouyoumjian", "intern", "Test Team B"),
-          ("Kayden Hyde", "intern", "Test Team B")]
+          # Andrew Quinn and Jonah Johnson are the pilot reps (real calls): never seeded, reset or logged in as by the harness
+          ("Austin Price", "team_lead", "Fixture Team B"),
+          ("Caleb Hong", "intern", "Fixture Team A"), ("Gavin Hopkinson", "intern", "Fixture Team A"),
+          ("Cteel Olsen", "intern", "Fixture Team A"), ("Jacob Farnsworth", "intern", "Fixture Team A"),
+          ("Yaseen Chaudhry", "intern", "Fixture Team A"), ("Daren Mumford", "intern", "Fixture Team B"),
+          ("Mikaela Harris", "intern", "Fixture Team B"), ("Harry Kouyoumjian", "intern", "Fixture Team B"),
+          ("Kayden Hyde", "intern", "Fixture Team B")]
 accts = sec.get("accounts", {})
 for name, role, team in people:
     email = "test." + name.lower().replace(" ", ".") + "@example.com" if not name.startswith(("Test ","Taylor ","Jordan ","Riley ","Casey ")) else name.lower().replace(" ", ".") + "@example.com"

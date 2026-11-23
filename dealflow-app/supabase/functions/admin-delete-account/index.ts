@@ -52,6 +52,9 @@ const CORS_HEADERS = {
                                                                                         admin.from("client_events").update({ created_by: callerId }).eq("created_by", targetId),
                                                                                             admin.from("dial_lists").update({ created_by: callerId }).eq("created_by", targetId),
                                                                                                 admin.from("dials").update({ created_by: callerId }).eq("created_by", targetId),
+                                                                                                                  // their email sequence work goes to the admin too: owner_id cascades on delete, which used to wipe every task
+                                                                                                                  // (queued first emails, reply tasks) and leave the campaign "Running" with nothing to send
+                                                                                                                  admin.from("sequence_tasks").update({ owner_id: callerId }).eq("owner_id", targetId),
                                                                                                   ];
                                                                                                     for (const p of reassignments) {
                                                                                                         const { error } = await p;

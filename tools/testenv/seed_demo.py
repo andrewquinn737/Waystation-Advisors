@@ -5,7 +5,7 @@ Fake data only: @example.com emails, (801) 555-01xx numbers. Run: python3 seed_d
 import sb, json, os, uuid
 
 SEC = json.load(open(os.path.expanduser("~/Projects/First Project/.waystation_test_secrets.json")))
-CALEB, ANDREW = "test.caleb.hong@example.com", "test.andrew.quinn@example.com"
+CALEB, ANDREW = "test.caleb.hong@example.com", "taylor.lead@example.com"
 uid = lambda e: SEC["accounts"][e]["id"]
 q = sb.test_sql
 lit = lambda v: "null" if v is None else "'" + str(v).replace("'", "''") + "'"

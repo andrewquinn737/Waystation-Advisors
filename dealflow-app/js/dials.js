@@ -358,6 +358,9 @@ function updateDialTabClientBtnVisibility() {
 }
 updateDialTabClientBtnVisibility();
 if (isAdmin || isTeamLead) els.menuAccountsVisibleBtn.classList.remove("hidden");
+// Sellers/Buyers is shown here too, as early as Accounts visible (it used to wait for the end of this file, so anything that went
+// wrong in between left the Calls gear with only "Advanced"). Its click handling is wired further down.
+if (isAdmin || isTeamLead) els.dealSideToggleBtn.classList.remove("hidden");
 // Manual "+ new tab" creation — same admin/team-lead-only scope as CSV
 // import above (interns can't create tabs at all; enforced server-side too,
 // see the dial_lists_insert_own RLS policy).
@@ -626,6 +629,7 @@ async function autoMarkContacted(dial, method) {
 let pendingNative = null;
 async function dialViaPhone(dial, method, phone) {
   if (await callBlocked(phone)) return;
+  countCallTry(dial, phone, method);
   pendingNative = { dial, method, at: Date.now(), left: false, busy: false };
   window.location.href = `tel:${phone}`;
 }
@@ -645,10 +649,14 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pagehide", () => { if (pendingNative) { pendingNative.left = true; commitPendingNative(); } });
 
-function placeCall(dial, phone, method) {
-  // Count tries on the same number in a row, so Autodial knows a mobile has only been rung once (see autodialTarget).
+// Count tries on the same number in a row, so Autodial knows a mobile has only been rung once (see autodialTarget). Called only once a
+// call is really placed (the call session's onDialed, or the phone's own dialer opened): a call the test lock refused, a blocked
+// microphone or "already on a call" never counts as the first ring.
+function countCallTry(dial, phone, method) {
   autoCall = autoCall?.dialId === dial.id && autoCall.method === method && autoCall.phone === phone
     ? { ...autoCall, attempt: autoCall.attempt + 1 } : { dialId: dial.id, method, phone, attempt: 1 };
+}
+function placeCall(dial, phone, method) {
   // "Transcript calling" off (Dials > Advanced): plain calling through the phone's own dialer, no in-app call.
   if (profile.transcript_calling_enabled === false) {
     dialViaPhone(dial, method, phone);
@@ -656,7 +664,7 @@ function placeCall(dial, phone, method) {
   }
   startCall({
     dial, phone, method, profile,
-    onDialed: () => autoMarkContacted(dial, method),
+    onDialed: () => { countCallTry(dial, phone, method); return autoMarkContacted(dial, method); },
     onSummary: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     onRecordingSaved: () => { if (currentDial?.id === dial.id) loadDialTranscript(); },
     fallbackTel: (num) => dialViaPhone(dial, method, num),
@@ -923,7 +931,7 @@ function renderTabs() {
   }
 
   if (filtered.length === 0) {
-    els.dialTabs.innerHTML = `<span class="help-text">No lists yet — tap + to create one.</span>`;
+    els.dialTabs.innerHTML = `<span class="help-text">${simpleUi ? "No lists yet." : "No lists yet — tap + to create one."}</span>`;
   } else {
     const shown = shownTabLists(filtered);
     const hiddenCount = filtered.length - shown.length;
@@ -1908,6 +1916,12 @@ els.dialsSearchInput.addEventListener("input", async () => {
 });
 
 els.dialsSearchCloseBtn.addEventListener("click", exitSearchMode);
+// Enter in the search box opens the first match (type, Enter, the card is open)
+els.dialsSearchInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || selectMode || !dialSearchQuery.trim() || !visibleDials().length) return;
+  e.preventDefault();
+  openDialModal(0);
+});
 
 els.menuSelectBtn.addEventListener("click", (e) => {
   // Without this, the very same click bubbles up to the document-level
@@ -2554,12 +2568,12 @@ function renderDialsTable() {
         ${visible
           .map(
             (d, i) => `
-          <tr class="clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
+          <tr class="clickable-row" role="button" tabindex="0" data-index="${i}" style="background:${statusInfo(d.contact_status).bg};">
             ${selectMode ? `<td>${selectCircleHTML(d)}</td>` : ""}
             <td data-label="Name">${escapeHtml(dialDisplayName(d))}${showAll ? seqBadgeHTML(d) : ""}</td>
             <td class="muted" data-label="Company">${escapeHtml(d.company_name || "—")}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</td>
             <td class="muted" data-label="Location">${escapeHtml(dialLocation(d))}</td>
-            <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || "—")}</td>
+            <td class="muted" data-label="Phone">${escapeHtml(d.mobile_phone || d.company_phone || "—")}</td>
             <td class="muted" data-label="Email">${escapeHtml(d.email || "—")}</td>
           </tr>`
           )
@@ -2575,7 +2589,7 @@ function renderDialsTable() {
       ${visible
         .map(
           (d, i) => `
-        <div class="mobile-card clickable-row" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
+        <div class="mobile-card clickable-row" role="button" tabindex="0" data-index="${i}" style="background:${statusInfo(d.contact_status).bg}; border-color:${statusInfo(d.contact_status).border};">
           <div class="mc-main">
             <div class="mc-name">${escapeHtml(dialDisplayName(d))}${showAll ? seqBadgeHTML(d) : ""}</div>
             <div class="mc-sub">${escapeHtml(dialCompanyAndLocation(d))}${searchPoolActive ? ` <span class="search-tab-tag">${escapeHtml(searchTabName(d))}</span>` : ""}</div>
@@ -2615,6 +2629,12 @@ function renderDialsTable() {
         return;
       }
       openDialModal(idx);
+    });
+    // keyboard: Enter / Space on a focused row opens it, like the rows on the main sheet
+    row.addEventListener("keydown", (e) => {
+      if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      row.click();
     });
   });
   if (!selectMode) {
@@ -2738,9 +2758,21 @@ function wireOutcomeButtons() {
     if (value === "intro_call_scheduled") return handleScheduleIntroCallFromDial(dial); // the existing intro-call flow
     const def = OUTCOMES.find((o) => o.status === value);
     if (def?.callback) return openCallbackModal(dial, { after: target ? () => runAutodial(target) : advanceAfterOutcome }); // pick the time first
-    if (target) return runAutodial(target);
-    else await advanceAfterOutcome();
+    if (target) { runAutodial(target); keepCardFocus(); return; }
+    await advanceAfterOutcome();
+    keepCardFocus();
   }));
+}
+// After an outcome moves the card on to the next company the old buttons are gone and focus falls to the page: put it on the new card's
+// first outcome (or the card itself) so a keyboard user keeps their place. Anything the person focused meanwhile wins.
+function keepCardFocus() {
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (a && a !== document.body && els.dialModalBackdrop.contains(a)) return;
+    if (els.dialModalBackdrop.classList.contains("hidden")) return;
+    const first = document.querySelector("#dialOutcomes [data-outcome]:not([disabled])");
+    (first || els.dialModalBackdrop).focus?.({ preventScroll: true });
+  }, 450);
 }
 
 // ---------------------------------------------------------------------------
@@ -3021,7 +3053,7 @@ function renderDialModal() {
   if (dialMode === "edit" || isCreate) {
     els.dialModalActions.innerHTML = `
       <button type="button" class="btn" id="dialSaveBtn">Save</button>
-      <button type="button" class="btn secondary" id="dialCancelBtn">Cancel</button>
+      <button type="button" class="btn secondary" id="dialCancelBtn" data-esc-close>Cancel</button>
       ${!isCreate ? `<button type="button" class="btn danger" id="dialDeleteBtn" style="margin-left:auto;">Delete</button>` : ""}
     `;
   } else {
@@ -3043,7 +3075,10 @@ function renderDialModal() {
     document.getElementById("dialCancelBtn").addEventListener("click", closeDialModal);
   } else if (dialMode === "edit") {
     document.getElementById("dialSaveBtn").addEventListener("click", handleEditDialSave);
+    // Esc presses this button (data-esc-close), so Esc in the edit form leaves only the form, and asks first when something was typed
+    editBaseline = JSON.stringify(collectDialFormData());
     document.getElementById("dialCancelBtn").addEventListener("click", () => {
+      if (JSON.stringify(collectDialFormData()) !== editBaseline && !window.confirm("Discard your changes to this company?")) return;
       dialMode = "view";
       renderDialModal();
     });
@@ -3066,8 +3101,24 @@ async function handleCreateDialSave() {
   await loadDials();
 }
 
+let editBaseline = "";
+// Saves only the fields this person changed, and refuses when another tab or device changed one of those same fields since this
+// card was opened (the old save wrote all eleven fields back, so a stale tab silently undid the other tab's edit).
 async function handleEditDialSave() {
-  const data = collectDialFormData();
+  const all = collectDialFormData();
+  const same = (a, b) => (a ?? null) === (b ?? null);
+  const data = {};
+  for (const k of Object.keys(all)) if (!same(all[k], currentDial[k])) data[k] = all[k];
+  if (!Object.keys(data).length) { dialMode = "view"; renderDialModal(); return; }
+  const { data: fresh } = await supabase.from("dials").select(Object.keys(data).join(",")).eq("id", currentDial.id).maybeSingle();
+  if (fresh) {
+    const clash = Object.keys(data).filter((k) => !same(fresh[k], currentDial[k]));
+    if (clash.length) {
+      els.dialModalError.textContent = "This company was changed on another screen while you were editing. Cancel, then open it again to see the latest, and make your change again.";
+      els.dialModalError.classList.remove("hidden");
+      return;
+    }
+  }
   // An imported number flagged "(Unsure)" (see rowsToDials) was never
   // confirmed as a mobile — changing the mobile number here is the user
   // stating what it is, so it goes back to the normal "(Mobile)" label.
@@ -3078,14 +3129,9 @@ async function handleEditDialSave() {
   // See syncTodaysCallLogSnapshot's comment — these are the same snapshot
   // fields autoMarkContacted() captures, kept in sync if they're corrected
   // through the edit form later the same day a call was already logged.
-  await syncTodaysCallLogSnapshot({
-    company_name: data.company_name,
-    contact_name: data.full_name,
-    website: data.website,
-    city: data.city,
-    state: data.state,
-    industry: data.industry,
-  });
+  const snap = {};
+  for (const [col, key] of [["company_name", "company_name"], ["contact_name", "full_name"], ["website", "website"], ["city", "city"], ["state", "state"], ["industry", "industry"]]) if (key in data) snap[col] = data[key];
+  if (Object.keys(snap).length) await syncTodaysCallLogSnapshot(snap);
   dialMode = "view";
   renderDialModal();
   await loadDials();

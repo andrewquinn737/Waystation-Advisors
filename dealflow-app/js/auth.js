@@ -8,6 +8,8 @@ import { defaultTimezone } from "./eventTime.js";
 import { friendlyMessage, addRetry, showFatalScreen, isTransient, NET_MESSAGE } from "./netError.js";
 import "./layers.js";
 
+const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
 // Why the app is sending someone back to the login page — shown there (login.html reads it) so a bounce is
 // never silent, and so login.html knows NOT to auto-forward into the app again (that was the endless loop).
 function goToLogin(reason) {
@@ -315,7 +317,7 @@ export function renderNav(profile) {
       <div class="brand">Waystation Advisors</div>
       <div class="links">${items.map(link).join("")}</div>
       <div class="who">
-        <span>${profile.full_name}</span>
+        <span>${escapeHtml(profile.full_name)}</span>
         <span class="role-badge">${role === "admin" ? "Admin" : role === "team_lead" ? "Team lead" : role === "independent_lead" ? "Independent lead" : "Intern"}</span>
         <button class="btn danger small" id="signOutBtn">Log out</button>
       </div>

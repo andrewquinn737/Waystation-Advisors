@@ -56,7 +56,11 @@ def run():
     check("call lock: client can create a call row for the test number", c in (200, 201), (c, r))
     q(f"delete from calls where to_number='502-419-6436'")
     c, r = api(CALEB, "POST", "/rpc/test_call_policy", {})
-    check("call lock: policy lists only the test number", c == 200 and r == {"allow": ["+15024196436"]}, (c, r))
+    check("call lock: policy no longer hands the allowlisted number to an intern (round 6)", c == 200 and r == {"free": False, "allow": []} and "5024196436" not in json.dumps(r), (c, r))
+    c, r = api(CALEB, "POST", "/rpc/test_call_allowed", {"p_number": "(502) 419-6436"})
+    check("call lock: test_call_allowed says yes for the test number", c == 200 and r is True, (c, r))
+    c, r = api(CALEB, "POST", "/rpc/test_call_allowed", {"p_number": "(801) 555-0123"})
+    check("call lock: test_call_allowed says no for any other number", c == 200 and r is False, (c, r))
     cid = q(f"insert into calls (user_id, mode, started_at, to_number, owner_state, transcribed) values ('{uid(CALEB)}', 'in_app', now(), '+15024196436', 'UT', true) returning id")[0]["id"]
     c, r = fn("deepgram-token", {"call_id": cid})
     check("deepgram-token 200 with a token", c == 200 and r.get("token"), (c, r.get("error")))

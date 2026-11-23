@@ -384,9 +384,23 @@ async function assign(ctx: Ctx, body: any) {
   if (!UUID_RE.test(owner_id)) return jsonResponse({ error: "owner_id must be a profile id." }, 400);
   const { data: p } = await ctx.admin.from("profiles").select("id, full_name").eq("id", owner_id).maybeSingle();
   if (!p) return jsonResponse({ error: "No such person." }, 404);
+  // Leads pinned to these mailboxes that have not been emailed yet are freed to pick a sender again from their list owner's
+  // mailboxes (emailed ones keep the mailbox so replies stay in one thread). The old mailbox owner is passed as the task owner, so
+  // sequence tasks stay with the person who works the list instead of moving to the mailbox's new owner.
+  const { data: prev } = await ctx.admin.from("email_accounts").select("id, owner_id").in("id", list);
   const { data, error } = await ctx.admin.from("email_accounts").update({ owner_id, needs_assignment: false, suggested_owner_id: null }).in("id", list).select("id");
   if (error) return jsonResponse({ error: error.message }, 400);
-  return jsonResponse({ ok: true, assigned: (data || []).length, requested: list.length, owner: p.full_name });
+  let repinned = 0, pinnedTotal = 0;
+  for (const a of (prev || []) as any[]) {
+    if (!a.owner_id || a.owner_id === owner_id) continue;
+    const { data: pinned } = await ctx.admin.from("dials").select("id").eq("sender_account_id", a.id).limit(5000);
+    const idsList = (pinned || []).map((d: any) => d.id);
+    pinnedTotal += idsList.length;
+    if (!idsList.length) continue;
+    const { data: n } = await ctx.admin.rpc("repin_unsent_dials", { p_dial_ids: idsList, p_new_owner: a.owner_id });
+    repinned += Number(n) || 0;
+  }
+  return jsonResponse({ ok: true, assigned: (data || []).length, requested: list.length, owner: p.full_name, repinned, kept_pinned: Math.max(0, pinnedTotal - repinned) });
 }
 
 async function update(ctx: Ctx, body: any) {

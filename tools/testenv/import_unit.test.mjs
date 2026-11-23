@@ -70,7 +70,7 @@ t("content sniff for unnamed columns", () => {
 t("same-number mobile/company becomes unsure, state normalized, names joined", () => {
   const rows = [["First", "Last", "Company", "Phone", "Company phone", "State"], ["Jo", "Li", "Acme", "(801) 555-1234", "801-555-1234", "ut"]];
   const [d] = rowsToDials(rows, "L1");
-  assert.equal(d.full_name, "Jo Li"); assert.equal(d.mobile_phone_unsure, true); assert.equal(d.company_phone, undefined); assert.equal(d.state, "Utah"); assert.equal(d.list_id, "L1");
+  assert.equal(d.full_name, "Jo Li"); assert.equal(d.mobile_phone_unsure, true); assert.equal(d.company_phone, undefined); assert.equal(d.state, "UT"); assert.equal(d.list_id, "L1");
   assert.equal(d.__row, undefined);
 });
 t("status mapping + every row has contact_status", () => {

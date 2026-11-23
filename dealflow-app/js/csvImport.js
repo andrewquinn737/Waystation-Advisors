@@ -1,7 +1,7 @@
 // CSV import engine (no DOM, no network): parse, auto-map columns, validate, find duplicates, build dial rows.
 // Used by js/importWizard.js (the Import dialog) and by tools/testenv/import_unit.test.mjs.
 // Behavior for CSVs that import today is unchanged: same aliases (plus more), same status mapping, same row shape.
-import { STATES } from "./clientForm.js";
+import { STATES, stateToCode } from "./clientForm.js";
 
 // ---------------------------------------------------------------------------
 // Parser: RFC4180-ish. Handles a BOM, CRLF / LF / lone CR line ends, quoted fields with commas, newlines and "" quotes,
@@ -242,10 +242,11 @@ export const STATE_ABBREVIATIONS = {
 export function normalizeStateValue(raw) {
   const v = String(raw || "").trim();
   if (!v) return v;
+  // One format everywhere: the 2-letter code ("UT"). "Not in the US" and anything that is not a US state stay as typed.
   const byAbbreviation = STATE_ABBREVIATIONS[v.toUpperCase()];
-  if (byAbbreviation) return byAbbreviation;
+  if (byAbbreviation) return stateToCode(byAbbreviation);
   const byName = STATES.find((s) => s.toLowerCase() === v.toLowerCase());
-  return byName || v;
+  return byName ? stateToCode(byName) : v;
 }
 
 const EMAIL_FIND = /[^\s<>"';,()]+@[^\s<>"';,()]+\.[a-z]{2,}/i;

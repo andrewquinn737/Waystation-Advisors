@@ -39,13 +39,14 @@ export function initAccounts() {
 
 let openKeys = new Set(); // owner groups the admin has open: kept across the reload after every change
 const ROLE = { admin: "admin", team_lead: "team lead", independent_lead: "lead", intern: "intern" };
-async function load() {
+async function load(keepMsg) {
+  keepMsg = keepMsg === true; // $("mbxRefresh").onclick passes an event, which is not true
   if (!boxes.length) $("mbxList").innerHTML = `<p class="ad-empty">Loading...</p>`; // an existing list stays on screen while it refreshes
   try {
     const r = await api({ action: "list" });
     boxes = r.mailboxes; people = r.people.filter((p) => p.full_name !== "AI Assistant").sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
     $("addOwner").innerHTML = `<option value="">Owner: match by name</option>` + people.map((p) => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
-    msg(""); render();
+    if (!keepMsg) msg(""); render();
   } catch (e) {
     $("mbxList").innerHTML = `<p class="ad-empty">Couldn't load the email accounts. ${esc(friendlyMessage(e))} <button type="button" class="ad-link" id="mbxRetry">Retry</button></p>`;
     $("mbxRetry").onclick = load; msg("");
@@ -73,14 +74,14 @@ function indicators(b) {
 }
 
 function boxHtml(b) {
-  const lim = b.effective_daily_limit ?? 0, sent = b.sent_24h ?? 0, paused = !!b.send_paused_reason;
+  const lim = Math.min(20, b.effective_daily_limit ?? 0), sent = b.sent_24h ?? 0, zero = b.daily_send_limit === 0, paused = !!b.send_paused_reason || zero;
   const ver = indicators(b);
   const owners = people.map((p) => `<option value="${p.id}" ${!b.needs_assignment && p.id === b.owner_id ? "selected" : ""}>${esc(p.full_name)}${ROLE[p.role] ? ` (${ROLE[p.role]})` : ""}</option>`).join("");
   return `<div class="ad-box${paused ? " paused" : ""}" data-id="${b.id}">
     <div class="ad-box-top"><span class="ad-addr" title="${esc(b.email_address)}">${esc(b.email_address)}</span><span class="ad-use${lim && sent + (b.scheduled ?? 0) >= lim ? " full" : ""}" title="Sent in the last 24h / daily limit (${b.scheduled ?? 0} queued)">${sent}/${lim} today</span></div>
-    <div class="ad-badges">${ver}<button type="button" class="ad-link" data-act="check" title="Log in to this mailbox now (nothing is sent)">Check now</button>${paused ? `<span class="ad-badge warn" title="${esc(b.send_paused_reason)}">paused: ${esc(b.send_paused_reason)}</span>` : ""}</div>
+    <div class="ad-badges">${ver}<button type="button" class="ad-link" data-act="check" title="Log in to this mailbox now (nothing is sent)">Check now</button>${b.send_paused_reason ? `<span class="ad-badge warn" title="${esc(b.send_paused_reason)}">paused: ${esc(b.send_paused_reason)}</span>` : zero ? `<span class="ad-badge warn" title="The daily limit is 0, so nothing is sent from this account. Clear the limit to send again.">paused: daily limit is 0</span>` : ""}</div>
     <div class="ad-box-ctl"><select data-act="owner" aria-label="Owner">${b.needs_assignment ? `<option value="" selected disabled>Pick an owner</option>` : ""}${owners}</select>
-      <input type="number" min="0" max="200" data-act="limit" value="${b.daily_send_limit ?? ""}" placeholder="${lim || ""}" title="Daily limit (blank = default)" aria-label="Daily limit" />
+      <input type="number" min="0" max="200" data-act="limit" value="${b.daily_send_limit ?? ""}" placeholder="${lim || ""}" title="Daily limit (blank = default). Sends are capped at 20 a day per account; 0 pauses it." aria-label="Daily limit" />
       <button type="button" class="btn secondary small" data-act="pause">${paused ? "Resume" : "Pause"}</button></div>
     <details class="ad-more"><summary>More</summary><div>
       <label>Mandate <select data-act="mandate"><option value="">Any</option><option value="ma" ${b.mandate === "ma" ? "selected" : ""}>M&amp;A</option><option value="data" ${b.mandate === "data" ? "selected" : ""}>Data</option></select></label>
@@ -100,13 +101,13 @@ function render() {
   }
   const ordered = [...groups.entries()].sort((a, b) => (a[0] === "__un" ? -1 : b[0] === "__un" ? 1 : a[1].name.localeCompare(b[1].name)));
   $("mbxList").innerHTML = ordered.map(([k, g]) => {
-    const used = g.items.reduce((s, b) => s + (b.sent_24h ?? 0), 0), cap = g.items.reduce((s, b) => s + (b.effective_daily_limit ?? 0), 0);
+    const used = g.items.reduce((s, b) => s + (b.sent_24h ?? 0), 0), cap = g.items.reduce((s, b) => s + Math.min(20, b.effective_daily_limit ?? 0), 0);
     const open = wasOpen.has(String(k)) || k === "__un" || g.items.some((b) => b.send_paused_reason || b.sending_ok === false);
     return `<details class="ad-group${k === "__un" ? " warn" : ""}" data-k="${esc(k)}" ${open ? "open" : ""}><summary><span>${esc(g.name)}</span><small>${plural(g.items.length)} · ${used} of ${cap} sent today</small></summary>${g.items.map(boxHtml).join("")}</details>`;
   }).join("");
 }
 
-async function run(fn, okText) { try { await fn(); if (okText) msg(okText, true); } catch (e) { msg(friendlyMessage(e)); } await load(); }
+async function run(fn, okText) { let note = ""; try { const r = await fn(); if (okText) msg(okText + (r && r.kept_pinned ? ` ${r.kept_pinned} lead${r.kept_pinned === 1 ? "" : "s"} already emailed from it keep sending from it so replies stay in one thread.` : ""), true); } catch (e) { note = friendlyMessage(e); msg(note); } await load(true); }
 function onEvent(ev) {
   const el = ev.target.closest("[data-act]"), card = ev.target.closest(".ad-box"); if (!el || !card) return;
   const id = card.dataset.id, b = boxes.find((x) => x.id === id), act = el.dataset.act; if (!b) return;

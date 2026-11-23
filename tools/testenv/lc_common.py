@@ -8,7 +8,9 @@ LOG = os.path.expanduser("~/Projects/First Project/TEST_LOGINS_LIVE_COPY.md")
 def creds(name):
     for l in open(LOG):
         c = [x.strip().strip("`") for x in l.split("|")]
-        if len(c) > 5 and c[1] == name: return c[4], c[5]
+        if len(c) > 5 and c[1] == name:
+            import sb; sb.guard_pilot(c[4])   # the live-copy people are separate accounts; refuse if one ever resolves to a pilot login
+            return c[4], c[5]
     raise KeyError(name)
 # real people (live copies; auth emails are @example.com)
 WHO = {"admin": "Mason Quinn", "lead": "Jonah Johnson", "intern": "Brian Skoubye", "indlead": "Kayden Hyde", "intern2": "Jacob Farnsworth"}

@@ -50,7 +50,7 @@ async function loadLookups() {
   buyers = bRes.data || [];
   deals = dRes.data || [];
   sellers = sRes.data || [];
-  els.buyerSelect.innerHTML = buyers.map((b) => `<option value="${b.id}">${b.company_name}</option>`).join("");
+  els.buyerSelect.innerHTML = buyers.map((b) => `<option value="${b.id}">${String(b.company_name ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))}</option>`).join("");
 }
 
 async function loadPayments() {

@@ -126,7 +126,7 @@ function personalAndContactSectionsHTML(client, brokers = []) {
              wireTransferOwnershipClick in js/clients.js for the click-to-
              transfer behavior this field gained). -->
         <div class="field-label-row"><label for="f_intern_name">Person responsible</label><span class="field-required-msg hidden" data-field="intern_name">required</span></div>
-        <input id="f_intern_name" value="${escapeHtml(client.intern_name)}" readonly title="Click to transfer ownership" style="background:var(--bg); color:var(--text-muted); cursor:pointer;" />
+        <input id="f_intern_name" value="${escapeHtml(client.intern_name)}" readonly title="Click to transfer ownership" class="picker-field" role="button" aria-haspopup="dialog" />
         ${
           client.client_type === "seller"
             ? `
@@ -141,7 +141,7 @@ function personalAndContactSectionsHTML(client, brokers = []) {
              has no name to show), defaulting to "None".
         -->
         <label for="f_intended_buyer_display">Intended buyer</label>
-        <input id="f_intended_buyer_display" value="${escapeHtml(client._intendedBuyerName || "None")}" readonly title="Click to change" style="background:var(--bg); color:var(--text-muted); cursor:pointer;" />
+        <input id="f_intended_buyer_display" value="${escapeHtml(client._intendedBuyerName || "None")}" readonly title="Click to change" class="picker-field" role="button" aria-haspopup="dialog" />
         <input type="hidden" id="f_intended_buyer_id" value="${client.intended_buyer_id || ""}" />
         `
             : ""

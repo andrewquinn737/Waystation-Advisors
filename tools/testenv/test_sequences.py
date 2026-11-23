@@ -11,6 +11,7 @@ SINKS = ["masonquinn10@gmail.com", "mason.alex.quinn@gmail.com", "mason@waystati
 _tok = {}
 
 def login(email):
+    sb.guard_pilot(email)
     if email not in _tok:
         r = urllib.request.Request(URL + "/auth/v1/token?grant_type=password", method="POST",
             data=json.dumps({"email": email, "password": SEC["accounts"][email]["password"]}).encode(),
@@ -58,7 +59,7 @@ def uid(email): return SEC["accounts"][email]["id"]
 def lit(v): return "null" if v is None else "'" + str(v).replace("'", "''") + "'"
 
 CALEB, GAVIN, LEAD_A, LEAD_B, ADMIN = ("test.caleb.hong@example.com", "test.gavin.hopkinson@example.com",
-    "test.andrew.quinn@example.com", "test.jonah.johnson@example.com", "test.admin@example.com")
+    "taylor.lead@example.com", "test.austin.price@example.com", "test.admin@example.com")   # LEAD_A/LEAD_B: fixture team leads (never the pilot reps Andrew Quinn / Jonah Johnson)
 results = []
 def check(name, cond, detail=""):
     results.append((name, bool(cond), detail)); print(("PASS " if cond else "FAIL ") + name + ("" if cond else f"  -> {detail}"))
