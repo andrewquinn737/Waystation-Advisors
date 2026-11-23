@@ -706,6 +706,20 @@ const STATE_ABBREVIATIONS = {
 // ("texas"), both come out as the canonical STATES entry. Anything else
 // (a foreign province, "DC", free text) is left exactly as written rather
 // than guessed at, so no data is lost.
+// Options for the edit form's State select. A stored value is always kept
+// exactly as saved ("UT" stays "UT"): it selects its matching state, and a
+// value that isn't a US state ("DC", a province) gets its own option, so
+// saving the form never wipes or rewrites a state the caller didn't touch.
+function stateOptionsHtml(current) {
+  const raw = String(current || "").trim();
+  const match = raw ? normalizeStateValue(raw) : "";
+  const known = STATES.includes(match);
+  const extra = raw && !known ? `<option value="${escapeHtml(raw)}" selected>${escapeHtml(raw)}</option>` : "";
+  return extra + STATES.map((s) => (known && s === match)
+    ? `<option value="${escapeHtml(raw)}" selected>${s}</option>`
+    : `<option value="${s}">${s}</option>`).join("");
+}
+
 function normalizeStateValue(raw) {
   const v = String(raw || "").trim();
   if (!v) return v;
@@ -2973,7 +2987,7 @@ function buildDialEditHTML(dial) {
         <label for="d_state">State</label>
         <select id="d_state">
           <option value="">Select a state...</option>
-          ${STATES.map((s) => `<option value="${s}" ${dial.state === s ? "selected" : ""}>${s}</option>`).join("")}
+          ${stateOptionsHtml(dial.state)}
         </select>
       </div>
     </div>
