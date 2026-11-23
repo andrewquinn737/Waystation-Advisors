@@ -13,7 +13,7 @@ async function getPolicy() {
 }
 export async function callBlocked(phone) {
   const p = await getPolicy();
-  if (!p) return false;
+  if (!p || p.free) return false; // live, or a pilot user allowed to call real numbers on TEST
   if ((p.allow || []).map(dg).includes(dg(phone))) return false;
   showNotice(TEST_CALL_MSG, { title: "Test app" });
   return true;

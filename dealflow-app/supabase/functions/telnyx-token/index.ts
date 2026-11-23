@@ -39,7 +39,7 @@ Deno.serve(async (req: Request) => {
     const to = e164(body.to_number || "");
     if (!to) return json({ error: "That phone number isn't a valid US number." }, 400);
 
-    if (!callAllowed(to)) return json({ error: TEST_CALL_MSG, code: "test_call_blocked" }, 403);
+    if (!callAllowed(to, userId)) return json({ error: TEST_CALL_MSG, code: "test_call_blocked" }, 403);
 
     const { data: consent, error: ce } = await admin.rpc("call_consent", { p_to: to, p_state: body.owner_state || null });
     if (ce) return json({ error: ce.message }, 500);
