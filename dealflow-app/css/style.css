@@ -285,6 +285,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 }
 .page-header h1 { font-size: 20px; line-height: 1; margin: 0; display: flex; align-items: center; }
 .page-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* Search + gear sit together on the right of the header. */
+.page-header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 /* "X prospects displayed" next to the Dials heading — count of dials visible
    in the currently selected tab, after the Categories filter is applied (see
    updateProspectCount() in js/dials.js). */
