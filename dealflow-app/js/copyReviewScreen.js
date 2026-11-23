@@ -39,9 +39,7 @@ export async function openCopyReview(list, { onChanged, all = false } = {}) {
     <div class="cr-body"><div class="help-text">Loading...</div></div></div>`);
   document.body.appendChild(panel);
   const body = panel.querySelector(".cr-body");
-  const close = () => { panel.remove(); unlockPageScroll(); document.removeEventListener("keydown", onKey); document.removeEventListener("ws:drafts-changed", onDrafts); if (changed) onChanged && onChanged(); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
-  document.addEventListener("keydown", onKey);
+  const close = () => { panel.remove(); unlockPageScroll(); document.removeEventListener("ws:drafts-changed", onDrafts); if (changed) onChanged && onChanged(); };
   // "Edit with Claude" (aiChat.js) saved changes: reload the drafts
   const onDrafts = (e) => { if (e.detail?.listId === list.id) { changed = true; loadHeld(list.id, all).then(render).catch(() => {}); } };
   document.addEventListener("ws:drafts-changed", onDrafts);

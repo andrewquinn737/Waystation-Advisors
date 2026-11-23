@@ -90,7 +90,7 @@ export function mountAiChat(host, { listId, listName = "" }) {
   openBtn.onclick = () => { drawer.hidden = false; document.body.classList.add("ai-open-body"); refreshStatus(); loadThread().then(() => { if (busy()) startPoll(true); }); r("input").focus(); };
   const close = () => { drawer.hidden = true; document.body.classList.remove("ai-open-body"); startPoll(false); };
   r("close").onclick = close;
-  drawer.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  drawer.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } });
   r("new").onclick = async () => {
     const { error } = await supabase.rpc("ai_new_thread", { p_list_id: listId });
     if (error) return showErr(error.message);

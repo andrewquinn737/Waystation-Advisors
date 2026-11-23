@@ -102,7 +102,7 @@ export function wireDealSideToggle(toggleBtn, labelEl, onChange, { allowBroker =
   if (allowBroker) allowBrokerSide(true);
   const current = () => (allowBroker ? getClientSide() : getDealSide());
   const render = () => {
-    labelEl.textContent = SIDE_LABELS[current()];
+    labelEl.textContent = "Viewing: " + SIDE_LABELS[current()];   // the item switches sides, so it says what is shown now
   };
   render();
 

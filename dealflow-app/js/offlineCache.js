@@ -67,7 +67,14 @@ export function isNetworkError(err) {
 export function showOfflineNotice(stale) {
   const el = document.getElementById("offlineNotice");
   if (!el) return;
-  el.textContent = stale ? "You're offline — showing the last loaded data." : "No internet connection.";
+  // Only say "offline" when the browser itself is offline; otherwise the server is what we could not reach.
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const lead = offline ? "You're offline" : "Couldn't reach the server";
+  el.textContent = stale ? `${lead}. Showing the last loaded data.` : `${lead}.`;
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "btn small secondary retry-btn"; b.textContent = "Retry";
+  b.addEventListener("click", () => window.location.reload());
+  el.append(" ", b);
   el.classList.remove("hidden");
 }
 

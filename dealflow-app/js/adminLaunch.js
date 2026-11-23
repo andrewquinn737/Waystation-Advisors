@@ -65,9 +65,7 @@ export function openLaunch(c, onDone) {
       <label class="ad-lbl" for="adCount">Or send a number</label>
       <div class="ad-num"><input id="adCount" type="number" inputmode="numeric" min="1" max="${n}" placeholder="1 to ${n}" /><button type="button" class="btn secondary" id="adSome">Send</button></div></div>
     <div class="ad-err" id="adErr" role="alert"></div><button type="button" class="btn secondary" id="adCancel">Cancel</button></div>`);
-  const q = (s) => sheet.querySelector(s), close = () => { sheet.remove(); document.removeEventListener("keydown", onKey); };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
-  document.addEventListener("keydown", onKey);
+  const q = (s) => sheet.querySelector(s), close = () => { sheet.remove(); };   // Esc is handled for every dialog by js/layers.js
   const openedAt = Date.now();   // a double click on Launch must not land on the backdrop and close the sheet
   sheet.addEventListener("click", (e) => { if (e.target === sheet && Date.now() - openedAt > 500) close(); });
   q("#adCancel").onclick = close;

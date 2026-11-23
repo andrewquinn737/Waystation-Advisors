@@ -1,8 +1,10 @@
 // Admin > Email accounts: sending mailboxes grouped by person (mailbox-admin edge function, same API an AI tool can call).
 import { supabase } from "./supabaseClient.js";
+import { friendlyMessage } from "./netError.js";
 import { SUPABASE_URL } from "./config.js";
 import { copyText } from "./claudeHelp.js";
 import { confirmBox } from "./copyCommon.js";
+import { confirmResume } from "./resumeConfirm.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -44,7 +46,10 @@ async function load() {
     boxes = r.mailboxes; people = r.people.filter((p) => p.full_name !== "AI Assistant").sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
     $("addOwner").innerHTML = `<option value="">Owner: match by name</option>` + people.map((p) => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("");
     msg(""); render();
-  } catch (e) { $("mbxList").innerHTML = ""; msg(e.message); }
+  } catch (e) {
+    $("mbxList").innerHTML = `<p class="ad-empty">Couldn't load the email accounts. ${esc(friendlyMessage(e))} <button type="button" class="ad-link" id="mbxRetry">Retry</button></p>`;
+    $("mbxRetry").onclick = load; msg("");
+  }
 }
 
 // Two separate indicators from the last REAL login check: sending (SMTP login) and reading (IMAP login; XOAUTH2 for Microsoft
@@ -85,7 +90,7 @@ const plural = (n) => `${n} mailbox${n === 1 ? "" : "es"}`;
 function render() {
   const unassigned = boxes.filter((b) => b.needs_assignment).length;
   $("mbxSummary").textContent = `${boxes.length} account${boxes.length === 1 ? "" : "s"}` + (unassigned ? `, ${unassigned} need an owner` : "");
-  if (!boxes.length) { $("mbxList").innerHTML = `<p class="ad-empty">No email accounts yet. Tap "Add account".</p>`; return; }
+  if (!boxes.length) { $("mbxList").innerHTML = `<p class="ad-empty">No email accounts yet. Use "Add account" above.</p>`; return; }
   const wasOpen = openKeys;
   const groups = new Map();
   for (const b of boxes) {
@@ -101,7 +106,7 @@ function render() {
   }).join("");
 }
 
-async function run(fn, okText) { try { await fn(); if (okText) msg(okText, true); } catch (e) { msg(e.message); } await load(); }
+async function run(fn, okText) { try { await fn(); if (okText) msg(okText, true); } catch (e) { msg(friendlyMessage(e)); } await load(); }
 function onEvent(ev) {
   const el = ev.target.closest("[data-act]"), card = ev.target.closest(".ad-box"); if (!el || !card) return;
   const id = card.dataset.id, b = boxes.find((x) => x.id === id), act = el.dataset.act; if (!b) return;
@@ -117,7 +122,15 @@ function onEvent(ev) {
     if (v !== "" && (!/^\d+$/.test(v) || +v > 200)) { msg("Daily limit must be a whole number from 0 to 200."); el.value = b.daily_send_limit ?? ""; return; }
     run(() => api({ action: "update", account_id: id, daily_send_limit: v === "" ? null : +v }));
   } else if (act === "check" && ev.type === "click") checkLogin(b, el);
-  else if (act === "pause" && ev.type === "click") run(() => api({ action: "update", account_id: id, send_paused_reason: b.send_paused_reason ? null : "Paused by admin" }), b.send_paused_reason ? `${b.email_address} will send again.` : `${b.email_address} paused. Nothing is sent from it until you resume.`);
+  else if (act === "pause" && ev.type === "click") {
+    // resuming something the system paused for bounces asks first, and says how bad the bounce rate was
+    if (b.send_paused_reason && /bounce/i.test(b.send_paused_reason)) {
+      confirmResume(`Resume ${b.email_address}?`, b.send_paused_reason).then((yes) => { if (yes) doPause(b, id); });
+    } else doPause(b, id);
+  }
+}
+function doPause(b, id) {
+  run(() => api({ action: "update", account_id: id, send_paused_reason: b.send_paused_reason ? null : "Paused by admin" }), b.send_paused_reason ? `${b.email_address} will send again.` : `${b.email_address} paused. Nothing is sent from it until you resume.`);
 }
 
 async function addOne() {
@@ -134,7 +147,7 @@ async function addOne() {
     $("addEmail").value = ""; $("addPass").value = ""; $("mbxAddPanel").classList.add("hidden"); say("");
     msg(x.needs_assignment ? `${email} added. Pick its owner below.` : `${email} added and its login works.`, true);
     await load();
-  } catch (e) { say(e.message); } finally { $("addGo").disabled = false; }
+  } catch (e) { say(friendlyMessage(e)); } finally { $("addGo").disabled = false; }
 }
 
 async function rotateKey() {
@@ -144,7 +157,7 @@ async function rotateKey() {
     const r = await api({ action: "rotate_api_key" });
     $("mbxKeyOut").innerHTML = `<p class="ad-note warn">Copy it now. It is not shown again.</p><pre>${esc(r.api_key)}</pre><button type="button" class="btn secondary small" id="mbxCopyKey">Copy key</button>`;
     $("mbxCopyKey").onclick = async (e) => { e.target.textContent = (await copyText(r.api_key)) ? "Copied" : "Select and copy it by hand"; };
-  } catch (e) { msg(e.status === 400 ? "Key rotation isn't available on this server yet." : e.message); }
+  } catch (e) { msg(e.status === 400 ? "Key rotation isn't available on this server yet." : friendlyMessage(e)); }
   $("mbxRotate").disabled = false;
 }
 
@@ -152,7 +165,7 @@ async function rotateKey() {
 async function checkLogin(b, btn) {
   btn.disabled = true; btn.textContent = "Checking...";
   try { await api({ action: "check_login", account_id: b.id }); await load(); }
-  catch (e) { msg(e.message); btn.disabled = false; btn.textContent = "Check now"; }
+  catch (e) { msg(friendlyMessage(e)); btn.disabled = false; btn.textContent = "Check now"; }
 }
 
 async function checkAll() {
@@ -160,6 +173,6 @@ async function checkAll() {
   try {
     const r = await api({ action: "check_login", all: true });
     await load(); msg(`Checked ${r.checked}: sending works on ${r.sending_ok}, reading works on ${r.reading_ok}.`, r.sending_ok === r.checked && r.reading_ok === r.checked);
-  } catch (e) { msg(e.message); }
+  } catch (e) { msg(friendlyMessage(e)); }
   btn.disabled = false; btn.textContent = "Check all";
 }

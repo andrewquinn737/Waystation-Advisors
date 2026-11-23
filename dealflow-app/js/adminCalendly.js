@@ -2,6 +2,7 @@
 // personal access token here. Until then the intro-call flow works by hand: Calendly popup or "Enter the time myself".
 // The token is write-only from the browser: it is stored by an admin-only RPC and never read back.
 import { supabase } from "./supabaseClient.js";
+import { friendlyMessage } from "./netError.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -10,7 +11,7 @@ export async function mountCalendlyConnect(host) {
   host.innerHTML = `<section class="ad-panel"><h3>Connect Calendly</h3><p class="ad-muted">Loading...</p></section>`;
   const { data: st, error } = await supabase.rpc("calendly_status");
   const panel = host.querySelector(".ad-panel");
-  if (error) { panel.innerHTML = `<h3>Connect Calendly</h3><p class="ad-muted">Couldn't read the Calendly setting: ${esc(error.message)}</p>`; return; }
+  if (error) { panel.innerHTML = `<h3>Connect Calendly</h3><p class="ad-muted">Couldn't read the Calendly setting. ${esc(friendlyMessage(error))} <button type="button" class="ad-link" id="cdlyRetry">Retry</button></p>`; panel.querySelector("#cdlyRetry").onclick = () => mountCalendlyConnect(host); return; }
   const on = !!st?.connected;
   panel.innerHTML = `<h3>Connect Calendly <span class="ad-pill ${on ? "ok" : ""}" id="cdlyState">${on ? "Connected" : "Not connected"}</span></h3>
     <p class="ad-muted">${on
@@ -32,9 +33,9 @@ export async function mountCalendlyConnect(host) {
     if (!token && !st?.has_token) return show("Paste the Calendly token first.");
     if (uri && !/^https:\/\/api\.calendly\.com\/event_types\/[\w-]+/.test(uri)) return show("The event type link should look like https://api.calendly.com/event_types/XXXXXXXX.");
     const { error: e } = await supabase.rpc("calendly_connect", { p_token: token, p_event_type_uri: uri });
-    if (e) return show(e.message);
+    if (e) return show(friendlyMessage(e));
     mountCalendlyConnect(host);
   };
   const off = panel.querySelector("#cdlyOff");
-  if (off) off.onclick = async () => { const { error: e } = await supabase.rpc("calendly_disconnect"); if (e) return show(e.message); mountCalendlyConnect(host); };
+  if (off) off.onclick = async () => { const { error: e } = await supabase.rpc("calendly_disconnect"); if (e) return show(friendlyMessage(e)); mountCalendlyConnect(host); };
 }

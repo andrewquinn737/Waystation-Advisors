@@ -18,7 +18,7 @@
 .dial-outcome { min-height: 48px; padding: 8px 6px; font-size: 14px; font-weight: 600; background: var(--surface); color: var(--text); border: 1px solid var(--border); line-height: 1.15; }
 .dial-outcome:first-of-type { grid-column: 1 / -1; }
 @media (hover: hover) { .btn.secondary:hover, .dial-outcome:hover { background: var(--gold-soft); color: var(--text); } }
-.dial-outcome.current { background: var(--tone-soft); color: var(--tone); border-color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone); }
+.dial-outcome.current { background: var(--tone-soft); color: var(--tone-text); border-color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone); }
 .dial-outcome.current::before { content: "\2713\00a0"; }
 .dial-outcome-intro { grid-column: 1 / -1; font-size: 14px; min-height: 44px; }
 .dial-more { padding: 6px 0; }

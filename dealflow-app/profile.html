@@ -16,6 +16,7 @@
   })();
 </script>
 <link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/a11y.css?v=1" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
@@ -534,7 +535,7 @@
        row per deleted tab (buyer attachment + last owner under its title),
        with a Select mode for Restore / Reassign / permanent Delete. Tapping a
        row swaps to the detail view: every dial in that tab, plus Back. -->
-  <div class="fullscreen-modal hidden" id="deletedTabsModal">
+  <div class="fullscreen-modal hidden" id="deletedTabsModal" data-esc="own">
     <div class="fs-header">
       <div class="fs-header-main" id="deletedTabsHeaderMain">
         <h2 id="deletedTabsTitle">Deleted tabs</h2>
@@ -561,7 +562,7 @@
   </div>
 
   <!-- Reassign: restores the selected tabs (and their dials) under a different account. -->
-  <div class="modal-backdrop hidden" id="deletedTabsReassignModal">
+  <div class="modal-backdrop hidden" id="deletedTabsReassignModal" data-esc="own">
     <div class="modal">
       <h2>Reassign to account</h2>
       <p class="help-text" id="deletedTabsReassignHelp"></p>
@@ -575,7 +576,7 @@
   </div>
 
   <!-- Permanent delete confirmation. -->
-  <div class="modal-backdrop hidden" id="deletedTabsPurgeModal">
+  <div class="modal-backdrop hidden" id="deletedTabsPurgeModal" data-esc="own">
     <div class="modal">
       <h2 id="deletedTabsPurgeTitle">Permanently delete?</h2>
       <p class="help-text" id="deletedTabsPurgeHelp"></p>

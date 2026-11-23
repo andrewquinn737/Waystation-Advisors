@@ -29,13 +29,23 @@ export function stateToName(v) {
   if (ABBR[t.toUpperCase()] && t.length === 2) return ABBR[t.toUpperCase()];
   return STATES.find((s) => s.toLowerCase() === t.toLowerCase()) || t;
 }
+// One location format everywhere: the 2-letter code ("Provo, UT"). Full names are mapped to their code; anything else is kept as is.
+const NAME_TO_CODE = Object.fromEntries(Object.entries(ABBR).map(([c, n]) => [n.toLowerCase(), c]));
+export function stateToCode(v) {
+  const t = String(v ?? "").trim();
+  if (!t) return "";
+  if (t.length === 2 && ABBR[t.toUpperCase()]) return t.toUpperCase();
+  return NAME_TO_CODE[t.toLowerCase()] || t;
+}
 export function stateOptionsHTML(current) {
   // A stored value is kept exactly as saved ("UT" stays "UT"): its option shows the full name but carries the stored value, and a value that
   // matches no state ("DC", a province) gets its own selected option, so saving the form never wipes or rewrites a state nobody touched.
+  // New saves store the 2-letter code ("UT"); "Not in the US" keeps its words. An old full name ("Utah") is saved as its code the next time the form is saved.
   const raw = String(current ?? "").trim(), cur = stateToName(raw), known = STATES.includes(cur);
+  const val = (s) => NAME_TO_CODE[s.toLowerCase()] || s;
   return `<option value="">Select a state...</option>` +
     (raw && !known ? `<option value="${escapeHtml(raw)}" selected>${escapeHtml(raw)}</option>` : "") +
-    STATES.map((s) => known && s === cur ? `<option value="${escapeHtml(raw)}" selected>${s}</option>` : `<option value="${s}">${s}</option>`).join("");
+    STATES.map((s) => known && s === cur ? `<option value="${escapeHtml(raw.length === 2 ? raw.toUpperCase() : val(s))}" selected>${s}</option>` : `<option value="${escapeHtml(val(s))}">${s}</option>`).join("");
 }
 
 export function escapeHtml(str) {
@@ -107,8 +117,7 @@ function personalAndContactSectionsHTML(client, brokers = []) {
           <div>
             <div class="field-label-row"><label for="f_state">State</label><span class="field-required-msg hidden" data-field="state">required</span></div>
             <select id="f_state">
-              <option value="">Select a state...</option>
-              ${STATES.map((s) => `<option value="${s}" ${client.state === s ? "selected" : ""}>${s}</option>`).join("")}
+              ${stateOptionsHTML(client.state)}
             </select>
           </div>
         </div>

@@ -5,6 +5,8 @@ import { setOwnEmail, setOwnRole, setTeamLeadMailbox, setOwnHasMailbox } from ".
 import { subscribeToPush } from "./push.js";
 import { cacheGet, cacheSet, isNetworkError, withTimeout } from "./offlineCache.js";
 import { defaultTimezone } from "./eventTime.js";
+import { friendlyMessage, addRetry, showFatalScreen, isTransient, NET_MESSAGE } from "./netError.js";
+import "./layers.js";
 
 // Why the app is sending someone back to the login page — shown there (login.html reads it) so a bounce is
 // never silent, and so login.html knows NOT to auto-forward into the app again (that was the endless loop).
@@ -16,6 +18,17 @@ function goToLogin(reason) {
     if (/^[a-z]+\.html(\?|$)/i.test(here) && !/^(login|index)\.html/i.test(here)) sessionStorage.setItem("login_next", here);
   } catch { /* storage blocked */ }
   window.location.href = "login.html";
+}
+
+// The last profile this device loaded (any user), for when even the sign-in check cannot reach the network.
+function anyCachedProfile() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("waystation_cache_profile_")) { const p = JSON.parse(localStorage.getItem(k)); if (p && p.id && p.role) return p; }
+    }
+  } catch { /* storage blocked */ }
+  return null;
 }
 
 function hidePageLoadingOverlay() {
@@ -41,15 +54,21 @@ export async function requireSession() {
   // same one-retry philosophy as withNetworkRetry elsewhere in this file —
   // since a timeout here is far more likely to be this exact glitch than an
   // actually-expired session.
+  // One shared time budget (about 8 s) for the whole sign-in check, so a dead connection shows the cached page or an error
+  // quickly instead of leaving the skeleton up for half a minute.
+  const t0 = Date.now();
+  const left = (max) => Math.max(1500, Math.min(max, 8000 - (Date.now() - t0)));
   let session;
   try {
-    ({ data: { session } } = await withTimeout(supabase.auth.getSession()));
+    ({ data: { session } } = await withTimeout(supabase.auth.getSession(), left(4000)));
   } catch {
     try {
-      ({ data: { session } } = await withTimeout(supabase.auth.getSession()));
+      ({ data: { session } } = await withTimeout(supabase.auth.getSession(), left(3000)));
     } catch {
-      goToLogin("Couldn't check your sign-in (the connection timed out). Please try again.");
-      return null;
+      // The connection is the problem, not the sign-in: use the last profile this device loaded, or say so and offer Retry.
+      const cachedProfile = anyCachedProfile();
+      if (!cachedProfile) { showFatalScreen(NET_MESSAGE); return null; }
+      session = { user: { id: cachedProfile.id } };
     }
   }
   if (!session) {
@@ -66,7 +85,8 @@ export async function requireSession() {
           "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, transcript_calling_enabled, record_accepted_calls, record_all_calls, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
         )
         .eq("id", session.user.id)
-        .single()
+        .single(),
+      left(4000)
     ));
   } catch (timeoutErr) {
     // One more try before giving up (a slow phone connection right after sign-in is the usual cause).
@@ -78,7 +98,8 @@ export async function requireSession() {
             "id, full_name, role, phone, email, email_2, email_3, team_id, avatar_url, notifications_enabled, autodial_enabled, transcript_calling_enabled, record_accepted_calls, record_all_calls, last_daily_notif_date, calendly_link, use_own_calendly_link, timezone, personalized_email_enabled, personalized_email_template, personalized_email_subject, recommended_first_email_enabled, recommended_second_email_enabled, personalized_texting_enabled, personalized_texting_template, about_us_email_enabled, about_us_email_subject, about_us_email_template"
           )
           .eq("id", session.user.id)
-          .single()
+          .single(),
+        left(3000)
       ));
     } catch (retryErr) {
       profile = null;
@@ -99,19 +120,21 @@ export async function requireSession() {
   // (see cacheSet below) and keep going instead of redirecting. Only a
   // genuinely missing session, or a real (non-network) error with nothing
   // cached yet, still sends someone to login.
-  let resolvedProfile = profile;
+  let resolvedProfile = profile, offlineMode = false;
   if (error || !profile) {
-    const cached = isNetworkError(error) ? cacheGet("profile_" + session.user.id) : null;
+    const transient = isTransient(error);
+    const cached = transient ? cacheGet("profile_" + session.user.id) : null;
     if (!cached) {
       console.error("Could not load profile", error);
-      // A real (non-network) failure means this stored session isn't usable —
-      // clear it, otherwise login.html sees it, sends us straight back here,
-      // and the two pages bounce forever.
-      if (!isNetworkError(error)) await supabase.auth.signOut({ scope: "local" });
-      goToLogin(`Couldn't load your profile (${error?.message || "unknown error"}). Please sign in again; if this repeats, tell an admin.`);
+      // A connection problem or a busy server is not a sign-out: say so in the page and offer Retry. Only a real rejection
+      // of the sign-in goes to the login page (and its stored session is cleared, or login.html would bounce straight back).
+      if (transient) { showFatalScreen(friendlyMessage(error)); return null; }
+      await supabase.auth.signOut({ scope: "local" });
+      goToLogin("We couldn't load your profile. Please sign in again; if this repeats, tell an admin.");
       return null;
     }
     resolvedProfile = cached;
+    offlineMode = true;   // the connection is down: skip the optional lookups below instead of waiting on each one
   } else {
     cacheSet("profile_" + session.user.id, profile);
   }
@@ -162,7 +185,7 @@ export async function requireSession() {
   // Every team this account belongs to or leads: a team lead can lead more than one (profiles.team_id is the
   // primary, team_lead_teams the extras). Everything that scopes "my team" uses profile.team_ids.
   resolvedProfile.team_ids = resolvedProfile.team_id ? [resolvedProfile.team_id] : [];
-  if (resolvedProfile.role === "team_lead") {
+  if (resolvedProfile.role === "team_lead" && !offlineMode) {
     try {
       const { data: extra } = await supabase.from("team_lead_teams").select("team_id").eq("profile_id", resolvedProfile.id);
       (extra || []).forEach((r) => { if (!resolvedProfile.team_ids.includes(r.team_id)) resolvedProfile.team_ids.push(r.team_id); });
@@ -181,7 +204,7 @@ export async function requireSession() {
   // never block sign-in, just silently leave the legacy mailto: fallback in
   // place, same as if the intern had no team lead at all.
   setOwnRole(resolvedProfile.role);
-  if (resolvedProfile.role === "intern" && resolvedProfile.team_id) {
+  if (resolvedProfile.role === "intern" && resolvedProfile.team_id && !offlineMode) {
     try {
       // Capped at 4 s: this only picks what the Email icon does, so a slow database must not hold up the first render.
       const teamLead = await withTimeout(findTeamLead(resolvedProfile.team_id, "id, email"), 4000);
@@ -197,7 +220,7 @@ export async function requireSession() {
 
   // A team lead/admin can't send email until they've connected one of their own
   // mailboxes (Profile -> Edit) — tell the Email icon so it can say so.
-  if (resolvedProfile.role === "team_lead" || resolvedProfile.role === "admin") {
+  if ((resolvedProfile.role === "team_lead" || resolvedProfile.role === "admin") && !offlineMode) {
     try {
       const { data: own } = await withTimeout(supabase.from("email_accounts").select("id").eq("owner_id", resolvedProfile.id).limit(1), 4000);
       setOwnHasMailbox(!!(own && own.length));
@@ -269,7 +292,7 @@ function navItems(role) {
 function ensureSimpleCss() {
   if (document.getElementById("simpleCss")) return;
   const l = document.createElement("link");
-  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=7";
+  l.id = "simpleCss"; l.rel = "stylesheet"; l.href = "css/simple.css?v=8";
   document.head.appendChild(l);
 }
 
@@ -324,8 +347,10 @@ async function watchInboxBadge(profile) {
   } catch { /* a missing badge is fine */ }
 }
 
-export function showError(el, err) {
+// onRetry (optional): adds a Retry button when the failure is a dropped connection or a busy server.
+export function showError(el, err, onRetry) {
   if (!el) return;
-  el.textContent = err?.message || String(err);
+  el.textContent = friendlyMessage(err);
+  if (onRetry && isTransient(err)) addRetry(el, onRetry);
   el.classList.remove("hidden");
 }

@@ -1,6 +1,7 @@
 // Admin > Do not email: the suppression list. View, search, add (paste many) and remove, with the reason and the date.
 // Bounces and "stop emailing me" replies land here by themselves; this is where an admin adds an owner who asked by phone, or a DNC list.
 import { supabase } from "./supabaseClient.js";
+import { friendlyMessage } from "./netError.js";
 import { confirmBox } from "./copyCommon.js";
 
 const $ = (id) => document.getElementById(id);
@@ -15,7 +16,7 @@ export function initSuppression() {
   $("adSuppression").innerHTML = `<section class="ad-panel"><h3>Add addresses</h3>
       <p class="ad-muted">Paste email addresses or whole company domains (like acme.com), one per line or separated by commas. Nobody on this list is emailed, now or in a later campaign. Anything already queued for them moves to backup (calls only).</p>
       <textarea id="supText" rows="4" class="ad-ta" placeholder="owner@acme.com&#10;beta-co.com" aria-label="Addresses or domains to add"></textarea>
-      <input id="supReason" type="text" maxlength="120" placeholder="Reason (for example: asked by phone on Nov 22)" aria-label="Reason" />
+      <input id="supReason" type="text" maxlength="120" placeholder="Reason (optional)" aria-label="Reason" />
       <div class="ad-row"><button type="button" class="btn" id="supAdd">Add to the list</button></div>
       <div class="ad-msg hidden" id="supMsg" role="alert"></div></section>
     <div class="ad-num sup-search"><input id="supSearch" type="search" placeholder="Search addresses, domains or reasons" aria-label="Search the list" /></div>
@@ -37,7 +38,7 @@ async function load(more) {
   const asked = term;
   const { data, error } = await supabase.rpc("suppression_list", { p_search: asked || null, p_limit: PAGE, p_offset: offset });
   if (mine !== seq) return;
-  if (error) { $("supList").innerHTML = `<p class="ad-empty">Couldn't load the list: ${esc(error.message)} <button type="button" class="ad-link" id="supRetry">Retry</button></p>`; $("supRetry").onclick = () => load(false); return; }
+  if (error) { $("supList").innerHTML = `<p class="ad-empty">Couldn't load the list. ${esc(friendlyMessage(error))} <button type="button" class="ad-link" id="supRetry">Retry</button></p>`; $("supRetry").onclick = () => load(false); return; }
   total = data?.total ?? 0;
   items = more ? items.concat(data?.items || []) : data?.items || [];
   offset = items.length;
@@ -59,7 +60,7 @@ async function add() {
   const b = $("supAdd"); b.disabled = true; msg("");
   // Preview first: free-mail domains are refused, a company domain asks "N leads will move to backup" before it is added
   const pv = await supabase.rpc("suppress_preview", { p_text: text });
-  if (pv.error) { b.disabled = false; return msg("Not added: " + pv.error.message); }
+  if (pv.error) { b.disabled = false; return msg("Not added: " + friendlyMessage(pv.error)); }
   const refused = pv.data?.refused || [], doms = pv.data?.domains || [];
   const refusedMsg = refused.length ? `${refused.join(", ")} ${refused.length === 1 ? "is a free-mail domain" : "are free-mail domains"} and can't be blocked as a whole: it would stop email to everyone using that service. Add the individual addresses instead. ` : "";
   if (doms.length) {
@@ -69,7 +70,7 @@ async function add() {
   }
   const { data, error } = await supabase.rpc("suppress_many", { p_text: text, p_reason: $("supReason").value.trim() || "manual" });
   b.disabled = false;
-  if (error) return msg("Not added: " + error.message);
+  if (error) return msg("Not added: " + friendlyMessage(error));
   const bits = [data.emails && `${data.emails} address${data.emails === 1 ? "" : "es"}`, data.domains && `${data.domains} domain${data.domains === 1 ? "" : "s"}`].filter(Boolean);
   const extra = [data.already && `${data.already} already on the list`, data.skipped?.length && `${data.skipped.length} not recognised (${data.skipped.slice(0, 3).join(", ")})`].filter(Boolean);
   const refusedNow = data.refused?.length ? ` ${data.refused.join(", ")} not added: free-mail domains can't be blocked as a whole. Add the individual addresses instead.` : "";
@@ -82,6 +83,6 @@ async function onRemove(e) {
   if (!(await confirmBox({ title: `Remove ${x.value}?`, body: `${x.kind === "domain" ? "Everyone at this company" : "This address"} can be emailed again by a later campaign. Leads already moved to backup stay there.`, yes: "Remove" }))) return;
   btn.disabled = true;
   const { error } = await supabase.rpc(x.kind === "domain" ? "unsuppress_domain" : "unsuppress_email", x.kind === "domain" ? { p_domain: x.value } : { p_email: x.value });
-  if (error) { btn.disabled = false; return msg("Not removed: " + error.message); }
+  if (error) { btn.disabled = false; return msg("Not removed: " + friendlyMessage(error)); }
   msg(`${x.value} removed.`, true); load(false);
 }

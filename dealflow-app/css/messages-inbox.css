@@ -6,7 +6,7 @@
 .mailbox-row-addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mailbox-filter { width: 100%; box-sizing: border-box; margin-top: 8px; }
 .message-mailbox-chip { display: inline-block; max-width: 100%; margin-top: 2px; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
-.message-seq-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--gold-soft); color: var(--accent); font-size: 11px; font-weight: 700; vertical-align: middle; }
+.message-seq-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--gold-soft); color: var(--accent-text); font-size: 11px; font-weight: 700; vertical-align: middle; }
 .message-seq-badge.replied { background: #fdecc8; color: #8a5a00; }
 .message-thread-row.readonly { opacity: .92; }
 .readonly-banner { margin: 0 0 10px; padding: 6px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--border); color: var(--text-muted); font-size: 12.5px; }

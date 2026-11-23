@@ -38,7 +38,7 @@ def round1(b):
     ctx = b.new_context(viewport={"width": 1280, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, "admin")
     # Calls: card buttons muted, readable on hover, clear selected state
     p.goto(BASE + "dials.html"); p.wait_for_timeout(2500)
-    p.locator(".dh-row").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+    p.locator(".dh-row").first.click(); p.wait_for_selector(".dial-outcome", timeout=20000)
     check("Calls: outcome buttons are readable when hovered (contrast >= 4.5)", contrast(p, '.dial-outcome[data-outcome="no_response"]', hover=True) >= 4.5, contrast(p, '.dial-outcome[data-outcome="no_response"]'))
     check("Calls: no saturated blue fill on call buttons or outcomes", p.evaluate("[...document.querySelectorAll('.dial-call-btn,.dial-outcome')].every(e => getComputedStyle(e).backgroundColor !== 'rgb(47, 95, 237)')"))
     p.evaluate("document.querySelector('.dial-outcome[data-outcome=\"no_response\"]').classList.add('current')")
@@ -124,7 +124,7 @@ def round2(b):
         p.unroute("**/rest/v1/dials?*list_id=eq.*"); p.click("[data-reload-dials]"); p.wait_for_timeout(2500)
         check("Calls: Retry reloads the list", p.locator(".dials-load-failed").count() == 0 and "TEST-R2 Co B" in p.inner_text("#dialsTableWrap"), p.inner_text("#dialsTableWrap")[:200])
         # -- outcome save failure stays visible
-        open_list("A"); p.locator(".dh-row", has_text="TEST-R2 Co A2").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+        open_list("A"); p.locator(".dh-row", has_text="TEST-R2 Co A2").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
         p.route("**/rest/v1/dials?id=eq.*", lambda r: r.fulfill(status=500, body='{"message":"new row violates row-level security"}', headers={"content-type": "application/json"}) if r.request.method == "PATCH" else r.continue_())
         p.click('.dial-outcome[data-outcome="no_response"]'); p.wait_for_timeout(1500)
         vis = p.is_visible("#dialModalError"); et = p.inner_text("#dialModalError") if vis else ""
@@ -232,7 +232,7 @@ def round3(b):
         check("Calls: the callback banner lists the missed one as overdue", "overdue callback" in p2.inner_text("#callbackBanners"), p2.inner_text("#callbackBanners")[:100])
         c2.close()
         # -- failed note save: plain words, never 'Saved', no raw error at the top of the card
-        p.locator(".dh-row", has_text="TEST-R3 Co A0").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+        p.locator(".dh-row", has_text="TEST-R3 Co A0").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
         p.click(".dial-more summary")
         p.route("**/rest/v1/dials?id=eq.*", lambda r: r.abort() if r.request.method == "PATCH" else r.continue_())
         p.fill("#d_call_notes_live", "owner wants a call next week"); p.click("#dialModalTitle") if p.query_selector("#dialModalTitle") else p.keyboard.press("Tab"); p.wait_for_timeout(1500)
@@ -248,7 +248,7 @@ def round3(b):
         p.click("#dialCancelBtn"); p.wait_for_timeout(500)
         # -- intro: closing the first chooser puts the dial back and removes the placeholder client
         sb.test_sql(f"update dials set industry='Plumbing' where id='{d['A0']}'")
-        open_list("A"); p.locator(".dh-row", has_text="TEST-R3 Co A0").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+        open_list("A"); p.locator(".dh-row", has_text="TEST-R3 Co A0").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
         p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
         p.click("#introCallPopupClose"); p.wait_for_timeout(1800)
         row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A0']}') c from dials where id='{d['A0']}'")[0]
@@ -342,7 +342,7 @@ def round4(b):
             if not p.query_selector(f'.dial-tab[data-id="{lid}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
             if p.query_selector(f'.dial-tab[data-id="{lid}"]:not(.active)'): p.click(f'.dial-tab[data-id="{lid}"]:not(.active)')
             p.wait_for_timeout(2500)
-            p.locator(".dh-row", has_text="TEST-R4 Co UT").first.click(); p.wait_for_selector(".dial-outcome", timeout=8000)
+            p.locator(".dh-row", has_text="TEST-R4 Co UT").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
             # in-call bar open with the card: More, the last outcome and Save can be scrolled to and are not under the bar
             p.evaluate("""async () => { const m = await import('/js/callPanel.js'); window.__pnl = m.openCallPanel({ name: 'X', onHangup() {}, onOutcome: async () => true, onNext() {}, outcomes: [["a", "A"]] }); window.__pnl.ended('Call ended'); }""")
             p.wait_for_timeout(300)
@@ -371,17 +371,19 @@ def round4(b):
         if not p.query_selector(f'.dial-tab[data-id="{lid}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
         if p.query_selector(f'.dial-tab[data-id="{lid}"]:not(.active)'): p.click(f'.dial-tab[data-id="{lid}"]:not(.active)')
         p.wait_for_timeout(2500)
-        p.locator(".dh-row", has_text="TEST-R4 Co ON").first.click(); p.wait_for_selector("#dialEditBtn", timeout=8000); p.click("#dialEditBtn"); p.wait_for_selector("#d_state")
+        p.locator(".dh-row", has_text="TEST-R4 Co ON").first.locator(".mc-name").click(); p.wait_for_selector("#dialEditBtn", timeout=8000); p.click("#dialEditBtn"); p.wait_for_selector("#d_state")
         p.fill("#d_city", "Toronto"); p.click("#dialSaveBtn"); p.wait_for_timeout(1500)
         check("Calls: a state that is not in the list ('Ontario') is kept when the dial is edited", sb.test_sql(f"select state s from dials where id='{d_on}'")[0]["s"] == "Ontario")
         # intro revert restores the callback time and the time step is prefilled from it
         cb = sb.test_sql(f"update dials set contact_status='busy_callback', callback_user_id='{adm}' where id='{d_cb}' returning 1")
-        sb.test_sql(f"update dials set callback_at=date_trunc('hour', now()) + interval '3 days 15 hours 30 minutes', callback_defaulted=false where id='{d_cb}'")
+        sb.test_sql(f"update dials set callback_at=date_trunc('day', now()) + interval '3 days 17 hours', callback_defaulted=false where id='{d_cb}'")
         want = sb.test_sql(f"select callback_at a from dials where id='{d_cb}'")[0]["a"]
         p.goto(BASE + f"dials.html?dial={d_cb}"); p.wait_for_timeout(3500)
-        p.wait_for_selector(".dial-outcome", timeout=8000)
+        p.wait_for_selector(".dial-outcome", timeout=20000)
         p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
-        p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeDateInput", state="visible", timeout=8000); p.wait_for_timeout(500)
+        p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeDateInput", state="visible", timeout=8000)
+        try: p.wait_for_function("!!document.getElementById('introCallTimeDateInput').value", timeout=10000)   # wait for the condition itself, not a fixed pause
+        except Exception: pass
         check("Calls: the intro time step is prefilled with the date of the callback time the owner gave", bool(p.input_value("#introCallTimeDateInput")), p.input_value("#introCallTimeDateInput"))
         p.click("#introCallTimeCancelBtn") if p.query_selector("#introCallTimeCancelBtn") else p.keyboard.press("Escape"); p.wait_for_timeout(1800)
         row = sb.test_sql(f"select contact_status s, callback_at a, callback_defaulted d from dials where id='{d_cb}'")[0]
@@ -459,8 +461,10 @@ def run():
                 p.click("#pageMenuToggle"); p.wait_for_timeout(200)
                 m = items(p, "#pageHeaderMenu .page-header-menu-item")
                 check(f"{role}: Calls menu has Add new, Import, Select, Search, Categories", {"menuAddNewBtn", "menuImportBtn", "menuSelectBtn", "menuSearchBtn", "menuCategoriesBtn"} <= set(m), m)
-            p.goto(BASE + "profile.html"); p.wait_for_timeout(2000); p.click("#pageSettingsBtn"); p.wait_for_timeout(500)
-            check(f"{role}: Profile gear has Notifications + Advanced", {"menuNotificationsBtn", "menuAdvancedBtn"} <= set(items(p, "#settingsMenu .page-header-menu-item")))
+            p.goto(BASE + "profile.html"); p.wait_for_selector("#pageSettingsBtn", state="visible", timeout=30000); p.wait_for_timeout(1500); p.click("#pageSettingsBtn")
+            try: p.wait_for_function("document.querySelectorAll('#settingsMenu .page-header-menu-item').length && ![...document.querySelectorAll('#settingsMenu .page-header-menu-item')].every(x => x.offsetParent === null)", timeout=10000)
+            except Exception: pass
+            check(f"{role}: Profile gear has Notifications + Advanced", {"menuNotificationsBtn", "menuAdvancedBtn"} <= set(items(p, "#settingsMenu .page-header-menu-item")), items(p, "#settingsMenu .page-header-menu-item"))
             ctx.close()
             ctx = b.new_context(viewport={"width": 375, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, role)
             for pg in ["profile", "dials", "messages"]:

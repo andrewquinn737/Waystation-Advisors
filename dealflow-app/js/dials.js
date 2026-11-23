@@ -1,7 +1,7 @@
 import { loadTeamScopeAccounts, groupsByTeam, teamIdsOf, withoutAi } from "./teamScope.js";
 import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
-import { STATES, escapeHtml, defaultClient, stateOptionsHTML } from "./clientForm.js";
+import { STATES, escapeHtml, defaultClient, stateOptionsHTML, stateToCode } from "./clientForm.js";
 import { buildIntroCallFormHTML, wireIntroCallForm } from "./introCall.js";
 import { buildSmsHref, rfContact, contactActionIcons, stopContactActionPropagation, wireQuickSendButtons, locationPinLink, buildPhoneNumbersHTML } from "./contactIcons.js";
 import {
@@ -464,7 +464,7 @@ function dialDisplayName(d) {
   return d.full_name || "Unnamed dial";
 }
 function dialLocation(d) {
-  return [d.city, d.state].filter(Boolean).join(", ") || "—";
+  return [d.city, stateToCode(d.state)].filter(Boolean).join(", ") || "—";
 }
 // "Company name, City, State" — used in the mobile card list's subtitle
 // line (plain text, no styling needed there).
@@ -590,7 +590,8 @@ async function syncTodaysCallLogSnapshot(fields) {
 // (mobile call, company call, email).
 function buildContactedTodayDisplayHTML(dial) {
   const count = contactedTodayCount(dial);
-  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}">Contacted today x${count}</div>`;
+  const label = count === 0 ? "Not contacted today" : `${count} ${count === 1 ? "contact" : "contacts"} today`;
+  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}" title="Calls and emails logged today (up to 3)">${label}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2419,7 +2420,7 @@ async function loadDials() {
   if (error) {
     if (!isNetworkError(error)) { dials = []; dialsLoadFailed = true; renderDialsTable(); return; } // a retry state, never "all caught up"
     const cached = cacheGet(cacheKey);
-    if (!cached) { dialsLoadFailed = true; renderDialsTable(); return showOfflineNotice(false); }
+    if (!cached) { dialsLoadFailed = true; renderDialsTable(); return hideOfflineNotice(); }
     dials = cached;
     showOfflineNotice(true);
     renderDialsTable();
@@ -2913,7 +2914,7 @@ function renderDialModal() {
               ? `
           <div class="dial-status-dropdown">
             <button type="button" class="dial-status-btn" id="dialStatusBtn"
-              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
+              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};" aria-label="Status: ${escapeHtml(statusInfo(dial.contact_status).label)}. Change" title="Change status">Status: ${escapeHtml(statusInfo(dial.contact_status).label)}</button>
             <div class="dial-status-menu hidden" id="dialStatusMenu">
               ${CONTACT_STATUSES.map(
                 (s) => `

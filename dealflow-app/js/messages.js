@@ -22,6 +22,7 @@ import { supabase } from "./supabaseClient.js";
 import { showConnectEmailNotice } from "./notice.js";
 import { findPriorOutbound, isReplySubject, stripReplyPrefix } from "./followUp.js";
 import { requireSession, showError } from "./auth.js";
+import { isTransient } from "./netError.js";
 import { wirePageHeaderMenu, closeAllPageHeaderMenus } from "./pageHeaderMenu.js";
 import { lockPageScroll, unlockPageScroll } from "./modalLock.js";
 import { wireNotificationsToggle } from "./notifications.js";
@@ -126,7 +127,7 @@ async function loadAccounts() {
   try {
     accounts = await loadMailboxes(profile, { isAdmin, isTeamLead });
   } catch (error) {
-    return showError(els.errorBox, error);
+    return showError(els.errorBox, error, () => window.location.reload());
   }
   canManageMail = isAdmin || isTeamLead || accounts.some((a) => a.mine);
   mailboxGroups = buildGroups(accounts, { isAdmin });
@@ -390,7 +391,9 @@ async function loadThreadList(loadMore = false) {
   if (listState !== state) return; // selection/folder changed while loading
   if (error) {
     els.wrap.innerHTML = "";
-    return showError(els.errorBox, error);
+    showError(els.errorBox, error, () => { els.errorBox.classList.add("hidden"); loadThreadList(); });
+    if (isTransient(error)) els.wrap.innerHTML = `<p class="empty-state">Couldn't load your inbox. Nothing is lost.</p>`;
+    return;
   }
 
   const fresh = (data || []).filter((m) => !state.msgs.has(m.id));

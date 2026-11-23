@@ -124,7 +124,7 @@ export function wireMailboxPicker({ menuBtn, popupEl, bodyEl, closeBtn, closePag
   let filter = "";
   let listEl = null;
   const selected = () => new Set(selectedMailboxIds(getAccounts(), true));
-  const badge = (n) => (n ? `<span class="mailbox-unread-badge">${n > 99 ? "99+" : n}</span>` : "");
+  const badge = (n) => (n ? `<span class="mailbox-unread-badge" title="${n} unread" aria-label="${n} unread">${n > 99 ? "99+" : n}</span>` : "");
 
   function renderList() {
     const sel = selected();

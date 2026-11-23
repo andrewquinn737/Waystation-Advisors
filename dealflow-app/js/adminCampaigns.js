@@ -1,5 +1,6 @@
 // Admin > Campaigns: one table row per email list (cards on phones). Design in Claude, Review, Launch / Pause / Resume.
 import { supabase } from "./supabaseClient.js";
+import { confirmResume } from "./resumeConfirm.js";
 import { openCopyReview } from "./copyReviewScreen.js";
 import { copyText } from "./claudeHelp.js";
 import { confirmBox } from "./copyCommon.js";
@@ -38,8 +39,8 @@ async function load() {
 }
 function retryLink() { const el = $("cpMsg"), b = document.createElement("button"); b.type = "button"; b.className = "ad-link"; b.textContent = "Retry"; b.onclick = load; el.appendChild(b); }
 
-const STATS = [["emails_sent", "Emails sent"], ["contacted", "Companies emailed"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
-const statCells = (n) => STATS.map(([k, label]) => { const v = n[k] ?? 0; return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${label}</span></div>`; }).join("");
+const STATS = [["emails_sent", "Emails sent"], ["contacted", "Companies emailed", "Emailed"], ["replied", "Replied"], ["interested", "Interested"], ["intro_calls", "Intro calls"], ["bounced", "Bounced"]];
+const statCells = (n) => STATS.map(([k, label, short]) => { const v = n[k] ?? 0; return `<div class="cp-n${v ? "" : " zero"}" title="${label}"><b>${v.toLocaleString()}</b><span>${short || label}</span></div>`; }).join("");
 export const designPrompt = (c) => `Use the Waystation CRM connector: design_campaign for list ${c.name} (list_id ${c.list_id})`;
 
 function totals(list) {
@@ -51,7 +52,11 @@ function hint(c) {
   const n = c.counts;
   if (c.status === "done") return "";
   if (!c.mailboxes) return `<span class="warn">${esc(c.owner || "The owner")} has no sending mailbox yet. Add one under Email accounts before launching.</span>`;
-  if (c.status === "paused") return `<span class="warn">${c.bounce_paused ? "Paused: " + esc(String(c.paused_reason || "bounce rate").replace(/^Auto-paused:\s*/i, "")) : "Paused" + (c.paused_reason ? ": " + esc(c.paused_reason) : "")}. Nothing is sent until you resume.</span>`;
+  if (c.status === "paused") {
+    const r = String(c.paused_reason || "").replace(/^Auto-paused:\s*/i, "").replace(/[.\s]+$/, "");
+    const why = c.bounce_paused ? "Paused: " + (r || "bounce rate") : /^paused/i.test(r) ? r : "Paused" + (r ? ": " + r : "");
+    return `<span class="warn">${esc(why)}. Nothing is sent until you resume.</span>`;
+  }
   if (c.status === "draft" && !c.has_spintax && !n.ready && !n.need_fix) return `No emails yet. Design them in Claude.`;
   if (n.started > 0 && n.ready > 0) return n.copy_changed > 0 ? `${plural(n.ready, "email is", "emails are")} waiting because copy changed after launch. Launch again to send ${n.ready === 1 ? "it" : "them"}.` : `${plural(n.ready, "more email is", "more emails are")} ready. ${n.active} running.`;
   if (c.status === "ready") return `${plural(n.ready, "email is", "emails are")} ready to launch.`;
@@ -61,15 +66,15 @@ function row(c) {
   const n = c.counts, paused = c.status === "paused", canLaunch = n.ready > 0 && !paused, noMailbox = !c.mailboxes;
   const sub = [c.owner || "Unknown owner", "Uploaded " + day(c.created_at), MANDATE[c.mandate] || ""].filter(Boolean).join(" \u00b7 ");
   // One primary action per row; the "..." menu holds the rest (see menuItems).
-  const pick = canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready}`, noMailbox] : paused ? ["resume", "Resume"]
-    : n.need_fix > 0 ? ["review", "Review emails"] : c.status === "draft" ? ["design", "Design in Claude"] : null;
+  const pick = canLaunch ? ["launch", `${c.launched_at ? "Launch again " : "Launch "}${n.ready.toLocaleString()}`, noMailbox] : paused ? ["resume", "Resume"]
+    : n.need_fix > 0 ? ["review", `Review ${n.need_fix.toLocaleString()}`] : c.status === "draft" ? ["design", "Design in Claude"] : null;
   const held = n.need_fix > 0 ? `<span class="warn">${plural(n.need_fix, "email needs", "emails need")} edits <button type="button" class="ad-link" data-a="review">Review</button></span>` : "";
   const note = [hint(c), held].filter(Boolean).join(" ");
   return `<article class="cp-row" data-id="${esc(c.list_id)}">
     <div class="cp-name"><b title="${esc(c.name || "")}">${esc(c.name || "(untitled)")}</b><span>${esc(sub)}</span></div>
     <div class="cp-status"><span class="cp-pill ${esc(c.status)}">${CHIP[c.status] || ""}</span>${c.status === "live" && n.ready > 0 ? `<span class="cp-sub">${n.started} of ${n.started + n.ready + n.need_fix} started</span>` : ""}</div>
     ${statCells(n)}
-    <div class="cp-act${pick ? "" : " cp-act-solo"}">${pick ? `<button type="button" class="btn small" data-a="${pick[0]}"${pick[2] ? ` disabled title="Add a sending mailbox under Email accounts first"` : ""}>${pick[1]}</button>` : "<span></span>"}
+    <div class="cp-act${pick ? "" : " cp-act-solo"}">${pick ? `<button type="button" class="btn small" data-a="${pick[0]}"${pick[2] ? ` disabled title="Add a sending mailbox under Email accounts first"` : ` title="${esc(pick[1].replace(/^Review (\d)/, "Review $1 emails that need edits"))}"`}>${pick[1]}</button>` : "<span></span>"}
       <button type="button" class="cp-more" data-menu aria-label="More actions" aria-haspopup="menu" aria-expanded="false">&#8943;</button></div>
     <div class="cp-note${note ? "" : " hidden"}">${note}</div></article>`;
 }
@@ -103,7 +108,7 @@ function openMenu(btn, c) {
   closeMenus();
   menuBtn = btn; btn.setAttribute("aria-expanded", "true");
   menuEl = document.createElement("div");
-  menuEl.className = "cp-menu"; menuEl.setAttribute("role", "menu"); menuEl.dataset.id = c.list_id;
+  menuEl.className = "cp-menu"; menuEl.dataset.esc = "own"; menuEl.setAttribute("role", "menu"); menuEl.dataset.id = c.list_id;
   menuEl.innerHTML = menuItems(c).map(([a, l]) => `<button type="button" role="menuitem" data-a="${a}">${l}</button>`).join("");
   document.body.appendChild(menuEl);
   const r = btn.getBoundingClientRect(), mw = menuEl.offsetWidth, mh = menuEl.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
@@ -112,7 +117,7 @@ function openMenu(btn, c) {
   menuEl.querySelector("button")?.focus();
 }
 document.addEventListener("click", (e) => { if (menuEl && !e.target.closest(".cp-menu, [data-menu]")) closeMenus(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });   // layers.js returns the focus to the "..." button
 window.addEventListener("resize", closeMenus);
 window.addEventListener("scroll", closeMenus, true);
 
@@ -140,6 +145,8 @@ async function runAction(b, listId, el) {
   if (a === "launch") return openLaunch(c, load);
   if (a === "design") return designInClaude(c, el);
   if (a === "pause" && !(await confirmBox({ title: "Pause this campaign?", body: "Nothing more is sent until you resume. Emails already queued for later are taken back out of the queue.", yes: "Pause" }))) return;
+  if (a === "resume" && (c.bounce_paused || /bounce/i.test(c.paused_reason || ""))
+    && !(await confirmResume(`Resume ${c.name || "this campaign"}?`, c.paused_reason))) return;
   b.disabled = true;
   const { error } = a === "pause" ? await supabase.rpc("campaign_pause", { p_list: c.list_id, p_reason: "Paused by admin" }) : await supabase.rpc("campaign_resume", { p_list: c.list_id });
   if (error) msg(error.message); else msg("");

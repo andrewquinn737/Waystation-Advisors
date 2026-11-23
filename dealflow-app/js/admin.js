@@ -25,5 +25,15 @@ else {
   const phone = window.matchMedia("(max-width: 720px)").matches;
   window.addEventListener("hashchange", route);
   route();
-  if (phone) for (const k of Object.keys(inits)) if (!loaded[k]) { loaded[k] = true; inits[k](); }
+  if (phone) {
+    for (const k of Object.keys(inits)) if (!loaded[k]) { loaded[k] = true; inits[k](); }
+    // sections are stacked on phones: the highlighted tab follows the section being read
+    const tabs = document.querySelectorAll("#adTabs a[data-tab]");
+    const onScroll = () => {
+      const secs = [...document.querySelectorAll(".ad-sec")];
+      const cur = secs.filter((x) => x.getBoundingClientRect().top <= 120).pop() || secs[0];
+      tabs.forEach((a) => { const on = a.dataset.tab === cur.dataset.sec; a.classList.toggle("active", on); if (on && a.scrollIntoView) { const bar = a.parentElement; bar.scrollLeft = a.offsetLeft - 16; } });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+  }
 }

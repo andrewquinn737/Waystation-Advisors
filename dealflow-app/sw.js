@@ -2,14 +2,14 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v125";
+const CACHE = "waystation-shell-v126";
 // Every page, script and stylesheet is precached (a page whose module is missing offline used to hang on its skeleton for good).
 const SHELL = [
   "/",
   "/admin.html", "/buyers.html", "/campaigns.html", "/clients.html",
   "/deals.html", "/dials.html", "/finance.html", "/index.html",
   "/login.html", "/mailboxes.html", "/messages.html", "/profile.html",
-  "/sellers.html", "/team.html", "/today.html", "/css/admin.css",
+  "/sellers.html", "/team.html", "/today.html", "/css/a11y.css", "/css/admin.css",
   "/css/aiChat.css", "/css/copyReview.css", "/css/dialsHome.css", "/css/importWizard.css",
   "/css/messages-inbox.css", "/css/simple.css", "/css/style.css", "/js/accountsVisible.js",
   "/js/admin.js", "/js/adminAccounts.js", "/js/adminCalendly.js", "/js/adminCampaigns.js",
@@ -21,7 +21,7 @@ const SHELL = [
   "/js/copyGate.js", "/js/copyLint.js", "/js/copyReview.js", "/js/copyReviewScreen.js",
   "/js/csvImport.js", "/js/dealSide.js", "/js/deletedTabs.js", "/js/dials.js",
   "/js/dialsHome.js", "/js/eventTime.js", "/js/finance.js", "/js/followUp.js",
-  "/js/importWizard.js", "/js/intakeForm.js", "/js/introCall.js", "/js/mailboxScope.js",
+  "/js/importWizard.js", "/js/layers.js", "/js/netError.js", "/js/resumeConfirm.js", "/js/intakeForm.js", "/js/introCall.js", "/js/mailboxScope.js",
   "/js/mainAdmin.js", "/js/messages.js", "/js/modalLock.js", "/js/noZoom.js",
   "/js/notice.js", "/js/notifications.js", "/js/offlineCache.js", "/js/pageHeaderMenu.js",
   "/js/phoneUtil.js", "/js/placeholders.js", "/js/profile.js", "/js/profileEmails.js",

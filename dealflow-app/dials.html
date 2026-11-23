@@ -22,6 +22,7 @@
   })();
 </script>
 <link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/a11y.css?v=1" />
 <link rel="stylesheet" href="css/copyReview.css" />
 <link rel="stylesheet" href="css/importWizard.css" />
 <link rel="stylesheet" href="css/dialsHome.css" />
@@ -513,7 +514,7 @@
        html.is-desktop-device .import-dials-drop-hint in css/style.css)
        since dragging files in from the OS isn't a mobile browser thing, but
        the drop handling itself is harmless to leave wired everywhere. -->
-  <div class="modal-backdrop hidden" id="importDialsModal">
+  <div class="modal-backdrop hidden" id="importDialsModal" data-esc="own">
     <div class="modal">
       <h2>Import dials from CSV</h2>
       <div id="importDialsError" class="error-msg hidden"></div>
@@ -607,7 +608,7 @@
     </div>
   </div>
 
-  <div class="modal-backdrop hidden" id="introCallTimeModal">
+  <div class="modal-backdrop hidden" id="introCallTimeModal" data-esc="own">
     <div class="modal">
       <h2>Confirm the scheduled time</h2>
       <p class="help-text">Enter the date and time you and the client agreed on (from Calendly, or by phone). It goes on the client's Timeline and in Upcoming events.</p>

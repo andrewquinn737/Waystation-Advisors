@@ -16,6 +16,7 @@
   })();
 </script>
 <link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/a11y.css?v=1" />
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
@@ -59,6 +60,7 @@
   <script type="module">
     import { supabase } from "./js/supabaseClient.js";
     import { purgeCache } from "./js/offlineCache.js";
+    import { friendlyMessage } from "./js/netError.js";
     purgeCache(); // old cached list data can fill a phone's storage and stop the sign-in from being saved
 
     const form = document.getElementById("authForm");
@@ -79,8 +81,6 @@
     try { bounceReason = sessionStorage.getItem("login_reason") || ""; sessionStorage.removeItem("login_reason"); } catch { /* ignore */ }
     if (bounceReason) {
       errorBox.classList.remove("hidden");
-      errorBox.style.background = "#fdecec";
-      errorBox.style.color = "#d1453b";
       errorBox.textContent = bounceReason;
     }
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -118,9 +118,7 @@
         window.location.href = next;
       } catch (err) {
         errorBox.classList.remove("hidden");
-        errorBox.style.background = "#fdecec";
-        errorBox.style.color = "#d1453b";
-        errorBox.textContent = err.message || String(err);
+        errorBox.textContent = friendlyMessage(err);
       } finally {
         submitBtn.disabled = false;
       }

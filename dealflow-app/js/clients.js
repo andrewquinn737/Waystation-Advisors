@@ -4,6 +4,7 @@ import { supabase } from "./supabaseClient.js";
 import { requireSession, showError } from "./auth.js";
 import {
   escapeHtml,
+  stateToCode,
   lookingForLabel,
   defaultClient,
   buildEditableSections,
@@ -554,7 +555,7 @@ function clientDisplayName(c) {
   return c.full_name || "—";
 }
 function clientLocation(c) {
-  return [c.city, c.state].filter(Boolean).join(", ") || "—";
+  return [c.city, stateToCode(c.state)].filter(Boolean).join(", ") || "—";
 }
 function clientSecondary(c) {
   return c.company_name || "—";
@@ -598,7 +599,7 @@ async function loadClients() {
     // js/offlineCache.js) falls back to the last successfully loaded list.
     if (!isNetworkError(error)) return showClientsLoadFailed();
     const cached = cacheGet(cacheKey);
-    if (!cached) { showClientsLoadFailed(); return showOfflineNotice(false); }
+    if (!cached) { showClientsLoadFailed(); return hideOfflineNotice(); }
     clients = cached;
     showOfflineNotice(true);
     await loadClientProgressStages();
@@ -733,10 +734,12 @@ function renderTable() {
   // Header line says what is in view: how many of which side, and (admin / team lead) whose accounts.
   const sideWord = { seller: "seller", buyer: "buyer", broker: "broker" }[getClientSide()] || "client";
   const acctWord = !(isAdmin || isTeamLead) ? "" : !visibleAccountIds ? "all accounts" : visibleAccountIds.size === 1 && visibleAccountIds.has(profile.id) ? "my account" : `${visibleAccountIds.size} account${visibleAccountIds.size === 1 ? "" : "s"}`;
+  const newLabel = els.menuAddNewBtn.querySelector(".menu-item-label");
+  if (newLabel) newLabel.textContent = `New ${sideWord}`;
   els.countBadge.textContent = `${rows.length} ${sideWord}${rows.length === 1 ? "" : "s"}${acctWord ? ` \u00b7 ${acctWord}` : ""}`;
 
   if (rows.length === 0) {
-    const hint = q ? `No ${sideWord}s match "${escapeHtml(els.search.value.trim())}".` : `No ${sideWord}s yet${acctWord && visibleAccountIds ? " in the accounts you're viewing. Change them under the gear, Accounts visible" : ""}.`;
+    const hint = q ? `No ${sideWord}s match "${escapeHtml(els.search.value.trim())}".` : `No ${sideWord}s to show${acctWord && visibleAccountIds ? ". If you expected some, check Accounts visible in the gear menu." : " yet."}`;
     els.tableWrap.innerHTML = `<div class="empty-state">${hint}</div>`;
     return;
   }
@@ -750,7 +753,7 @@ function renderTable() {
         ${rows
           .map(
             (c) => `
-          <tr class="clickable-row" data-id="${c.id}" style="background:${clientStatusInfo(c.pipeline_status).bg};">
+          <tr class="clickable-row" tabindex="0" data-id="${c.id}" style="background:${clientStatusInfo(c.pipeline_status).bg};">
             <td data-label="Name">${escapeHtml(clientDisplayName(c))}</td>
             <td class="muted" data-label="Company">${escapeHtml(clientSecondary(c))}</td>
             <td class="muted" data-label="Location">${escapeHtml(clientLocation(c))}</td>
@@ -768,7 +771,7 @@ function renderTable() {
       ${rows
         .map(
           (c) => `
-        <div class="mobile-card clickable-row" data-id="${c.id}" style="background:${clientStatusInfo(c.pipeline_status).bg}; border-color:${clientStatusInfo(c.pipeline_status).border};">
+        <div class="mobile-card clickable-row" tabindex="0" role="button" aria-label="Open ${escapeHtml(c.name || c.company_name || "client")}" data-id="${c.id}" style="background:${clientStatusInfo(c.pipeline_status).bg}; border-color:${clientStatusInfo(c.pipeline_status).border};">
           <div class="mc-main">
             <div class="mc-name">${escapeHtml(clientDisplayName(c))}</div>
             <div class="mc-sub">${escapeHtml(clientCompanyAndLocation(c))}</div>
@@ -782,6 +785,10 @@ function renderTable() {
 
   els.tableWrap.querySelectorAll("[data-id]").forEach((row) => {
     row.addEventListener("click", () => openDetailModal(clients.find((c) => c.id === row.dataset.id)));
+    // rows are keyboard-reachable: Enter or Space opens the client (only when the row itself has focus, not a button inside it)
+    row.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); openDetailModal(clients.find((c) => c.id === row.dataset.id)); }
+    });
   });
   stopContactActionPropagation(els.tableWrap);
   wireQuickSendButtons(els.tableWrap);
@@ -1440,7 +1447,7 @@ function buildTimelineHTML(events) {
         const editBtn = `<button type="button" class="timeline-edit-btn" data-event-id="${e.id}" title="Edit event">&#9998;</button>`;
         const confirmBtn = future
           ? ""
-          : `${!e.confirmed ? `<span class="tl-confirm-label">Did it happen?</span>` : ""}<button type="button" class="timeline-confirm-btn ${e.confirmed ? "confirmed" : ""}" data-event-id="${e.id}" data-confirmed="${e.confirmed ? "1" : "0"}" title="${e.confirmed ? "Mark as not happened" : "Mark as happened"}">${e.confirmed ? CHECK_SVG : ""}</button>`;
+          : `${!e.confirmed ? `<span class="tl-confirm-label">Did it happen?</span>` : ""}<button type="button" class="timeline-confirm-btn ${e.confirmed ? "confirmed" : ""}" data-event-id="${e.id}" data-confirmed="${e.confirmed ? "1" : "0"}" title="${e.confirmed ? "Mark as not happened" : "Mark as happened"}" aria-label="${e.confirmed ? "Mark as not happened" : "Mark as happened"}">${e.confirmed ? CHECK_SVG : ""}</button>`;
         actionsHTML = `<div class="timeline-box-actions">${editBtn}${confirmBtn}</div>`;
 
         // Triangle toggle + connected report box — only exist at all once the
@@ -1472,7 +1479,9 @@ function buildTimelineHTML(events) {
     })
     .join("");
 
-  const listHTML = sorted.length ? `<div class="timeline-list">${itemsHTML}</div>` : `<div class="empty-state">No events yet.</div>`;
+  const listHTML = eventsLoadError
+    ? `<div class="empty-state" role="alert"><p>Couldn't load the timeline. Nothing is lost.</p><button type="button" class="btn secondary" id="timelineRetryBtn">Retry</button></div>`
+    : sorted.length ? `<div class="timeline-list">${itemsHTML}</div>` : `<div class="empty-state">No events yet.</div>`;
 
   return `
     ${listHTML}
@@ -1489,6 +1498,8 @@ function wireTimelineTab() {
   const addBtn = document.getElementById("timelineAddBtn");
   const addMenu = document.getElementById("timelineAddMenu");
   if (!addBtn) return;
+  addBtn.setAttribute("aria-label", "Add event");
+  document.getElementById("timelineRetryBtn")?.addEventListener("click", async () => { await loadClientEvents(); renderModalBody(); });
 
   // Closing on an outside click used to be wired with a single one-time
   // document listener registered whenever this function ran (i.e. once per
@@ -2138,8 +2149,11 @@ async function loadClientEvents() {
     return;
   }
   const { data, error } = await supabase.from("client_events").select("*").eq("client_id", currentClient.id).order("event_date", { ascending: true });
+  // a failed load is an error to show (with Retry), never an empty timeline
+  eventsLoadError = error || null;
   currentClientEvents = error ? [] : data || [];
 }
+let eventsLoadError = null;
 
 async function logClientEvent(eventType, eventDate, details = null, category = null) {
   const payload = { client_id: currentClient.id, event_type: eventType, created_by: profile.id };
@@ -2507,8 +2521,12 @@ function validateAndCollect() {
   if (missing.length) {
     missing.forEach((key) => {
       const el = els.clientModalBody.querySelector(`.field-required-msg[data-field="${key}"]`);
-      if (el) el.classList.remove("hidden");
+      if (el) { el.classList.remove("hidden"); el.closest(".accordion-section")?.classList.add("open"); }   // show the section the missing field is in
     });
+    // after OK, land on the first missing field
+    const firstMissing = els.clientModalBody.querySelector(".field-required-msg:not(.hidden)");
+    const focusAfterOk = () => { els.requiredPopupOk.removeEventListener("click", focusAfterOk); const f = firstMissing?.closest(".form-group, .form-row, div")?.querySelector("input, select, textarea"); firstMissing?.scrollIntoView?.({ block: "center" }); f?.focus(); };
+    els.requiredPopupOk.addEventListener("click", focusAfterOk);
     els.requiredPopupText.textContent = `Please fill out the missing information. The following is required: ${popupLabels.join(", ")}.`;
     els.requiredPopup.classList.remove("hidden");
     return null;
@@ -2530,7 +2548,7 @@ function renderModalBody() {
   renderSubtabsBar();
 
   if (currentMode === "create") {
-    els.clientModalTitle.textContent = "New client";
+    els.clientModalTitle.textContent = `New ${createClientType || "client"}`;
     els.clientModalSubtitle.classList.add("hidden");
     els.clientModalBody.innerHTML = `
       <div id="clientModalError" class="error-msg hidden"></div>

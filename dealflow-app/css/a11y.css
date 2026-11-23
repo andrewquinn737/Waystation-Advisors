@@ -1,0 +1,64 @@
+/* Round 5 review: focus ring, 44px tap targets on phones, error/retry pieces, and a few layout fixes. Loaded after style.css on every page. */
+button { font-family: inherit; }
+
+/* ---- one visible focus ring (2px, offset, theme-aware token; same at every width) ---- */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cp-menu button:focus-visible, .page-header-menu-item:focus-visible { outline-offset: -2px; }
+/* dialogs are focused as a whole by js/layers.js; the ring belongs on the controls inside */
+[role="dialog"]:focus, [role="dialog"]:focus-visible, [tabindex="-1"]:focus-visible { outline: none; }
+
+/* ---- error / retry pieces ---- */
+.retry-btn { margin-left: 8px; vertical-align: middle; }
+.inline-retry { background: none; border: 0; padding: 0 4px; min-height: 44px; font: inherit; color: var(--accent-text); text-decoration: underline; cursor: pointer; }
+.offline-notice .retry-btn, .error-msg .retry-btn { min-height: 32px; }
+.net-fatal { position: fixed; inset: 0; z-index: 900; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.net-fatal-card { max-width: 360px; text-align: center; }
+.net-fatal-card h2 { margin: 0 0 8px; font-size: 18px; }
+.net-fatal-card p { margin: 0 0 16px; color: var(--text-muted-strong); font-size: 14px; line-height: 1.45; }
+.skeleton-page-content .ad-muted { color: var(--text-muted-strong); }
+
+/* ---- layout ---- */
+/* Inbox: room under the list so the floating compose button never sits on a date */
+body[data-page="messages.html"] main { padding-bottom: 150px; }
+html.is-mobile-device body[data-page="messages.html"] main { padding-bottom: 170px; }
+/* Calls list on a phone: the callback time / days late are the point of the line, so it wraps instead of being cut */
+@media (max-width: 720px), (pointer: coarse) { .dh-meta { white-space: normal; overflow: visible; text-overflow: clip; } }
+html.is-mobile-device .dh-meta { white-space: normal; overflow: visible; text-overflow: clip; }
+/* login: the error box follows the theme (it used to be pinned to light pink) */
+.auth-card .error-msg { margin: 10px 0 0; }
+.dial-modal-subtitle, .upcoming-event-meta { color: var(--text-muted-strong); }
+
+/* ---- 44px tap targets on phones (and any touch screen) ---- */
+@media (max-width: 720px), (pointer: coarse) {
+  button:not(.toggle-switch):not(.skeleton-bar):not(.timeline-add-btn):not(.fab):not(.compose-fab):not(.select-circle),
+  .btn, a.btn, summary, select,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="range"]):not([type="file"]) { min-height: 44px; }
+  button:not(.btn):not(.toggle-switch):not(.skeleton-bar):not(.select-circle):not(.dh-go):not(.dh-more):not(.dial-tab):not(.cp-menu button):not(.subtabs button):not([role="tab"]) { min-width: 44px; }
+  .btn.small { min-height: 44px; padding-top: 4px; padding-bottom: 4px; }
+  .topnav-bar .links a { min-height: 44px; display: inline-flex; align-items: center; padding: 6px 8px; }
+  .topnav-bar .who .btn { min-height: 44px; }
+  label:has(> input[type="checkbox"]), label:has(> input[type="radio"]), .accounts-visible-row, .mailbox-row { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+  input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; flex-shrink: 0; }
+  .contact-actions { gap: 0; }
+  .contact-action-btn { width: 44px; height: 44px; position: relative; border: 0; background: transparent; }
+  .contact-action-btn::after { content: none !important; }
+  .contact-action-btn::before { content: ""; position: absolute; inset: 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); z-index: 0; }
+  .contact-action-btn > * { position: relative; z-index: 1; }
+  .contact-action-btn.skeleton-bar { width: 28px; height: 28px; min-height: 0; min-width: 0; }
+  .contact-action-btn.skeleton-bar::before { content: none; }
+  .location-pin-link { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -14px -14px -14px -8px; }
+  .callback-banner a, .callback-banner button { min-height: 44px; display: inline-flex; align-items: center; }
+  .callback-banner { min-height: 44px; }
+  .dial-nav-btn { min-height: 44px; }
+}
+@media (hover: hover) and (max-width: 720px) { .contact-action-btn:hover::before { background: var(--gold-soft); } }
+
+/* mailbox picker: group titles readable, the unread counts say what they are */
+.accounts-visible-group-label { font-size: 12.5px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mailbox-unread-badge { position: relative; }
+@media (pointer: coarse), (max-width: 720px) { input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px; } }
+@media (max-width: 720px), (pointer: coarse) {
+  .readonly-field .rf-value a { display: inline-flex; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
+}
+@media (max-width: 720px), (pointer: coarse) { .profile-mail-box { min-height: 44px; box-sizing: border-box; } }

@@ -13,8 +13,17 @@ def creds(name):
             return c[3], c[4]
 def login(page, role):
     email, pw = creds(USERS[role])
-    page.goto(BASE + "login.html"); page.fill("#email", email); page.fill("#password", pw)
-    page.click("#submitBtn"); page.wait_for_url(re.compile(r"(profile|dials|admin|clients)\.html"), timeout=60000)
+    for attempt in range(3):
+        page.goto(BASE + "login.html"); page.fill("#email", email); page.fill("#password", pw)
+        page.click("#submitBtn")
+        try: page.wait_for_url(re.compile(r"(profile|dials|admin|clients)\.html"), timeout=30000)
+        except Exception:
+            # a CDN module that was reset leaves the form to submit natively (login.html?), and a page 'load' can stall: if the address has
+            # changed the sign-in is done; otherwise try again (never more than 3 times)
+            if re.search(r"(profile|dials|admin|clients)\.html", page.url): return
+            if attempt == 2: raise
+            continue
+        return
 def new_page(ctx, errs):
     ctx.add_init_script("try{sessionStorage.setItem('ws_onboarding_skip','1')}catch(e){}")
     p = ctx.new_page()
