@@ -270,8 +270,17 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
   // Everything else on TEST is still redirected to TEST_REDIRECT_TO. Live is unaffected (testSinks is empty there).
   const realAccts = (Deno.env.get("TEST_REAL_SEND_ACCOUNTS") || "").split(",").map((s) => s.trim()).filter(Boolean);
   const realTo = (Deno.env.get("TEST_REAL_SEND_TO") || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-  const pilotRealSend = !IS_LIVE_PROJECT && !!ctx.scheduledId && realAccts.includes(String(account_id)) &&
+  const legacyRealSend = !IS_LIVE_PROJECT && !!ctx.scheduledId && realAccts.includes(String(account_id)) &&
     (to || []).length === 1 && !(cc || []).length && realTo.includes(String(to[0]).trim().toLowerCase());
+  // Pilot owners (TEST_REAL_SEND_OWNERS, comma-separated user ids): ANY send, queued or direct (Inbox reply, quick send), from a
+  // mailbox whose OWNER is listed goes to the real recipients. Mason approved real email for these testers (2026-11-23).
+  const realOwners = (Deno.env.get("TEST_REAL_SEND_OWNERS") || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  let ownerRealSend = false;
+  if (!IS_LIVE_PROJECT && realOwners.length && account_id) {
+    const { data: ob } = await admin.from("email_accounts").select("owner_id").eq("id", account_id).maybeSingle();
+    ownerRealSend = !!ob?.owner_id && realOwners.includes(String(ob.owner_id).toLowerCase());
+  }
+  const pilotRealSend = legacyRealSend || ownerRealSend;
   if (testSinks.length && to?.length && !pilotRealSend) {
     const redirect = (addr: string) => {
       const a = String(addr).trim().toLowerCase();
@@ -334,8 +343,11 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
   // "scheduled" (its own row is 'sending'), and was checked when it was
   // queued, so on that path only what has actually gone out counts; a direct
   // send counts sent + everything still scheduled.
+  // Warm-lead (hot recipient) sends are never blocked by the cap: skip the check for a single hot recipient.
   {
-    const { data: countsData } = await admin.rpc("mailbox_send_counts", { p_account_id: account_id });
+    const { data: hot } = await admin.rpc("is_hot_recipient", { p_addr: to[0] });
+    const skipCap = hot === true && (to || []).length === 1;
+    const { data: countsData } = skipCap ? { data: null } : await admin.rpc("mailbox_send_counts", { p_account_id: account_id });
     const counts = Array.isArray(countsData) ? countsData[0] : countsData;
     if (counts) {
       const used = ctx.scheduledId ? counts.sent : counts.sent + counts.scheduled;

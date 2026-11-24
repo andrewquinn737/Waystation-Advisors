@@ -38,18 +38,37 @@ def live_sql(sql):
 def live_get(path, raw=False):
     return _req(LIVE_TOK, f"/projects/{LIVE_REF}{path}", raw=raw)
 
-# PILOT GUARD: two real reps (Andrew Quinn, Jonah Johnson) place real calls from the TEST project. No harness code may log in as them or
+# PILOT GUARD: real reps place real calls (and send real email) from the TEST project. No harness code may log in as them or
 # write anything that names them. Reads (select) are allowed so their data can be checked.
+# Two founding pilots are hardcoded; every other pilot account is listed in the secrets file with a "pilot": true marker on its
+# accounts entry (written by seed_pilot.py), so adding a pilot never needs a code change here.
 PILOT_EMAILS = ("test.andrew.quinn@example.com", "test.jonah.johnson@example.com")
 PILOT_IDS = ("49255b71-de62-45d4-a252-c0b3e2ab91e9", "18e3e191-5e10-4022-959d-f6172f7e86fa")
+SECRETS_FILE = os.path.expanduser("~/Projects/First Project/.waystation_test_secrets.json")
+
+def _pilots():
+    """(emails, ids) of every pilot account: the two hardcoded ones plus every secrets-file account marked pilot:true."""
+    emails, ids = set(PILOT_EMAILS), set(PILOT_IDS)
+    try:
+        for e, a in json.load(open(SECRETS_FILE)).get("accounts", {}).items():
+            if a.get("pilot"):
+                emails.add(e.strip().lower())
+                if a.get("id"): ids.add(str(a["id"]).strip().lower())
+    except (OSError, ValueError):
+        pass          # no secrets file: the hardcoded two still apply
+    return emails, ids
+
 def guard_pilot(*who):
+    emails, ids = _pilots()
     for w in who:
-        if str(w).strip().lower() in PILOT_EMAILS or str(w).strip().lower() in PILOT_IDS or str(w).strip() in ("Andrew Quinn", "Jonah Johnson"):
+        k = str(w).strip().lower()
+        if k in emails or k in ids or str(w).strip() in ("Andrew Quinn", "Jonah Johnson"):
             raise PermissionError(f"pilot guard: the harness may not use the pilot account {w}")
 
 def test_sql(sql):
     low = sql.lower()
-    if not low.lstrip().startswith(("select", "with")) and any(x in low for x in PILOT_EMAILS + PILOT_IDS):
+    emails, ids = _pilots()
+    if not low.lstrip().startswith(("select", "with")) and any(x in low for x in tuple(emails) + tuple(ids)):
         raise PermissionError("pilot guard: refusing a write that names a pilot account")
     return _req(TEST_TOK, f"/projects/{TEST_REF}/database/query", {"query": sql})
 
