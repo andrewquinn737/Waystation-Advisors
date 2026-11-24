@@ -7,7 +7,8 @@ begin
   if new.contact_status = 'no_response' and old.contact_status is distinct from 'no_response'
      and coalesce(new.sequence, 'backup') = 'backup'
      and (coalesce(nullif(btrim(new.mobile_phone), ''), nullif(btrim(new.company_phone), '')) is not null)
-     and (coalesce(btrim(new.email), '') = '' or not coalesce(is_personal_email(new.email), false) or not seq_can_email(new.created_by)) then
+     and (new.sequence = 'backup'   -- already put on the call track (e.g. emailed elsewhere, or not an email lead)
+          or coalesce(btrim(new.email), '') = '' or not coalesce(is_personal_email(new.email), false) or not seq_can_email(new.created_by)) then
     perform seq_start_call3(new.id, person_today(new.created_by, now()));
   end if;
   return new;
