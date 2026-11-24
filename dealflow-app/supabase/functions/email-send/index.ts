@@ -265,7 +265,14 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
   if (!IS_LIVE_PROJECT && !testSinks.length) {
     return jsonResponse({ error: "Test project without TEST_REDIRECT_TO: sending is disabled." }, 503);
   }
-  if (testSinks.length && to?.length) {
+  // TEST pilot exemption (TEST only, fail-closed): a QUEUED send (scheduled_emails row) from a mailbox listed in
+  // TEST_REAL_SEND_ACCOUNTS, to exactly one recipient listed in TEST_REAL_SEND_TO, with no cc, goes to the real address.
+  // Everything else on TEST is still redirected to TEST_REDIRECT_TO. Live is unaffected (testSinks is empty there).
+  const realAccts = (Deno.env.get("TEST_REAL_SEND_ACCOUNTS") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const realTo = (Deno.env.get("TEST_REAL_SEND_TO") || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const pilotRealSend = !IS_LIVE_PROJECT && !!ctx.scheduledId && realAccts.includes(String(account_id)) &&
+    (to || []).length === 1 && !(cc || []).length && realTo.includes(String(to[0]).trim().toLowerCase());
+  if (testSinks.length && to?.length && !pilotRealSend) {
     const redirect = (addr: string) => {
       const a = String(addr).trim().toLowerCase();
       if (testSinks.includes(a)) return a;
