@@ -263,7 +263,16 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   function queueLine() {
     if (queueErr || !queue || !(queue.mailboxes || []).length) return "";
     const sent = queue.sent_today ?? 0, cap = queue.capacity_today;
-    const next = queue.next_send_at ? new Date(queue.next_send_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: tz }).replace(/\s/g, "").toLowerCase() : "";
+    // Next scheduled send, in this person's time zone, with the day when it isn't today ("next tomorrow 6:00am MST").
+    let next = "";
+    if (queue.next_send_at) {
+      const at = new Date(queue.next_send_at), day = (d) => d.toLocaleDateString("en-CA", { timeZone: tz });
+      const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: tz }).replace(/\s/g, "").toLowerCase();
+      const zone = (at.toLocaleTimeString("en-US", { timeZone: tz, timeZoneName: "short" }).split(" ").pop()) || "";
+      const today = day(new Date()), tomorrow = day(new Date(Date.now() + 86400000));
+      const when = day(at) === today ? "" : day(at) === tomorrow ? "tomorrow " : at.toLocaleDateString(undefined, { weekday: "short", timeZone: tz }) + " ";
+      next = `${when}${time} ${zone}`.trim();
+    }
     return [cap ? `${sent} of ${cap} sent today` : `${sent} sent today`, next ? `next ${next}` : ""].filter(Boolean).join(" · ");
   }
   function renderEmails() {
