@@ -21,7 +21,7 @@ const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000)
 const GROUPS = [
   { n: 1, label: "Past due" }, { n: 2, label: "Due today" }, { n: 3, label: "Not called yet" }, { n: 4, label: "Intro calls" },
   { n: 5, label: "Callback · Interested" }, { n: 6, label: "Callback · Busy" }, { n: 7, label: "No response" },
-  { n: 8, label: "In sequence", closed: true }, // emailing now; no call due yet (shows the next step + date)
+  { n: 8, label: "In sequence", closed: true }, // emailing or in the 3-step call follow-up; nothing due yet (shows the next step + date)
   { n: 9, label: "Finished sequence", closed: true }, { n: 10, label: "Dead number", closed: true }, { n: 11, label: "Not interested", closed: true },
 ];
 const byName = (a, b) => (a.d.company_name || a.d.full_name || "").localeCompare(b.d.company_name || b.d.full_name || "", undefined, { sensitivity: "base" });
@@ -76,15 +76,18 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
   // ---- the sheet: which group does a company belong in? ------------------------------------------------------------
   // Active email sequence with nothing due: not shown (it surfaces when a step is due). Appointments (4-6) always show.
   function groupFor(d) {
-    const st = d.contact_status || "uncontacted", running = d.sequence === "email5" && (d.seq_state === "active" || d.seq_state === "awaiting_copy");
+    const st = d.contact_status || "uncontacted", seq = d.sequence === "email5" || d.sequence === "call3";
+    const running = seq && (d.seq_state === "active" || d.seq_state === "awaiting_copy");
     if (st === "intro_call_scheduled") return 4;
     if (st === "callback_interested") return 5;
     if (st === "busy_callback") return 6;
     if (running) return 8; // in sequence, nothing due today (due steps were already placed in groups 1-2)
+    // A sequence that ran its course without reaching the owner (email 5-step or the 3-step call follow-up)
+    if (seq && d.seq_state === "completed" && (st === "no_response" || st === "uncontacted")) return 9;
     if (st === "no_response") return 7;
     if (st === "unable_to_contact") return 10;
     if (st === "not_interested") return 11;
-    if (st === "uncontacted") return d.sequence === "email5" && d.seq_state === "completed" ? 9 : 3;
+    if (st === "uncontacted") return 3;
     return 0;
   }
   function buildGroups() {
@@ -151,7 +154,7 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
       const nx = it.next, NEXT = { email: "Email", followup_email: "Follow-up email", ...KIND };
       if (d.seq_state === "awaiting_copy") bits.push("First email not sent yet");
       else if (nx) bits.push(`Next: ${esc(NEXT[nx.kind] || nx.kind)} · ${esc(new Date(nx.due_on + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }))}`);
-      else bits.push("Waiting for the first email to send");
+      else bits.push(d.sequence === "call3" ? "Follow-up calls finished" : "Waiting for the first email to send");
     } else if (d.callback_at && [4, 5, 6].includes(g.n)) {
       const c = callbackText(d.callback_at);
       bits.push(`${c.missed ? "Missed · " : ""}${esc(c.text)}`);
