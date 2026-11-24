@@ -358,9 +358,18 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
   const messageId = `<${crypto.randomUUID()}@${senderDomain}>`;
   // SMTP and IMAP both require CRLF line endings; user-typed text arrives
   // with bare \n, so normalize the whole message once up front.
+  // Sender name: the mailbox label, unless it is empty or is itself an email address. Mail whose display name is the bare
+  // address ("jonah@x.com <jonah@x.com>") is silently dropped by the mailbox provider (2026-11-23: 4 of 4 such test sends
+  // vanished, the same message with a real name arrived at once), so fall back to the owner's full name.
+  let fromName: string | null = account.label && !String(account.label).includes("@") ? account.label : null;
+  if (!fromName && account.owner_id) {
+    const { data: op } = await admin.from("profiles").select("full_name").eq("id", account.owner_id).maybeSingle();
+    const n = String(op?.full_name || "").replace(/\s*\(.*\)\s*$/, "").trim();
+    if (n && !n.includes("@")) fromName = n;
+  }
   const raw = buildRawMessage({
     fromAddr: account.email_address,
-    fromName: account.label,
+    fromName,
     to,
     toName,
     cc,
@@ -461,7 +470,7 @@ async function handle(req: Request, ctx: { scheduledId: string | null }): Promis
     in_reply_to: in_reply_to || null,
     direction: "outbound",
     from_address: account.email_address,
-    from_name: account.label,
+    from_name: fromName ?? account.label,
     to_addresses: to.map((a) => ({ address: a })),
     cc_addresses: (cc || []).map((a) => ({ address: a })),
     subject: subject || null,
