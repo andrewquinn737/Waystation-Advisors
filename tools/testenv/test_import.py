@@ -80,7 +80,7 @@ def run():
         if SHOT: p.screenshot(path=f"{SHOT}/desk_result.png")
         rows = sb.test_sql("select l.id, l.name, l.mandate, p.full_name owner, (select count(*) from dials d where d.list_id=l.id) n, (select count(*) from dials d where d.list_id=l.id and d.created_by=l.created_by) own, (select count(*) from dials d where d.list_id=l.id and d.sequence='email5') em, (select count(*) from dials d where d.list_id=l.id and d.sequence='backup') bk from dial_lists l join profiles p on p.id=l.created_by where l.name like 'TEST-IMPORT-big%'")
         r = rows[0] if rows else {}
-        check("one list, 2,100 dials, owned by Caleb Hong, dials follow", len(rows) == 1 and r["n"] == 2100 and r["owner"] == "Caleb Hong" and r["own"] == 2100, rows)
+        check("one list, 2,100 dials, owned by Caleb Hong, dials follow", len(rows) == 1 and r["n"] == 2100 and r["owner"] == "Caleb Hong (test)" and r["own"] == 2100, rows)
         check("sequences classified (email5 + backup = all)", r and r["em"] + r["bk"] == 2100 and r["em"] > 1000, rows)
         notif = sb.test_sql(f"select count(*) c from notifications where type='dial_transfer' and message like '%sent you a list%' and created_at > now() - interval '5 minutes' and user_id=(select id from profiles where email='test.caleb.hong@example.com')")
         check("assignee notified (dial_transfer)", notif and notif[0]["c"] >= 1, notif)

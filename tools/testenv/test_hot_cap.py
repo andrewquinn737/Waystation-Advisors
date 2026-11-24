@@ -5,9 +5,9 @@ SQL = r"""
 do $$
 declare acct uuid; owner uuid; lst uuid; d uuid; c0 record; c1 record; c2 record; blocked bool := false; i int;
 begin
-  select a.id, a.owner_id into acct, owner from email_accounts a join auth.users u on u.id = a.owner_id
-   where u.email = 'test.caleb.hong@example.com' limit 1;
-  update email_accounts set daily_send_limit = 2 where id = acct;
+  select u.id into owner from auth.users u where u.email = 'test.caleb.hong@example.com';
+  insert into email_accounts (owner_id, label, email_address, imap_host, smtp_host, username, daily_send_limit)
+  values (owner, 'HOTCAP', 'hotcap-mbx@example.com', 'imap.example.com', 'smtp.example.com', 'hotcap', 2) returning id into acct;
   select id into lst from dial_lists limit 1;
   insert into dials (list_id, company_name, email, contact_status) values (lst, 'HOTCAP_T', 'hotcap_t@example.com', 'callback_interested') returning id into d;
   select * into c0 from mailbox_send_counts(acct);

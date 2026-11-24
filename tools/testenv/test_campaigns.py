@@ -155,7 +155,7 @@ def _run():
     code, r = rpc(ADMIN, "admin_campaigns")
     mine = [x for x in r if x["list_id"] == lid]
     check("admin_campaigns: counts + status + owner + spintax flag", code == 200 and mine and mine[0]["status"] == "ready" and mine[0]["counts"]["ready"] == 50 and mine[0]["counts"]["need_fix"] == 1
-          and mine[0]["owner"] == "Caleb Hong" and mine[0]["has_spintax"] and mine[0]["mailboxes"] >= 1, mine)
+          and mine[0]["owner"] == "Caleb Hong (test)" and mine[0]["has_spintax"] and mine[0]["mailboxes"] >= 1, mine)
     # round 1: the page reads cached stats (p_fresh=false: no refresh pass, so a status change made behind its back is not applied yet)
     q(f"update campaigns set status = 'draft' where list_id = '{lid}'")
     code, r = rpc(ADMIN, "admin_campaigns", p_fresh=False)
@@ -309,7 +309,7 @@ def _transfer_and_reply():
     check("transfer: a first email already queued keeps mailbox and task", sa(c) == cal_box and own(c, 1) == uid(CALEB))
     check("transfer: campaign sender list reset to the new owner's mailboxes", q(f"select sender_account_ids s from campaigns where list_id='{xl}'")[0]["s"] is None)
     code, r = rpc(ADMIN, "admin_campaigns")
-    check("campaign shows the new owner", [x["owner"] for x in r if x["list_id"] == xl] == ["Gavin Hopkinson"], [x["owner"] for x in r if x["list_id"] == xl])
+    check("campaign shows the new owner", [x["owner"] for x in r if x["list_id"] == xl] == ["Gavin Hopkinson (test)"], [x["owner"] for x in r if x["list_id"] == xl])
     gv_box = q(f"select id from email_accounts where owner_id='{uid(GAVIN)}' and not needs_assignment limit 1")
     if gv_box:
         check("new owner has eligible mailboxes for those leads", q(f"select count(*)::int n from owner_eligible_mailboxes('{uid(GAVIN)}', 'data')")[0]["n"] >= 1)

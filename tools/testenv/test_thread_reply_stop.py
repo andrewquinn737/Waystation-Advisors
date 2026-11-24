@@ -4,6 +4,8 @@
 Everything is torn down at the end (flag off, redirect restored to Mason's 5 inboxes, pending sends cancelled, isolation undone).
 Usage: python3 test_thread_reply_stop.py   (~20-30 min; TEST project only; sends to our own mailboxes + Mason's Gmail sink)"""
 import sb, json, re, time, sys, urllib.request, urllib.error, uuid
+# 2026-11-24: the Working Signal mailboxes below now belong to the pilot reps (real sends). This test must not use them.
+sys.exit("test_thread_reply_stop.py is retired: its Working Signal mailboxes belong to pilot reps now. Point PLAN at fixture-owned mailboxes first.")
 import test_sequences as T
 q, lit = T.q, T.lit
 

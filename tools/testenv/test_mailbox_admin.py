@@ -54,11 +54,11 @@ try:
     check("array body -> 400", call(None, raw=b"[1]")[0] == 400)
 
     # dry run
-    rows = [mb(1, display_name="Caleb Hong"), mb(2, display_name="Caleb"), mb(3, owner_email="test.gavin.hopkinson@example.com")]
+    rows = [mb(1, display_name="Caleb Hong (test)"), mb(2, display_name="Caleb"), mb(3, owner_email="test.gavin.hopkinson@example.com")]
     c, r = call({"action": "bulk_upsert", "dry_run": True, "mailboxes": rows})
     check("dry_run statuses", c == 200 and [x["status"] for x in r["results"]] == ["would_create"] * 3, r)
     check("dry_run wrote nothing", q("select count(*) n from email_accounts where email_address ilike 'test-mbx-%'")[0]["n"] == 0)
-    check("dry_run name match Caleb Hong", r["results"][0]["owner"] == "Caleb Hong" and not r["results"][0]["needs_assignment"], r["results"][0])
+    check("dry_run name match Caleb Hong", r["results"][0]["owner"] == "Caleb Hong (test)" and not r["results"][0]["needs_assignment"], r["results"][0])
     check("dry_run first-name-only needs assignment", r["results"][1]["needs_assignment"] is True, r["results"][1])
     check("dry_run owner_email", r["results"][2]["owner"] and "Gavin" in r["results"][2]["owner"], r["results"][2])
 
