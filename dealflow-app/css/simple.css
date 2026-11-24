@@ -18,9 +18,7 @@ body.role-intern[data-page="messages.html"] #pageSettingsBtn,
 body.role-intern[data-page="messages.html"] #menuMailboxesBtn { display: none !important; }
 
 /* ---- One place for each setting ---- */
-/* Sellers/Buyers and Accounts visible live on Profile and Clients (Clients keeps its own gear, as on the original app); not on Calls */
-body[data-page="dials.html"] #dealSideToggleBtn,
-body[data-page="dials.html"] #menuAccountsVisibleBtn,
+/* Sellers/Buyers and Accounts visible: on Calls for admins and team leads (Mason, 2026-11-23; shown by js/dials.js), not on Inbox */
 body[data-page="messages.html"] #dealSideToggleBtn,
 body[data-page="messages.html"] #menuAccountsVisibleBtn { display: none !important; }
 
