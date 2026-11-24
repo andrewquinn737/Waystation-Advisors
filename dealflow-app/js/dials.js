@@ -2959,7 +2959,14 @@ function renderDialModal() {
         const target = autodialTarget(value); // decided before the save so the right "next" dial is used
         if (target) primeAudio(); // unlock call audio inside this tap
         const saved = await updateDialStatus(value);
-        if (saved && target) runAutodial(target);
+        if (!saved) { // kept fix: a failed save says so in plain words and nothing looks changed
+          statusMenu.classList.add("hidden");
+          const why = els.dialModalError.textContent;
+          els.dialModalError.textContent = `The outcome was not saved. Nothing changed, so pick it again.${why ? ` (${friendlyMsg(why).replace(/\s*(and )?press Retry\.?/i, "")})` : ""}`;
+          els.dialModalError.classList.remove("hidden");
+          return;
+        }
+        if (target) runAutodial(target);
       });
     });
   }

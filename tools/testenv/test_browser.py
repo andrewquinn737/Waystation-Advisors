@@ -7,6 +7,10 @@ from playwright.sync_api import sync_playwright
 from browser_regress import BASE, login, new_page, USERS, creds
 creds_for = lambda role: creds(USERS[role])
 results = []
+def pick(p, status):
+    """choose an outcome the way the live card does: the status pill, then the option"""
+    (p.is_visible('.dial-status-menu') or p.click('#dialStatusBtn')); p.click(f'.dial-status-option[data-value="{status}"]')
+
 def check(name, cond, detail=""):
     results.append(bool(cond)); print(("PASS " if cond else "FAIL ") + name + ("" if cond else f"  -> {str(detail)[:300]}"))
 NOISE = ("Auto-sync failed", "Failed to send a request to the Edge Function", "net::ERR_ABORTED")
@@ -38,11 +42,9 @@ def round1(b):
     ctx = b.new_context(viewport={"width": 1280, "height": 800}); errs = []; p = new_page(ctx, errs); login(p, "admin")
     # Calls: card buttons muted, readable on hover, clear selected state
     p.goto(BASE + "dials.html"); p.wait_for_timeout(2500)
-    p.locator(".dh-row").first.click(); p.wait_for_selector(".dial-outcome", timeout=20000)
-    check("Calls: outcome buttons are readable when hovered (contrast >= 4.5)", contrast(p, '.dial-outcome[data-outcome="no_response"]', hover=True) >= 4.5, contrast(p, '.dial-outcome[data-outcome="no_response"]'))
-    check("Calls: no saturated blue fill on call buttons or outcomes", p.evaluate("[...document.querySelectorAll('.dial-call-btn,.dial-outcome')].every(e => getComputedStyle(e).backgroundColor !== 'rgb(47, 95, 237)')"))
-    p.evaluate("document.querySelector('.dial-outcome[data-outcome=\"no_response\"]').classList.add('current')")
-    check("Calls: the selected outcome shows a check mark and a visibly different background", p.evaluate("(() => { const e = document.querySelector('.dial-outcome.current'); const cs = getComputedStyle(e); return getComputedStyle(e, '::before').content.includes('\\u2713') && cs.backgroundColor !== getComputedStyle(document.querySelector('.dial-outcome:not(.current)')).backgroundColor; })()"))
+    p.locator(".dh-row").first.click(); p.wait_for_selector("#dialStatusBtn", timeout=20000)
+    check("Calls: the card is the live layout (status pill, phone list with icons; no big call / outcome buttons, no More fold)", p.evaluate("!!document.querySelector('#dialStatusBtn') && !document.querySelector('.dial-call-btn,.dial-outcome,.dial-more') && !!document.querySelector('#dialModalBackdrop .contact-action-call')"))
+    check("Calls: the card keeps the live blue accent, not the round 5 slate", p.evaluate("getComputedStyle(document.querySelector('#dialModalBackdrop')).getPropertyValue('--accent').trim() === '#2f5fed'"))
     # Clients: the original gear is back (Accounts visible, Sellers/Buyers/Brokers for admin, Notifications, Advanced) and the header says what is in view
     p.goto(BASE + "clients.html"); p.wait_for_timeout(3000)
     p.click("#pageSettingsBtn"); p.wait_for_timeout(300)
@@ -125,21 +127,21 @@ def round2(b):
         p.unroute("**/rest/v1/dials?*list_id=eq.*"); p.click("[data-reload-dials]"); p.wait_for_timeout(2500)
         check("Calls: Retry reloads the list", p.locator(".dials-load-failed").count() == 0 and "TEST-R2 Co B" in p.inner_text("#dialsTableWrap"), p.inner_text("#dialsTableWrap")[:200])
         # -- outcome save failure stays visible
-        open_list("A"); p.locator(".dh-row", has_text="TEST-R2 Co A2").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
+        open_list("A"); p.locator(".dh-row", has_text="TEST-R2 Co A2").first.locator(".mc-name").click(); p.wait_for_selector("#dialStatusBtn", timeout=20000)
         p.route("**/rest/v1/dials?id=eq.*", lambda r: r.fulfill(status=500, body='{"message":"new row violates row-level security"}', headers={"content-type": "application/json"}) if r.request.method == "PATCH" else r.continue_())
-        p.click('.dial-outcome[data-outcome="no_response"]'); p.wait_for_timeout(1500)
+        pick(p, 'no_response'); p.wait_for_timeout(1500)
         vis = p.is_visible("#dialModalError"); et = p.inner_text("#dialModalError") if vis else ""
         check("Calls: a failed outcome save leaves a visible error (not cleared by the re-render)", vis and "not saved" in et and "row-level" not in et.lower(), et)
-        check("Calls: the outcome buttons work again after the failure", p.locator(".dial-outcome:not([disabled])").count() >= 4)
+        check("Calls: the status pill works again after the failure", p.locator("#dialStatusBtn").is_enabled())
         p.unroute("**/rest/v1/dials?id=eq.*")
         # -- intro-time Cancel puts the status back and leaves no client
-        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000); p.click("#manualIntroBtn")
+        pick(p, 'intro_call_scheduled'); p.click('#scheduleIntroCallFromDialBtn'); p.wait_for_selector("#manualIntroBtn", timeout=8000); p.click("#manualIntroBtn")
         p.wait_for_selector("#introCallTimeModal:not(.hidden)", timeout=8000)
         check("Calls: 'Confirm the scheduled time' has a Cancel button", p.is_visible("#introCallTimeCancelBtn"))
         p.click("#introCallTimeCancelBtn"); p.wait_for_timeout(1500)
         row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A2']}') c from dials where id='{d['A2']}'")[0]
         check("Calls: Cancel on the time step puts the dial back and leaves no client", not p.is_visible("#introCallTimeModal") and row["contact_status"] != "intro_call_scheduled" and row["c"] == 0, row)
-        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000); p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeModal:not(.hidden)")
+        pick(p, 'intro_call_scheduled'); p.click('#scheduleIntroCallFromDialBtn'); p.wait_for_selector("#manualIntroBtn", timeout=8000); p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeModal:not(.hidden)")
         p.keyboard.press("Escape"); p.wait_for_timeout(1500)
         row = sb.test_sql(f"select contact_status from dials where id='{d['A2']}'")[0]
         check("Calls: Esc on the time step also backs out", not p.is_visible("#introCallTimeModal") and row["contact_status"] != "intro_call_scheduled", row)
@@ -233,15 +235,14 @@ def round3(b):
         check("Calls: the callback banner lists the missed one as overdue", "overdue callback" in p2.inner_text("#callbackBanners"), p2.inner_text("#callbackBanners")[:100])
         c2.close()
         # -- failed note save: plain words, never 'Saved', no raw error at the top of the card
-        p.locator(".dh-row", has_text="TEST-R3 Co A0").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
-        p.click(".dial-more summary")
+        p.locator(".dh-row", has_text="TEST-R3 Co A0").first.locator(".mc-name").click(); p.wait_for_selector("#dialStatusBtn", timeout=20000)
         p.route("**/rest/v1/dials?id=eq.*", lambda r: r.abort() if r.request.method == "PATCH" else r.continue_())
         p.fill("#d_call_notes_live", "owner wants a call next week"); p.click("#dialModalTitle") if p.query_selector("#dialModalTitle") else p.keyboard.press("Tab"); p.wait_for_timeout(1500)
         msg = p.inner_text("#callNotesSavedMsg") if p.is_visible("#callNotesSavedMsg") else ""
         check("Calls: a failed note save says so in plain words (not 'Saved', no raw TypeError)", msg.startswith("Note not saved") and "TypeError" not in msg and "Failed to fetch" not in msg and not p.is_visible("#dialModalError"), msg)
         p.unroute("**/rest/v1/dials?id=eq.*")
         # -- intro: the missing-information prompt comes BEFORE the status flips
-        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_timeout(1200)
+        pick(p, 'intro_call_scheduled'); p.wait_for_timeout(1200)
         row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A0']}') c from dials where id='{d['A0']}'")[0]
         check("Calls: 'Intro call booked' on a dial with no industry asks first (Fill in now) and changes nothing", p.is_visible("#requiredPopup") and p.is_visible("#requiredPopupFill") and row["contact_status"] != "intro_call_scheduled" and row["c"] == 0, row)
         p.click("#requiredPopupFill"); p.wait_for_timeout(600)
@@ -249,8 +250,8 @@ def round3(b):
         p.click("#dialCancelBtn"); p.wait_for_timeout(500)
         # -- intro: closing the first chooser puts the dial back and removes the placeholder client
         sb.test_sql(f"update dials set industry='Plumbing' where id='{d['A0']}'")
-        open_list("A"); p.locator(".dh-row", has_text="TEST-R3 Co A0").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
-        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
+        open_list("A"); p.locator(".dh-row", has_text="TEST-R3 Co A0").first.locator(".mc-name").click(); p.wait_for_selector("#dialStatusBtn", timeout=20000)
+        pick(p, 'intro_call_scheduled'); p.click('#scheduleIntroCallFromDialBtn'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
         p.click("#introCallPopupClose"); p.wait_for_timeout(1800)
         row = sb.test_sql(f"select contact_status, (select count(*) from clients where source_dial_id='{d['A0']}') c from dials where id='{d['A0']}'")[0]
         check("Calls: closing the Schedule Intro Call chooser reverts the dial and leaves no client", row["contact_status"] != "intro_call_scheduled" and row["c"] == 0, row)
@@ -343,7 +344,7 @@ def round4(b):
             if not p.query_selector(f'.dial-tab[data-id="{lid}"]') and p.query_selector("#dialTabMoreBtn"): p.click("#dialTabMoreBtn")
             if p.query_selector(f'.dial-tab[data-id="{lid}"]:not(.active)'): p.click(f'.dial-tab[data-id="{lid}"]:not(.active)')
             p.wait_for_timeout(2500)
-            p.locator(".dh-row", has_text="TEST-R4 Co UT").first.locator(".mc-name").click(); p.wait_for_selector(".dial-outcome", timeout=20000)
+            p.locator(".dh-row", has_text="TEST-R4 Co UT").first.locator(".mc-name").click(); p.wait_for_selector("#dialStatusBtn", timeout=20000)
             # in-call bar open with the card: More, the last outcome and Save can be scrolled to and are not under the bar
             p.evaluate("""async () => { const m = await import('/js/callPanel.js'); window.__pnl = m.openCallPanel({ name: 'X', onHangup() {}, onOutcome: async () => true, onNext() {}, outcomes: [["a", "A"]] }); window.__pnl.ended('Call ended'); }""")
             p.wait_for_timeout(300)
@@ -351,7 +352,6 @@ def round4(b):
             check(f"Calls ({nm}): the open call bar gives popups bottom room (class + bar height variable)", has)
             chips_hidden = p.evaluate("[...document.querySelectorAll('.call-panel .call-outcome-chip')].every(x => x.offsetParent === null)")
             check(f"Calls ({nm}): with the card open the bar does not repeat the outcome buttons", chips_hidden)
-            p.click(".dial-more summary", timeout=5000)   # Playwright refuses to click when the bar intercepts the pointer
             p.evaluate("document.querySelector('#dialModalBackdrop').scrollTo(0, 99999)")
             r = p.evaluate("""() => { const bar = document.querySelector('.call-panel').getBoundingClientRect(); const last = [...document.querySelectorAll('#dialModalBackdrop .dial-modal > *')].filter(x => x.offsetParent).pop().getBoundingClientRect(); return { barTop: bar.top, lastBottom: last.bottom }; }""")
             check(f"Calls ({nm}): scrolled to the end, the card's last block ends above the bar", r["lastBottom"] <= r["barTop"] + 1, r)
@@ -380,8 +380,8 @@ def round4(b):
         sb.test_sql(f"update dials set callback_at=date_trunc('day', now()) + interval '3 days 17 hours', callback_defaulted=false where id='{d_cb}'")
         want = sb.test_sql(f"select callback_at a from dials where id='{d_cb}'")[0]["a"]
         p.goto(BASE + f"dials.html?dial={d_cb}"); p.wait_for_timeout(3500)
-        p.wait_for_selector(".dial-outcome", timeout=20000)
-        p.click('.dial-outcome[data-outcome="intro_call_scheduled"]'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
+        p.wait_for_selector("#dialStatusBtn", timeout=20000)
+        pick(p, 'intro_call_scheduled'); p.click('#scheduleIntroCallFromDialBtn'); p.wait_for_selector("#manualIntroBtn", timeout=8000)
         p.click("#manualIntroBtn"); p.wait_for_selector("#introCallTimeDateInput", state="visible", timeout=8000)
         try: p.wait_for_function("!!document.getElementById('introCallTimeDateInput').value", timeout=10000)   # wait for the condition itself, not a fixed pause
         except Exception: pass

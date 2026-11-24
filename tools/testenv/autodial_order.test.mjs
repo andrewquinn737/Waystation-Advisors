@@ -25,7 +25,7 @@ check("Next company and autodial share one order", /function nextCompanyTarget\(
 const q = home.slice(home.indexOf("callQueue()"), home.indexOf("callQueue()") + 900);
 check("queue = Past due, Due today, Not called yet only", /g\.n > 3/.test(q));
 check("queue skips LinkedIn / reply steps and callbacks not due yet", /CALL_KINDS\.includes/.test(q) && /it\.cb > dueBy/.test(q));
-check("a callback outcome asks for the time before autodial moves on", /openCallbackModal\(dial, \{ after: target \? \(\) => runAutodial\(target\)/.test(src));
+check("a callback outcome asks for the time before autodial moves on", /openCallbackModal\(dial, target \? \{ after: \(\) => runAutodial\(target\) \} : \{\}\)/.test(src));
 const adv = fs.readFileSync(path.join(dir, "advancedSettings.js"), "utf8");
 check("About us email no longer changes the email icon", /export function resolveAboutUsEmailBody\(\) \{\s*return null;/.test(adv));
 for (const f of ["dials.html", "clients.html", "profile.html"]) {

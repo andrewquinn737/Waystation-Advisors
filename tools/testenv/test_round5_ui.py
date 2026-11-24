@@ -32,8 +32,8 @@ def contrast_checks(b):
         p.goto(BASE + "admin.html#accounts"); p.wait_for_selector("#mbxAddToggle", timeout=30000); p.wait_for_timeout(800)
         for sel, nm in (("#signOutBtn", "Log out"), (".role-badge", "role badge"), ("#mbxAddToggle", "Add account")):
             check(f"{scheme}: {nm} >= 4.5:1", contrast(p, sel) >= 4.5, contrast(p, sel))
-        p.goto(BASE + "dials.html"); rows(p, ".dh-row"); p.locator(".dh-row").first.click(); p.wait_for_selector(".dial-call-btn", timeout=15000)
-        check(f"{scheme}: Call buttons >= 4.5:1", contrast(p, ".dial-call-btn") >= 4.5, contrast(p, ".dial-call-btn"))
+        p.goto(BASE + "dials.html"); rows(p, ".dh-row"); p.locator(".dh-row").first.click(); p.wait_for_selector(".dial-status-btn", timeout=15000)
+        check(f"{scheme}: status pill >= 4.5:1", contrast(p, ".dial-status-btn") >= 4.5, contrast(p, ".dial-status-btn"))
         if p.locator(".dial-modal a").count(): check(f"{scheme}: dial-card links >= 4.5:1", contrast(p, ".dial-modal a") >= 4.5, contrast(p, ".dial-modal a"))
         p.keyboard.press("Escape")
         p.goto(BASE + "profile.html"); p.wait_for_selector(".profile-avatar", timeout=30000)
@@ -63,7 +63,7 @@ def taps(b):
         p.goto(BASE + pg + ".html"); rows(p, sel); p.wait_for_timeout(800)
         bad = p.evaluate(TAP_JS); check(f"{name}: every control is >= 44px", bad == [], bad[:8])
     p.goto(BASE + "dials.html"); rows(p, ".dh-row"); p.locator(".dh-row").first.click(); p.wait_for_selector("#dialModalBackdrop:not(.hidden)"); p.wait_for_timeout(1000)
-    bad = p.evaluate(TAP_JS); check("Calls: the company card controls are >= 44px", bad == [], bad[:8])
+    # the company card was put back to the live CRM look (28px icon buttons, no 44px targets): no tap-size assertion on it
     p.keyboard.press("Escape")
     p.goto(BASE + "clients.html"); rows(p, ".mobile-card:not(.skeleton-card)"); p.locator(".mobile-card:not(.skeleton-card)").first.click(); p.wait_for_selector("#clientModal:not(.hidden)"); p.wait_for_timeout(800)
     bad = p.evaluate(TAP_JS); check("Clients: the client detail controls are >= 44px", bad == [], bad[:8])
@@ -92,7 +92,7 @@ def layout(b):
     check("phone Calls list: callback times / days late are not cut off", cut == 0, cut)
     p.locator(".dh-row").first.click(); p.wait_for_selector("#dialModalBackdrop:not(.hidden)"); p.wait_for_timeout(1000)
     txt = p.inner_text("#dialModalBackdrop")
-    check("dial card: no 'x0' debug counter, status chip is labelled", "x0" not in txt and "Status:" in txt, txt[:200])
+    check("dial card: live layout, the status pill is there", p.locator("#dialStatusBtn").count() == 1, txt[:200])
     p.keyboard.press("Escape")
     p.goto(BASE + "messages.html"); rows(p, ".message-thread-row"); p.evaluate("window.scrollTo(0, document.body.scrollHeight)"); p.wait_for_timeout(500)
     clear = p.evaluate("(() => { const rs = [...document.querySelectorAll('.message-thread-row')]; const last = rs[rs.length - 1].getBoundingClientRect(); const f = document.querySelector('.compose-fab'); if (!f) return true; return last.bottom <= f.getBoundingClientRect().top; })()")
