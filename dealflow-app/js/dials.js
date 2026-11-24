@@ -445,21 +445,18 @@ function openConfirmModal(modalEl, yesId, noId, onConfirm, onClose) {
   noBtn.addEventListener("click", onNo);
 }
 
-// Only filled fields are shown (no "Not provided" rows).
 function rf(label, value) {
   const v = value === null || value === undefined || value === "" ? "" : String(value);
-  if (!v) return "";
-  return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value">${escapeHtml(v)}</div></div>`;
+  return `<div class="readonly-field"><div class="rf-label">${escapeHtml(label)}</div><div class="rf-value ${v ? "" : "empty"}">${v ? escapeHtml(v) : "Not provided"}</div></div>`;
 }
 
 function rfWebsite(label, value) {
   const v = value ? String(value) : "";
-  if (!v) return "";
-  const href = !/^https?:\/\//i.test(v) ? `https://${v}` : v;
+  const href = v && !/^https?:\/\//i.test(v) ? `https://${v}` : v;
   return `
     <div class="readonly-field">
       <div class="rf-label">${escapeHtml(label)}</div>
-      <div class="rf-value"><a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v)}</a></div>
+      <div class="rf-value ${v ? "" : "empty"}">${v ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v)}</a>` : "Not provided"}</div>
     </div>`;
 }
 
@@ -593,8 +590,7 @@ async function syncTodaysCallLogSnapshot(fields) {
 // (mobile call, company call, email).
 function buildContactedTodayDisplayHTML(dial) {
   const count = contactedTodayCount(dial);
-  const label = count === 0 ? "Not contacted today" : `${count} ${count === 1 ? "contact" : "contacts"} today`;
-  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}" title="Calls and emails logged today (up to 3)">${label}</div>`;
+  return `<div class="dial-contacted-today-display ${count > 0 ? "active" : ""}">Contacted today x${count}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -739,14 +735,6 @@ async function loadDialTranscript() {
     el.innerHTML = `<div class="help-text">${error ? "Couldn't load calls." : "No in-app calls yet."}</div>`;
     return;
   }
-  // The newest call's summary is shown above "More" when it is from the last day, so nobody has to dig for what was just said.
-  const recent = data.find((c) => c.summary && Date.now() - Date.parse(c.started_at) < 86400000);
-  const more = document.querySelector(".dial-more");
-  let last = document.getElementById("dialLastCall");
-  if (recent && more) {
-    if (!last) { last = document.createElement("div"); last.id = "dialLastCall"; last.className = "dial-last-call"; more.before(last); }
-    last.innerHTML = `<b>Last call, ${escapeHtml(new Date(recent.started_at).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" }))}:</b> ${escapeHtml(recent.summary)}`;
-  } else last?.remove();
   el.innerHTML = data
     .map((c) => {
       const when = new Date(c.started_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -2681,29 +2669,22 @@ function resolveEmailSubject(dial) {
 // narrower scope than this dial-level change.
 function buildDialViewHTML(dial) {
   return `
-    ${dial.mobile_phone || dial.company_phone ? "" : `<div class="help-text">No phone number. Tap the pencil to add one.</div>`}
-    ${dialCallButtonsHTML(dial)}
-    ${outcomeButtonsHTML(dial)}
-    ${dial.email ? rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial)) : ""}
+    ${rfContact("Email", dial.email, "email", "", resolveEmailBody(dial), resolveEmailSubject(dial))}
+    ${buildPhoneNumbersHTML(dial, null, resolvePersonalizedTextingBody(profile, dial), dial.id)}
     ${rfWebsite("LinkedIn", dial.linkedin)}
     ${rfWebsite("Website", dial.website)}
     ${rf("Industry sector", dial.industry)}
     ${rf("Summary", dial.summary)}
-    <details class="dial-more">
-      <summary>More</summary>
-      ${buildCallNotesLiveHTML(dial)}
-      ${buildCallbackHTML(dial)}
-      ${buildDialTranscriptHTML()}
-    </details>
+    ${buildCallNotesLiveHTML(dial)}
+    ${buildCallbackHTML(dial)}
+    ${buildDialTranscriptHTML()}
   `;
 }
 
 // ---------------------------------------------------------------------------
-// Calling + the five outcomes (docs/CRM_DESIGN.md §1). Big call buttons (one per number, labelled), then five outcome
-// buttons that replace the old 7-option status pill for everyone; after one is saved the card moves on to the next row of
-// the call sheet. Admins/team leads also keep the old status pill (to re-categorise or reset a company).
+// Outcome lists used by the call bar's one-tap chips after hangup (js/callSession.js). The card itself uses the status pill, as on live.
 // ---------------------------------------------------------------------------
-const simpleUi = !isAdmin && !isTeamLead; // interns (and independent leads): the slimmest card
+const simpleUi = !isAdmin && !isTeamLead; // interns (and independent leads): fewer empty-state hints / menu items (not the card)
 const OUTCOME_CHIPS = [["callback_interested", "Talked – interested"], ["busy_callback", "Call back"], ["no_response", "No answer"], ["not_interested", "Not interested"], ["unable_to_contact", "Wrong / dead number"], ["intro_call_scheduled", "Intro call booked"]];
 const OUTCOMES = [
   { status: "callback_interested", label: "Talked – interested", callback: true },
@@ -2712,69 +2693,6 @@ const OUTCOMES = [
   { status: "not_interested", label: "Not interested" },
   { status: "unable_to_contact", label: "Wrong / dead number" },
 ];
-function dialCallButtonsHTML(dial) {
-  // Each number: the big in-app Call button plus a Text button (sms: link, with the personalized text if that setting is on).
-  const btn = (num, method, label) =>
-    `<div class="dial-call-line"><button type="button" class="btn dial-call-btn contact-action-call" data-dial-id="${escapeHtml(dial.id)}" data-tel="${escapeHtml(num)}" data-method="${method}"><b>${label}</b><span>${escapeHtml(num)}</span></button>` +
-    `<a class="btn secondary dial-text-btn" href="${escapeHtml(buildSmsHref(num, resolvePersonalizedTextingBody(profile, dial)))}" title="Text ${escapeHtml(num)}">Text</a></div>`;
-  const rows = [];
-  if (dial.mobile_phone) rows.push(btn(dial.mobile_phone, "mobile", dial.mobile_phone_unsure ? "Call (may not be a mobile)" : "Call mobile"));
-  if (dial.company_phone) rows.push(btn(dial.company_phone, "company", "Call office"));
-  return rows.length ? `<div class="dial-call-row">${rows.join("")}</div>` : "";
-}
-function outcomeButtonsHTML(dial) {
-  return `
-    <div class="dial-outcomes" id="dialOutcomes">
-      <div class="rf-label">How did it go?</div>
-      ${OUTCOMES.map((o) => `<button type="button" class="btn dial-outcome ${dial.contact_status === o.status ? "current" : ""}" data-outcome="${o.status}">${o.label}</button>`).join("")}
-      <button type="button" class="btn secondary dial-outcome dial-outcome-intro ${dial.contact_status === "intro_call_scheduled" ? "current" : ""}" data-outcome="intro_call_scheduled">Intro call booked</button>
-    </div>`;
-}
-// Moves on to the next row of the call sheet (the order the card was opened from), or closes the card at the end.
-async function advanceAfterOutcome() {
-  if (currentDialIndex < currentDialSet.length - 1) await goToDial(1);
-  else await closeDialModal();
-}
-function wireOutcomeButtons() {
-  const wrap = document.getElementById("dialOutcomes");
-  if (!wrap) return;
-  wrap.querySelectorAll("[data-outcome]").forEach((b) => b.addEventListener("click", async () => {
-    const value = b.dataset.outcome, dial = currentDial;
-    wrap.querySelectorAll("button").forEach((x) => (x.disabled = true));
-    if (value === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" && introInfoMissing(dial)) { renderDialModal(); return; } // asked BEFORE anything is saved
-    const target = autodialTarget(value); // the Autodial setting (if on) still picks its own next company
-    if (target) primeAudio();
-    // Remember where the dial was, so backing out of the "Confirm the scheduled time" step can put it back.
-    introRevert = value === "intro_call_scheduled" && dial.contact_status !== "intro_call_scheduled" ? snapIntro(dial) : null;
-    const saved = await updateDialStatus(value);
-    if (!saved) { // error shown by updateDialStatus; re-enable the buttons, then put the error back (the re-render clears it)
-      const why = els.dialModalError.textContent;
-      renderDialModal();
-      els.dialModalError.textContent = `The outcome was not saved. Nothing changed, so tap it again.${why ? ` (${friendlyMsg(why).replace(/\s*(and )?press Retry\.?/i, "")})` : ""}`;
-      els.dialModalError.classList.remove("hidden");
-      els.dialModalError.scrollIntoView({ block: "nearest" });
-      return;
-    }
-    if (value === "intro_call_scheduled") return handleScheduleIntroCallFromDial(dial); // the existing intro-call flow
-    const def = OUTCOMES.find((o) => o.status === value);
-    if (def?.callback) return openCallbackModal(dial, { after: target ? () => runAutodial(target) : advanceAfterOutcome }); // pick the time first
-    if (target) { runAutodial(target); keepCardFocus(); return; }
-    await advanceAfterOutcome();
-    keepCardFocus();
-  }));
-}
-// After an outcome moves the card on to the next company the old buttons are gone and focus falls to the page: put it on the new card's
-// first outcome (or the card itself) so a keyboard user keeps their place. Anything the person focused meanwhile wins.
-function keepCardFocus() {
-  setTimeout(() => {
-    const a = document.activeElement;
-    if (a && a !== document.body && els.dialModalBackdrop.contains(a)) return;
-    if (els.dialModalBackdrop.classList.contains("hidden")) return;
-    const first = document.querySelector("#dialOutcomes [data-outcome]:not([disabled])");
-    (first || els.dialModalBackdrop).focus?.({ preventScroll: true });
-  }, 450);
-}
-
 // ---------------------------------------------------------------------------
 // Callback time (dials.callback_at): a button under Call notes that opens a calendar + time picker. A set callback
 // shows under "Callbacks for today" on Profile, as a banner at the top of the app, and as a push reminder 5 minutes
@@ -2961,11 +2879,11 @@ function renderDialModal() {
       <div class="dial-modal-header-right">
         <div class="dial-modal-header-actions">
           ${
-            isViewingExisting && !simpleUi
+            isViewingExisting
               ? `
           <div class="dial-status-dropdown">
             <button type="button" class="dial-status-btn" id="dialStatusBtn"
-              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};" aria-label="Status: ${escapeHtml(statusInfo(dial.contact_status).label)}. Change" title="Change status">Status: ${escapeHtml(statusInfo(dial.contact_status).label)}</button>
+              style="background:${statusInfo(dial.contact_status).bg}; border-color:${statusInfo(dial.contact_status).border};" aria-label="Status: ${escapeHtml(statusInfo(dial.contact_status).label)}. Change" title="Change status">${escapeHtml(statusInfo(dial.contact_status).label)}</button>
             <div class="dial-status-menu hidden" id="dialStatusMenu">
               ${CONTACT_STATUSES.map(
                 (s) => `
@@ -3026,14 +2944,18 @@ function renderDialModal() {
     });
     const statusBtn = document.getElementById("dialStatusBtn");
     const statusMenu = document.getElementById("dialStatusMenu");
-    if (statusBtn) statusBtn.addEventListener("click", (e) => {
+    statusBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       statusMenu.classList.toggle("hidden");
     });
-    if (statusMenu) document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
-    if (statusMenu) statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
+    document.addEventListener("click", () => statusMenu.classList.add("hidden"), { once: true });
+    statusMenu.querySelectorAll(".dial-status-option").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const value = btn.dataset.value;
+        // Kept fixes: "Intro call booked" is refused (before anything is saved) while the dial lacks what a client needs, and the
+        // dial's previous status + callback time are remembered so backing out of the time step puts them back.
+        if (value === "intro_call_scheduled" && currentDial.contact_status !== "intro_call_scheduled" && introInfoMissing(currentDial)) { statusMenu.classList.add("hidden"); return; }
+        introRevert = value === "intro_call_scheduled" && currentDial.contact_status !== "intro_call_scheduled" ? snapIntro(currentDial) : null;
         const target = autodialTarget(value); // decided before the save so the right "next" dial is used
         if (target) primeAudio(); // unlock call audio inside this tap
         const saved = await updateDialStatus(value);
@@ -3087,7 +3009,6 @@ function renderDialModal() {
   } else {
     wireCallNotesAutosave();
     loadDialTranscript();
-    wireOutcomeButtons();
   }
 }
 

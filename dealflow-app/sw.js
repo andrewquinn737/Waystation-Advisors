@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v131";
+const CACHE = "waystation-shell-v132";
 // Every page, script and stylesheet is precached (a page whose module is missing offline used to hang on its skeleton for good).
 // Paths are relative to wherever the app is served (the site root on Vercel, a sub-folder on the GitHub Pages test copy).
 const APP = (u) => new URL(String(u).replace(/^\//, ""), self.registration?.scope || self.location.href).href;
@@ -12,7 +12,7 @@ const SHELL = [
   "/deals.html", "/dials.html", "/finance.html", "/index.html",
   "/login.html", "/mailboxes.html", "/messages.html", "/profile.html",
   "/sellers.html", "/team.html", "/today.html", "/css/a11y.css", "/css/admin.css",
-  "/css/aiChat.css", "/css/copyReview.css", "/css/dialsHome.css", "/css/importWizard.css",
+  "/css/aiChat.css", "/css/copyReview.css", "/css/dialsHome.css", "/css/dialCardLive.css", "/css/importWizard.css",
   "/css/messages-inbox.css", "/css/simple.css", "/css/style.css", "/js/accountsVisible.js",
   "/js/admin.js", "/js/adminAccounts.js", "/js/adminCalendly.js", "/js/adminCampaigns.js",
   "/js/adminLaunch.js", "/js/adminOnboarding.js", "/js/adminSettings.js", "/js/adminSuppression.js", "/js/advancedSettings.js", "/js/aiChat.js",

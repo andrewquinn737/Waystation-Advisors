@@ -5,24 +5,7 @@
 .bottom-tabbar a { flex-direction: column; gap: 2px; padding: 7px 2px; min-height: 48px; }
 .bottom-tabbar .tab-label { font-size: 11px; font-weight: 600; line-height: 1.1; }
 
-/* ---- Call card: big call buttons + five outcome buttons ---- */
-.dial-call-row { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 10px; }
-.dial-call-line { display: flex; gap: 8px; align-items: stretch; }
-.dial-call-line .dial-call-btn { flex: 1; }
-.dial-text-btn { display: flex; align-items: center; justify-content: center; min-width: 64px; font-size: 15px; font-weight: 600; text-decoration: none; }
-.dial-call-btn { background: var(--tone); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 52px; font-size: 16px; }
-@media (hover: hover) { .dial-call-btn:hover { background: var(--tone-hover); color: #fff; } }
-.dial-call-btn span { font-size: 13px; font-weight: 400; opacity: .9; }
-.dial-outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
-.dial-outcomes .rf-label { grid-column: 1 / -1; margin: 0; }
-.dial-outcome { min-height: 48px; padding: 8px 6px; font-size: 14px; font-weight: 600; background: var(--surface); color: var(--text); border: 1px solid var(--border); line-height: 1.15; }
-.dial-outcome:first-of-type { grid-column: 1 / -1; }
-@media (hover: hover) { .btn.secondary:hover, .dial-outcome:hover { background: var(--gold-soft); color: var(--text); } }
-.dial-outcome.current { background: var(--tone-soft); color: var(--tone-text); border-color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone); }
-.dial-outcome.current::before { content: "\2713\00a0"; }
-.dial-outcome-intro { grid-column: 1 / -1; font-size: 14px; min-height: 44px; }
-.dial-more { padding: 6px 0; }
-.dial-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted-strong); }
+@media (hover: hover) { .btn.secondary:hover { background: var(--gold-soft); color: var(--text); } }
 
 /* ---- Interns: less chrome ---- */
 body.role-intern #seqPanel,

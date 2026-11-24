@@ -2143,7 +2143,6 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 #reportsTableWrap table { min-width: 560px; }
 
 .call-notes-saved.bad { color: var(--danger, #b3261e); }
-.dial-last-call { margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13.5px; line-height: 1.45; color: var(--text-muted-strong, var(--text)); }
 
 @media (max-width: 420px) { .callback-banner-title { white-space: normal; line-height: 1.25; padding: 6px 0; } }
 
@@ -2172,7 +2171,7 @@ html.is-mobile-device .referral-add-btn { bottom: 60px; }
 body.has-call-bar .modal-backdrop { padding-bottom: calc(var(--call-bar-h, 0px) + 12px) !important; }
 body.has-call-bar #dialModalBackdrop { padding-bottom: calc(var(--call-bar-h, 0px) + 12px) !important; }
 .call-outcome-chips.hidden, .call-outcome-label.hidden { display: none; }
-/* the card shows the same six outcomes once it is open: the bar's copy is hidden then (it stays when the card is closed) */
+/* the card's status pill takes the outcome while it is open, so the bar's one-tap copy is hidden then (it stays when the card is closed) */
 body:has(#dialModalBackdrop:not(.hidden)) .call-panel .call-outcome-chips, body:has(#dialModalBackdrop:not(.hidden)) .call-panel .call-outcome-label { display: none; }
 .client-calls-all { background: none; border: 0; color: var(--text-muted); text-decoration: underline; padding: 8px 0; min-height: 44px; cursor: pointer; font: inherit; font-size: 13px; }
 /* timeline: the date keeps to one line (shorter wrap on phones) */

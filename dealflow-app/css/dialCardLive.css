@@ -1,0 +1,47 @@
+/* The company card (#dialModalBackdrop) looks and behaves like the live CRM's card (origin/main). Everything here is scoped to the card
+   and loaded after the newer shared sheets (style.css round 5/6 tokens, a11y.css, simple.css), so it undoes their effect on the card only.
+   Rules: main's colour tokens, main's sizes (no 44px tap targets), main's plain inputs. Kept on the card: the focus ring. */
+#dialModalBackdrop {
+  --text-muted: #6b7280;
+  --accent: #2f5fed; --accent-hover: #2449c4; --accent-text: #2f5fed;
+  --input-border: var(--border);
+  --danger: #d1453b; --danger-fill: #d1453b; --danger-soft: #fdecec;
+  --success: #1f9d55; --success-fill: #1f9d55;
+  --warn: #c98a12;
+  --tone: #2f5fed; --tone-hover: #2449c4; --tone-text: #2f5fed; --tone-soft: #eef1ff;
+}
+@media (prefers-color-scheme: dark) {
+  #dialModalBackdrop {
+    --text-muted: #a3adba;
+    --accent: #6d8dff; --accent-hover: #8aa4ff; --accent-text: #6d8dff;
+    --danger: #ff6b61; --danger-fill: #ff6b61; --danger-soft: #3a1f1d;
+    --success: #34c973; --success-fill: #34c973;
+    --warn: #e0a83e;
+    --tone: #6d8dff; --tone-hover: #8aa4ff; --tone-text: #6d8dff; --tone-soft: #161a24;
+  }
+}
+#dialModalBackdrop .btn.danger { background: var(--danger); }
+#dialModalBackdrop .dial-modal-subtitle { color: var(--text-muted-strong); }
+
+/* a11y.css: 44px tap targets on phones -> main's sizes inside the card */
+@media (max-width: 720px), (pointer: coarse) {
+  #dialModalBackdrop button, #dialModalBackdrop .btn, #dialModalBackdrop a.btn, #dialModalBackdrop summary, #dialModalBackdrop select,
+  #dialModalBackdrop input:not([type="checkbox"]):not([type="radio"]) { min-height: 0; }
+  #dialModalBackdrop button:not(.btn) { min-width: 0; }
+  #dialModalBackdrop input[type="checkbox"], #dialModalBackdrop input[type="radio"] { width: auto; height: auto; }
+  #dialModalBackdrop .contact-actions { gap: 6px; }
+  #dialModalBackdrop .contact-action-btn { width: 28px; height: 28px; border: 1px solid var(--border); background: var(--surface); position: static; }
+  #dialModalBackdrop .contact-action-btn::before { content: none; }
+  #dialModalBackdrop .contact-action-btn > * { position: static; }
+  #dialModalBackdrop .location-pin-link { display: inline-flex; min-width: 0; min-height: 0; margin: 0 0 0 8px; }
+  #dialModalBackdrop .readonly-field .rf-value a { display: inline; min-height: 0; }
+  #dialModalBackdrop .fs-close, #dialModalBackdrop .edit-icon-btn { min-width: 0; }
+}
+@media (hover: hover) and (max-width: 720px) { #dialModalBackdrop .contact-action-btn:hover::before { background: none; } }
+
+/* simple.css hid the "Contacted today" pill for interns; live shows it to everyone (the sequence panel stays hidden for them) */
+body.role-intern #dialModalBackdrop .dial-contacted-today-display { display: inline-flex !important; }
+
+/* a11y.css makes every button inherit the page font; live's card buttons use the browser's own button font */
+#dialModalBackdrop button { font-family: revert; }
+@media (pointer: coarse), (max-width: 720px) { #dialModalBackdrop input:not([type="checkbox"]):not([type="radio"]), #dialModalBackdrop select, #dialModalBackdrop textarea { font-size: 14px; } }
