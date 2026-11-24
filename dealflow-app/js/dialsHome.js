@@ -260,20 +260,21 @@ export function initDialsHome({ profile, getList, getDials, openCard, isSheet, i
     queueErr = !!error; queue = error ? null : (Array.isArray(data) ? data[0] : data) || null;
     renderEmails();
   }
+  // Plain-English email status for the person's mailboxes, e.g.
+  //   "Emails: 13 sent today (daily limit 40) · 13 scheduled, first tomorrow at 6:00 AM MST"
   function queueLine() {
     if (queueErr || !queue || !(queue.mailboxes || []).length) return "";
-    const sent = queue.sent_today ?? 0, cap = queue.capacity_today;
-    // Next scheduled send, in this person's time zone, with the day when it isn't today ("next tomorrow 6:00am MST").
-    let next = "";
-    if (queue.next_send_at) {
+    const sent = queue.sent_today ?? 0, cap = queue.capacity_today, sched = queue.scheduled_count ?? 0;
+    const parts = [`Emails: ${sent} sent today${cap ? ` (daily limit ${cap})` : ""}`];
+    if (sched && queue.next_send_at) {
       const at = new Date(queue.next_send_at), day = (d) => d.toLocaleDateString("en-CA", { timeZone: tz });
-      const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: tz }).replace(/\s/g, "").toLowerCase();
-      const zone = (at.toLocaleTimeString("en-US", { timeZone: tz, timeZoneName: "short" }).split(" ").pop()) || "";
+      const time = at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
+      const zone = at.toLocaleTimeString("en-US", { timeZone: tz, timeZoneName: "short" }).split(" ").pop() || "";
       const today = day(new Date()), tomorrow = day(new Date(Date.now() + 86400000));
-      const when = day(at) === today ? "" : day(at) === tomorrow ? "tomorrow " : at.toLocaleDateString(undefined, { weekday: "short", timeZone: tz }) + " ";
-      next = `${when}${time} ${zone}`.trim();
-    }
-    return [cap ? `${sent} of ${cap} sent today` : `${sent} sent today`, next ? `next ${next}` : ""].filter(Boolean).join(" · ");
+      const when = day(at) === today ? "today" : day(at) === tomorrow ? "tomorrow" : at.toLocaleDateString("en-US", { weekday: "long", timeZone: tz });
+      parts.push(`${sched} scheduled, ${sched === 1 ? "sending" : "first"} ${when} at ${time} ${zone}`);
+    } else parts.push("none scheduled");
+    return parts.join(" · ");
   }
   function renderEmails() {
     const bar = $("dhBar"); if (!bar) return;
