@@ -12,9 +12,12 @@ export const connectorUrl = (token) => `${SUPABASE_URL}/functions/v1/claude-conn
 const STEPS = `<ol class="cc-steps"><li>In claude.ai or Claude Desktop, go to <b>Settings &gt; Connectors</b>.</li>
   <li>Choose <b>Add custom connector</b> and name it <b>Waystation CRM</b>.</li><li>Paste the link above and save.</li></ol>`;
 
-export function mountClaudeConnect(host, { profile }) {
-  const card = $(`<section class="cc-card" id="claudeConnectCard"><h3>Connect Claude</h3>
-    <p>Let Claude see and rewrite your own held email drafts. Its rewrites must pass the same checks before they save.</p>
+const GPT_STEPS = `<p class="help-text">Using ChatGPT instead? In ChatGPT go to <b>Settings &gt; Apps &amp; Connectors &gt; Advanced</b>, turn on
+  <b>Developer mode</b>, then <b>Create</b> a connector named <b>Waystation CRM</b> with the link above (no sign-in needed).</p>`;
+
+export function mountClaudeConnect(host, { profile, title = "Connect Claude", blurb, chatgpt = false }) {
+  const card = $(`<section class="cc-card" id="claudeConnectCard"><h3>${escapeHtml(title)}</h3>
+    <p>${blurb ? escapeHtml(blurb) : "Let Claude see and rewrite your own held email drafts. Its rewrites must pass the same checks before they save."}</p>
     <div class="cc-body"><div class="help-text">Loading...</div></div></section>`);
   host.appendChild(card);
   const bodyEl = card.querySelector(".cc-body");
@@ -34,7 +37,7 @@ export function mountClaudeConnect(host, { profile }) {
     if (shownToken) {
       h += `<p class="cc-warn">Treat this link like a password. It is shown only once; anyone with it can read and edit your drafts.</p>
         <input class="cc-url" id="ccUrl" readonly value="${escapeHtml(connectorUrl(shownToken))}" aria-label="Your Claude link" />
-        <div class="cc-actions"><button type="button" class="btn" data-a="copy">Copy link</button></div>${STEPS}`;
+        <div class="cc-actions"><button type="button" class="btn" data-a="copy">Copy link</button></div>${STEPS}${chatgpt ? GPT_STEPS : ""}`;
     }
     if (live) {
       h += `<div class="cc-status">Connected link created ${escapeHtml(when(tok.created_at))} · ${tok.last_used_at ? `last used ${escapeHtml(when(tok.last_used_at))}` : "not used yet"}${tok.expires_at ? ` · expires ${escapeHtml(when(tok.expires_at))}` : ""}</div>

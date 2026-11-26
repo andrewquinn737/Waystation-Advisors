@@ -15,4 +15,5 @@ printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$tok" >> "$tmp"
 chown waystation-ai:waystation-ai "$tmp"
 mv "$tmp" "$ENVF"
 systemctl restart waystation-ai-worker
+systemctl restart waystation-ai-coach 2>/dev/null || true   # the coach shares this token
 echo "Token saved ($(printf '%s' "$tok" | wc -c | tr -d ' ') characters). Worker restarted. Check the status line in Admin > Settings in about 15 seconds."

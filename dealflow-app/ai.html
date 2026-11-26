@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<title>AI Coach — Waystation Advisors</title>
+<script>
+  // Device-type detection — see the matching comment in dials.html for why
+  // this replaced viewport-width media queries.
+  (function () {
+    var ua = navigator.userAgent || navigator.vendor || "";
+    var isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile/i.test(ua);
+    var isIpadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    document.documentElement.classList.add(isMobileUA || isIpadOS ? "is-mobile-device" : "is-desktop-device");
+  })();
+</script>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/a11y.css?v=1" />
+<link rel="icon" href="favicon.ico" sizes="any" />
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
+<link rel="icon" href="favicon-16.png" type="image/png" sizes="16x16" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Waystation Advisors" />
+<script src="js/pwa.js" defer></script>
+<script src="js/noZoom.js" defer></script>
+<link rel="stylesheet" href="css/aiCoach.css?v=2" />
+</head>
+<body data-page="ai.html">
+  <div class="page-loading-overlay" id="pageLoadingOverlay"><div id="pageLoadingTopnav"></div><div class="skeleton-page-content" id="pageLoadingSkeleton"></div></div>
+  <script type="module">
+    import { skeletonTopnavHtml } from "./js/placeholders.js";
+    document.getElementById("pageLoadingTopnav").innerHTML = skeletonTopnavHtml();
+  </script>
+  <nav class="topnav" id="topnav"></nav>
+  <main class="aic-main">
+    <div class="page-header"><div class="page-header-left"><h1>AI Coach</h1></div>
+      <div class="aic-track" role="group" aria-label="Which calls">
+        <button type="button" class="btn small secondary" data-track="data">Data sales</button>
+        <button type="button" class="btn small secondary" data-track="ma">M&amp;A</button>
+      </div>
+    </div>
+    <ol class="aic-steps">
+      <li class="aic-step" id="aicConnect"><div class="aic-step-h"><span class="aic-num">1</span><h2>Connect Claude or ChatGPT</h2></div><div class="aic-step-b" id="aicConnectBody"></div></li>
+      <li class="aic-step" id="aicCoach"><div class="aic-step-h"><span class="aic-num">2</span><h2>Your coach</h2></div><div class="aic-step-b" id="aicCoachBody"><div class="help-text">Loading...</div></div></li>
+      <li class="aic-step" id="aicPractice"><div class="aic-step-h"><span class="aic-num">3</span><h2>Practice call</h2></div><div class="aic-step-b" id="aicPracticeBody"></div></li>
+    </ol>
+  </main>
+  <script type="module" src="js/aiCoach.js"></script>
+</body>
+</html>
