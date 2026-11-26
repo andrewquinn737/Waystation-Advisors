@@ -3,9 +3,11 @@ LLM output is only proposed; code checks quotes verbatim, clamps scores and writ
 from datetime import datetime, timezone
 import coachlib as cl
 import prompts as P
+import engine as E
+import taxonomy as T
+from clean import clean_lines
 
-OBJ_TYPES = {"not_interested", "busy", "what_is_this", "who_are_you", "scam_or_trust", "price_or_value", "confidentiality",
-             "send_email", "not_decision_maker", "not_selling", "timing", "already_have", "wrong_fit", "other"}
+OBJ_TYPES = set(T.OBJECTIONS["data"]) | set(T.OBJECTIONS["ma"]) | {"already_have", "wrong_fit"}
 REACTIONS = {"hostile", "brush_off", "busy", "question", "curious", "engaged", "neutral", "na"}
 
 
@@ -38,10 +40,41 @@ def clean_analysis(a, transcript):
     for k in ("keeps", "fixes"):
         a[k] = [cl.no_dashes(str(x)) for x in (a.get(k) or []) if x][:2]
     a["try_line"] = cl.no_dashes(a.get("try_line") or "")
+    secs = {}
+    for k, v in (a.get("sections") or {}).items():
+        if k not in ("opener", "explain", "objections", "close") or not isinstance(v, dict) or score(v.get("score")) is None: continue
+        rq, iq = v.get("reaction_quote") or "", v.get("intern_quote") or ""
+        secs[k] = {"score": score(v.get("score")), "reaction": v.get("reaction") if v.get("reaction") in T.OWNER_ACTS else "other",
+                   "reaction_quote": rq if rq and cl.quote_in(rq, transcript) else "",
+                   "intern_quote": iq if iq and cl.quote_in(iq, transcript) else "", "why": cl.no_dashes(str(v.get("why") or ""))}
+    a["sections"] = secs
+    if a.get("outcome") not in T.OUTCOMES: a["outcome"] = None
+    if a.get("outcome_quote") and not cl.quote_in(a["outcome_quote"], transcript): a["outcome_quote"] = ""
+    if a.get("weakest") not in secs: a["weakest"] = min(secs, key=lambda k: secs[k]["score"]) if secs else None
     ps = a.get("persona") if isinstance(a.get("persona"), dict) else {}
     ps["signature_phrases"] = [x for x in (ps.get("signature_phrases") or []) if isinstance(x, str) and cl.quote_in(x, transcript)][:6]
     a["persona"] = ps
     return a
+
+
+def grade_call(sb, call, lines, track, cfg):
+    """Outcome first, then each section by the owner's reaction. No writes. -> (track, analysis, opener, objection, overall)"""
+    tx = P.call_lines_text(lines)
+    track = T.pitch_track(" ".join(l["text"] for l in lines if l["speaker"] == "intern"), track or "data")
+    for attempt in (1, 2):      # grade against what was actually pitched; the list's track can be wrong
+        user = (f"Track: {track}. Company: {call.get('company_name') or '?'}. Call length: {call.get('duration_sec') or '?'}s.\n\n"
+                f"Transcript:\n{tx}\n\nReply with the JSON object only.")
+        a = cl.parse_json(cl.run_claude(user, P.feedback_system(sb, track), model=cfg["model_feedback"], timeout=cfg["timeout"]))
+        if not isinstance(a, dict): raise RuntimeError("feedback reply was not JSON")
+        if a.get("pitched") in ("data", "ma") and a["pitched"] != track and attempt == 1: track = a["pitched"]; continue
+        break
+    a = clean_analysis(a, tx)
+    secs = a["sections"]
+    op = secs.get("opener", {}).get("score") if a.get("reached") in (None, "decision_maker") else None
+    ob = secs.get("objections", {}).get("score") if a["objections"] or "objections" in secs else None
+    w = a.get("weakest")
+    a["peer_examples"] = E.peer_examples(sb, track, w, (secs.get(w) or {}).get("intern_quote")) if w else []
+    return track, a, op, ob, E.overall(sb, track, a)
 
 
 # ------------------------------------------------------------------------------------------------- real call feedback
@@ -50,20 +83,12 @@ def call_feedback(sb, job, cfg):
     if sb.select("ai_call_feedback", f"call_id=eq.{cid}&select=call_id"): return {"skipped": "already has feedback"}
     call = (sb.select("calls", f"id=eq.{cid}&select=id,user_id,list_id,company_name,owner_name,duration_sec") or [None])[0]
     if not call: return {"skipped": "call gone"}
-    lines = sb.select("call_lines", f"call_id=eq.{cid}&select=speaker,text,start_ms&order=start_ms.asc")
+    lines = clean_lines(sb.select("call_lines", f"call_id=eq.{cid}&select=speaker,text,start_ms&order=start_ms.asc"))
     if sum(l["speaker"] == "owner" for l in lines) < 3 or sum(l["speaker"] == "intern" for l in lines) < 3:
         return {"skipped": "not a conversation"}
-    track = job.get("track") or "data"
-    tx = P.call_lines_text(lines)
-    user = (f"Track: {track}. Company: {call.get('company_name') or '?'}. Call length: {call.get('duration_sec') or '?'}s.\n\n"
-            f"Transcript:\n{tx}\n\nReply with the JSON object only.")
-    a = cl.parse_json(cl.run_claude(user, P.feedback_system(sb, track), model=cfg["model_feedback"], timeout=cfg["timeout"]))
-    if not isinstance(a, dict): raise RuntimeError("feedback reply was not JSON")
-    a = clean_analysis(a, tx)
-    ob = score(a.get("objection_score")) if a["objections"] else None
-    op = score(a.get("opener_score")) if a.get("reached") in (None, "decision_maker") else None
+    track, a, op, ob, ov = grade_call(sb, call, lines, job.get("track"), cfg)
     sb.insert("ai_call_feedback", [{"call_id": cid, "user_id": call["user_id"], "track": track, "opener_score": op,
-              "objection_score": ob, "overall_score": score(a.get("overall_score")), "feedback": P.feedback_text(a),
+              "objection_score": ob, "overall_score": ov, "feedback": P.feedback_text(a),
               "analysis": a}], upsert_on="call_id")
     sb.rpc("_ai_coach_recompute", {"p_user": call["user_id"], "p_track": track})
     return {"opener": op, "objection": ob}
@@ -74,11 +99,19 @@ def practice_turn(sb, job, cfg):
     ses = (sb.select("ai_practice_sessions", f"id=eq.{job['session_id']}&select=*") or [None])[0]
     if not ses or ses["status"] != "active": return {"skipped": "session not active"}
     turns = ses["turns"]
-    raw = cl.run_claude(P.prospect_user(turns), P.prospect_system(sb, ses), model=cfg["model_prospect"], timeout=90)
-    r = cl.parse_json(raw)
-    if not isinstance(r, dict) or not str(r.get("say") or "").strip():
-        r = {"say": (raw or "").strip().strip('"')[:400] or "Sorry, who is this?", "hang_up": False}
-    t = {"role": "prospect", "text": cl.no_dashes(str(r["say"]).strip())[:600], "at": now()}
+    said = next((t["text"] for t in reversed(turns) if t["role"] == "intern"), "")
+    plan, real = E.plan_reply(sb, ses, said)
+    if plan and plan.get("source") == "path": r = dict(plan)          # the real owner's own reply, no model needed
+    else:
+        raw = cl.run_claude(P.prospect_user(turns), P.prospect_system(sb, ses, real), model=cfg["model_prospect"], timeout=90)
+        r = cl.parse_json(raw)
+        if not isinstance(r, dict) or not str(r.get("say") or "").strip():
+            r = {"say": (raw or "").strip().strip('"')[:400] or "Sorry, who is this?", "hang_up": False}
+        r["source"], r["match"] = E.tag_source(r, plan) if plan else ("new", 0)
+        if plan: r.update(move=plan["move"], path_pos=plan["path_pos"])
+    t = {"role": "prospect", "text": cl.no_dashes(str(r["say"]).strip())[:600], "at": now(), "source": r["source"]}
+    for k in ("move", "path_pos", "match"):
+        if r.get(k) is not None: t[k] = r[k]
     already = any(x.get("opener_ok") is not None for x in turns)
     if r.get("opener_ok") in (True, False) and not already: t["opener_ok"] = r["opener_ok"]
     if r.get("objection") in OBJ_TYPES: t["objection"] = r["objection"]
@@ -115,6 +148,11 @@ def practice_score(sb, job, cfg):
            "feedback": cl.no_dashes(str(r.get("feedback") or "")),
            "best_line": r.get("best_line") if r.get("best_line") and cl.quote_in(r["best_line"], tx) else "",
            "fix_line": r.get("fix_line") if r.get("fix_line") and cl.quote_in(r["fix_line"], tx) else ""}
+    secs = clean_analysis({"sections": r.get("sections"), "outcome": r.get("outcome")}, tx)
+    res["outcome"], res["sections"] = secs.get("outcome"), secs["sections"]
+    if res["sections"] or res["outcome"]: res["overall_score"] = E.overall(sb, ses["track"], res)
+    w = secs.get("weakest")
+    if w: res["peer_examples"] = E.peer_examples(sb, ses["track"], w, res["sections"][w].get("intern_quote"))
     if ses["stage"] == "opener": res["objections_pass"] = None
     if not res["opener_pass"] and res["opener_score"] is not None:   # a failed opener can't score as a good one
         res["opener_score"] = min(res["opener_score"], 6)

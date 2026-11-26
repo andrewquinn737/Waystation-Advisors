@@ -33,7 +33,7 @@ if not err and isinstance(a, dict) and a.get("pending"):
         if not (isinstance(a, dict) and a.get("pending")): break
 check("practice_say gets an owner reply", not err and isinstance(a, dict) and a.get("owner_says"), a)
 code, e, err = tool(tok, "end_practice_call", session_id=sid)
-for _ in range(30):
+for _ in range(60):
     if isinstance(e, dict) and e.get("result"): break
     time.sleep(3); code, e, err = tool(tok, "get_practice_reply", session_id=sid)
 check("end_practice_call scores", isinstance(e, dict) and e.get("result") is not None, str(e)[:300])

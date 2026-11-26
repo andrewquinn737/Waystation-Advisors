@@ -70,6 +70,43 @@ The research files (`kb/*/research_*.md`) are a base only. The prompts reach the
 calls-derived `calls_playbook` goes into every prompt. The M&A track uses the same machinery with its own playbook,
 guide, track context and openers (Jesse's calls weighted).
 
+## Expert system (v2): real owner lines, outcome-first grading
+
+Data and M&A are built separately end to end: `taxonomy.py` holds each track's caller moves, owner objections and
+call sections, and every prompt is a per-track copy (`kb/<track>/prompt_*.md`).
+
+**Track per call.** A list mixes pitches, so the list's track is only a fallback. `taxonomy.pitch_track()` reads what
+the caller actually said, and the grader reports `pitched`; if it differs, the call is re-graded on the pitched track.
+
+**Clean input.** `clean.py` runs on every transcript, offline and live: IVR lines dropped, echo lines (the caller's
+voice on the owner channel) dropped, fragments merged into turns, speaker swaps fixed.
+
+**Practice owner replies (`engine.plan_reply`).**
+1. The intern's line is classified into a move: TF-IDF nearest neighbours over 3,388 labeled real caller turns (2,172 data, 1,216 M&A) plus regex
+   rules, so no exact phrasing is needed.
+2. PATH: if that move is what the real caller did next on the persona's source call (skip of up to 2 allowed,
+   confidence ≥ .45), the real owner's own reply is returned word for word. No model call.
+3. BANK: otherwise the closest real caller turns with that move, from any call on the track, supply up to 4 real owner
+   replies (weighted by outcome, and ×1.5 when the owner reacted to the pitch the same way). Sonnet picks one,
+   adapts one, or, only for an intern line unlike anything on file, writes a new one.
+4. Code tags the source: a reply counts as real only if it overlaps a real candidate (≥ .5). Each turn stores
+   `source` (path/bank/new), `move`, `path_pos`.
+
+**Grading (`handlers.grade_call`).** Outcome first (`taxonomy.OUTCOMES`, 0 to 10), then opener / explain /
+objections / close each scored on the owner's reaction right after it, with the reaction quote and the intern line
+checked verbatim. `overall = 0.5 × outcome + 0.5 × weighted section mean`. Section weights come from the data
+(`calibrate.py`: how strongly each section's owner reaction predicts the outcome). The grader reads a data-based
+answer key (`grade_key`): per move, how owners reacted and how often the call ended well, plus the real lines that
+drew the best and worst reactions. Feedback adds "Worked for another caller here": real lines from other callers in
+the intern's weakest section that drew a good reaction.
+
+**Where it lives.** `turn_bank`, `grade_key`, `grade_weights` are `ai_kb_docs` rows of kind `prompt` (admin-only under
+the existing read policy, since they hold real transcript lines). Local copies go in `tools/ai_coach/bank/`
+(gitignored). Each persona carries its call path in `ai_personas.persona.path`.
+
+**Build (staging/ai_call_coach):** `clean.py` → `label_turns.py` (Haiku labels every turn) → `build_paths.py --test`
+→ `calibrate.py --test` → `validate_grading.py` → `tools/ai_coach/judge_paths.py`.
+
 ## Judge: is the AI owner acting like the real owner?
 
 `judge.py` replays a real call's caller lines into the simulator turn by turn and compares the AI's reply with what

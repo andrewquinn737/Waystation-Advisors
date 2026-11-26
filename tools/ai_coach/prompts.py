@@ -23,7 +23,7 @@ def docs(sb=None):
     out = {}
     if sb is not None:
         try:
-            for r in sb.select("ai_kb_docs", "select=track,slug,title,body,kind,weight,version"):
+            for r in sb.select("ai_kb_docs", "select=track,slug,title,body,kind,weight,version&slug=not.in.(turn_bank)"):
                 out[(r["track"], r["slug"])] = r
         except Exception:
             out = {}
@@ -41,6 +41,11 @@ def docs(sb=None):
 def doc(sb, track, slug):
     r = docs(sb).get((track, slug))
     return r["body"] if r else (local_doc(track, slug) or "")
+
+
+def tdoc(sb, track, slug):
+    """The track's own copy first (data and M&A are built separately), the shared one only as a fallback."""
+    return doc(sb, track, slug) or doc(sb, "shared", slug)
 
 
 def playbook(sb, track, budget=9000):
@@ -102,11 +107,11 @@ def persona_block(p):
     return "\n".join(lines)
 
 
-def prospect_system(sb, session):
+def prospect_system(sb, session, real_lines=""):
     p, track, stage = session["persona"], session["track"], session["stage"]
     rules = session.get("rules") or doc(sb, "shared", "stage_rules_" + stage)
     focus = ", ".join(p.get("objection_types") or []) or "your real concerns"
-    return render(doc(sb, "shared", "prompt_prospect"), persona_block=persona_block(p),
+    return render(tdoc(sb, track, "prompt_prospect"), persona_block=persona_block(p), real_lines=real_lines or "(none)",
                   track_context=doc(sb, track, "track_context"), stage_rules=render(rules, focus=focus))
 
 
@@ -123,24 +128,39 @@ def call_lines_text(lines):
     return "\n".join(f"{'Intern' if l['speaker'] == 'intern' else 'Owner'}: {l['text']}" for l in lines)
 
 
+def grade_key(sb, track):
+    """Data-based answer key from calibrate.py (ai_kb_docs, else the local gitignored bank/ copy)."""
+    k = doc(sb, track, "grade_key")
+    f = os.path.join(os.path.dirname(KB_DIR), "bank", f"grade_key_{track}.md")
+    return k or (open(f).read() if os.path.exists(f) else "No call data yet.")
+
+
 def feedback_system(sb, track):
-    return render(doc(sb, "shared", "prompt_feedback"), playbook=playbook(sb, track))
+    return render(tdoc(sb, track, "prompt_feedback"), playbook=playbook(sb, track), grade_key=grade_key(sb, track))
 
 
 def score_system(sb, track):
-    return render(doc(sb, "shared", "prompt_practice_score"), playbook=playbook(sb, track))
+    return render(tdoc(sb, track, "prompt_practice_score"), playbook=playbook(sb, track), grade_key=grade_key(sb, track))
 
 
 def coach_system(sb, track):
-    return render(doc(sb, "shared", "prompt_coach_update"), playbook=playbook(sb, track))
+    return render(tdoc(sb, track, "prompt_coach_update"), playbook=playbook(sb, track))
 
 
 def feedback_text(a):
     """What the intern sees, assembled in code from the model's parts (no free-form essay)."""
     out = []
+    oc = {"meeting_booked": "You booked the meeting.", "callback_interested": "They want to hear more: callback with interest.",
+          "callback_set": "You got a callback time.", "info_or_email": "You got an email or sent info.",
+          "soft_no": "Soft no.", "hard_no": "Hard no.", "hung_up": "They hung up."}.get(a.get("outcome"))
+    if oc: out.append("Result: " + oc)
+    for k, v in (a.get("sections") or {}).items():
+        out.append(f"{k.capitalize()}: {v['score']}/10" + (f" ({v['why']})" if v.get("why") else ""))
     for k in (a.get("keeps") or [])[:2]: out.append("Keep: " + k)
     for f in (a.get("fixes") or [])[:2]: out.append("Fix: " + f)
     if a.get("try_line"): out.append('Try next time: "' + a["try_line"].strip().strip('"') + '"')
+    for x in (a.get("peer_examples") or [])[:2]:
+        out.append(f'Worked for another caller here: "{x["line"]}" (owner: "{x["owner_reply"][:120]}")')
     return "\n".join(out) or "No feedback this time."
 
 
