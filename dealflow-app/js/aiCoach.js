@@ -5,6 +5,7 @@ import { requireSession } from "./auth.js";
 import { escapeHtml } from "./clientForm.js";
 import { mountClaudeConnect } from "./claudeConnect.js";
 import { mountPractice } from "./aiPractice.js";
+import { mountVoice } from "./aiVoice.js";
 
 const session = await requireSession();
 if (!session) throw new Error("redirecting to login");
@@ -23,7 +24,7 @@ const md = (t) => escapeHtml(t || "").replace(/^# .+\n*/m, "").replace(/^#{2,3} 
   .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*(?:[-*]|\d+\.) (.+(?:\n {2,}.+)*)$/gm, (_, x) => `<li>${x.replace(/\n +/g, " ")}</li>`)
   .replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`).replace(/<\/h4>\n+/g, "</h4>").replace(/\n{2,}/g, "<br><br>");
 
-let track = null, practice = null;
+let track = null, practice = null, voice = null;
 
 mountClaudeConnect($("aicConnectBody"), { profile, title: "Your AI link", chatgpt: true,
   blurb: "Add this link to Claude or ChatGPT to run practice calls and get coaching there too. Ask it to \"run a practice call\" or \"coach me\"." });
@@ -65,7 +66,10 @@ async function load() {
     ${fb.length ? fb.map(feedbackHtml).join("") : `<p class="aic-muted">No graded calls yet. Every call you make where you reach someone gets feedback here within a few minutes.</p>`}
     <details class="aic-guide"><summary>How the coach works</summary><div id="aicGuide" class="aic-fb">Loading...</div></details>`;
   body.querySelector(".aic-guide").addEventListener("toggle", loadGuide, { once: true });
-  if (!practice) practice = mountPractice($("aicPracticeBody"), { getTrack: () => track, onScored: load, workerOnline: data.worker_online });
+  if (!voice) voice = mountVoice($("aicVoiceBody"), { getTrack: () => track, onScored: load }) || {};
+  if (!practice) {
+    practice = mountPractice($("aicPracticeBody"), { getTrack: () => track, onScored: load, workerOnline: data.worker_online });
+  }
   else practice.setWorker(data.worker_online);
 }
 

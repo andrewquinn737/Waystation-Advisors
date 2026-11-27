@@ -143,6 +143,34 @@ Re-run:
 python3 judge.py <records.jsonl> --track data --n 20 --mode full --model sonnet --seed 11 --out r8.json
 ```
 
+## Live voice call (free, no LLM per turn)
+
+A phone-style practice call on the coach page (`js/aiVoice.js`). Chrome hears the intern (Web Speech API), code picks the
+owner's reply from real owner lines, and a pre-recorded Kokoro clip of that line plays through a phone-band filter. The
+only LLM call is the Sonnet grade after hang-up (`ai_practice_end_voice` queues the usual practice grading).
+
+| Piece | Where |
+|---|---|
+| Panel | `js/aiVoice.js` (UI), `js/aiVoiceCall.js` (listening, turn-taking, barge-in, silence, hang-up) |
+| Picker | `js/aiVoicePlan.js` (order of choices), `js/aiVoiceFit.js` (does a line fit this moment), `js/aiVoiceEngine.js` (bank search, hang-up rate) |
+| Kit + clips | `js/aiVoiceKit.js` loads `kit_{track}.json` + `emb_{track}.i8` and `clips/{voice}/{id}.mp3` from the private TEST bucket `coach-voice` |
+| Build | `tools/ai_coach/voice_tags.py` (Haiku tags each real reply: usable?, stance, kind) → `voice_kit.py` (kit, edge lines, `DROP` list) → `voice_render.py` (Kokoro render, `--upload-only` to TEST) |
+| Schema | `supabase/migrations/20261215_ai_voice_practice.sql`: bucket + read policy, `ai_practice_start_voice`, `ai_practice_end_voice` (applied on TEST only) |
+
+Reply order: edge cases (nothing heard, rude, repeated line, caller saying bye, filler), the persona's own real call path,
+the real hang-up rate, then the closest real bank line, a real reply to the same kind of caller line, and last a short real
+line of the right kind. `aiVoiceFit.js` rejects lines that don't fit: asking who's calling after the caller said, agreeing
+after a no, an ack after a long pitch, a non-answer to a meeting ask, a line naming the original call's caller or firm, a
+word from the original call this caller never said ("What's NGL?"), a greeting after the opener, a cut-off line.
+
+**Measured (blind Sonnet A/B on 42 scripted edge-case calls, same scripts for both):** the original LLM owner took a median
+2.2 s per turn (p90 14 s); the free picker takes ~3 ms. Round 1: original won 28 to 13. After the tag pass and fit rules,
+round 5: free won 22 to 16 (4 ties), 18 bad owner lines vs 32. Judge runs vary by a few calls. Harness: scratchpad
+`voice/edge/` (`run_js.mjs`, `run_py.py`, `judge.py`); not in git.
+
+Privacy: the kit holds real owner first names and company names from our calls. The bucket is private but any signed-in
+user can read it. Rebuild the kit after new calls: `voice_tags.py`, `voice_kit.py`, `voice_render.py`.
+
 ## Deploy (Oracle VM, next to tools/ai_worker)
 
 1. Run `tools/ai_worker/install.sh` first. It creates the user, the token env and claude.

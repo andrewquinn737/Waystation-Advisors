@@ -44,3 +44,18 @@
   .aic-warn { background: #431407; color: #fed7aa; }
   .ap-score { background: #052e16; }
 }
+/* voice practice */
+.hidden.btn, .av-status.hidden { display: none; }
+.av-status { margin: 8px 0; padding: 8px 12px; border-radius: 10px; background: #f1f5f9; font-size: 14px; font-weight: 600; }
+.av-status.av-you { background: #dcfce7; }
+.av-note { justify-self: center; font-size: 12px; opacity: .65; background: none; padding: 2px 8px; }
+.aic-typed { margin-top: 14px; }
+.aic-typed summary { cursor: pointer; font-size: 13px; opacity: .8; }
+@media (prefers-color-scheme: dark) {
+  .av-status { background: #111827; }
+  .av-status.av-you { background: #052e16; }
+}
+
+.av-panel { border-top: 1px solid var(--border, #e5e7eb); margin-top: 14px; padding-top: 10px; }
+.av-state { font-size: 13px; font-weight: 600; color: #2563eb; }
+#avEnd.hidden, .ap-log.hidden { display: none; }
