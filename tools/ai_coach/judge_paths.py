@@ -7,7 +7,7 @@ blind = no path, quotes stripped, and the source call's own lines are excluded f
 Usage: python3 judge_paths.py turns.jsonl --track data --n 60 --mode blind --seed 11 --out run.json"""
 import argparse, json, os, random, re
 from concurrent.futures import ThreadPoolExecutor
-import bank, coachlib as cl, prompts as P, engine as E, paths, judge as J
+import bank, coachlib as cl, prompts as P, engine as E, paths, judge as J, realism as R
 
 
 def convo(c):
@@ -45,11 +45,12 @@ def pick(pts, k=4):
 def reply(sb, ses, model):
     said = next((t["text"] for t in reversed(ses["turns"]) if t["role"] == "intern"), "")
     plan, real = E.plan_reply(sb, ses, said)
-    if plan and plan.get("source") == "path": return plan
+    if plan and plan.get("say"): return plan
     r = cl.parse_json(cl.run_claude(P.prospect_user(ses["turns"]), P.prospect_system(sb, ses, real), model=model, timeout=120))
     if not isinstance(r, dict): r = {"say": ""}
     r["source"], r["match"] = E.tag_source(r, plan) if plan else ("new", 0)
     r["move"] = (plan or {}).get("move")
+    if (plan or {}).get("stay"): r["hang_up"] = False
     return r
 
 
@@ -65,9 +66,9 @@ def run(sb, calls, track, n, mode, model, workers=5, seed=11):
     rules = P.doc(sb, "shared", "stage_rules_full")
     jobs = []
     for c in sample:
-        p = bank.persona_from_call(c)
+        p = dict(bank.persona_from_call(c), outcome_tx=c.get("outcome_tx"))
         if mode == "blind": p = dict(J.blind(p), exclude_call=c["id"][:8])
-        else: p["path"] = paths.call_path(c)
+        else: p.update(path=R.annotate(paths.call_path(c), c.get("outcome_tx")), path_call=c["id"][:8])
         turns, pts = replay(c)
         last = max((i for i, t in enumerate(turns) if t["role"] == "prospect"), default=-1)
         for ti, pos, act in pick(pts):
@@ -76,7 +77,7 @@ def run(sb, calls, track, n, mode, model, workers=5, seed=11):
                 if t["role"] == "prospect": t["path_pos"] = pos; break
             jobs.append({"call": c["id"], "ses": {"persona": p, "track": track, "stage": "full", "rules": rules, "turns": prefix},
                          "prefix": prefix, "real": turns[ti]["text"][:400], "real_act": act, "real_last": ti == last,
-                         "first": ti == pts[0][0]})
+                         "first": ti == pts[0][0], "real_end": ti == last and c.get("outcome_tx") in R.END_OUTCOMES})
     def go(j):
         try:
             r = reply(sb, j.pop("ses"), model)
@@ -94,21 +95,29 @@ def run(sb, calls, track, n, mode, model, workers=5, seed=11):
     jj = [j for j in jobs if j.get("j")]
     s["source_share"] = {k: round(sum(j["source"] == k for j in jj) / max(1, len(jj)), 3) for k in ("path", "bank", "new")}
     s["stance_by_source"] = {k: J.summarize([j for j in jj if j["source"] == k]).get("stance_match") for k in ("path", "bank", "new")}
+    s["hang"] = hang_stats(jj)
     s["sim_by_source"] = {k: J.summarize([j for j in jj if j["source"] == k]).get("sim_avg") for k in ("path", "bank", "new")}
     return jobs, s
+
+
+def hang_stats(jj):
+    """Does the AI owner end the call where real owners did, and as often?"""
+    tp = sum(j["ai_hang"] and j["real_end"] for j in jj); ai = sum(j["ai_hang"] for j in jj); re_ = sum(j["real_end"] for j in jj)
+    return {"real_end_rate": round(re_ / max(1, len(jj)), 3), "ai_end_rate": round(ai / max(1, len(jj)), 3),
+            "caught": f"{tp}/{re_}", "false_ends": ai - tp}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("turns"); ap.add_argument("--track", default="data"); ap.add_argument("--n", type=int, default=60)
     ap.add_argument("--mode", default="blind"); ap.add_argument("--model", default="sonnet"); ap.add_argument("--out")
-    ap.add_argument("--seed", type=int, default=11); ap.add_argument("--test", action="store_true")
+    ap.add_argument("--seed", type=int, default=11); ap.add_argument("--test", action="store_true"); ap.add_argument("--workers", type=int, default=5)
     a = ap.parse_args()
     import dev_sb
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = dev_sb.claude_token(); os.environ.pop("ANTHROPIC_API_KEY", None)
     sb = dev_sb.test_client() if a.test else None
     calls = [json.loads(l) for l in open(a.turns)]
-    jobs, s = run(sb, calls, a.track, a.n, a.mode, a.model, seed=a.seed)
+    jobs, s = run(sb, calls, a.track, a.n, a.mode, a.model, workers=a.workers, seed=a.seed)
     print(json.dumps(s, indent=1))
     if a.out: json.dump({"summary": s, "jobs": jobs}, open(a.out, "w"), indent=1, default=str)
 

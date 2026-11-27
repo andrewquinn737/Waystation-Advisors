@@ -6,8 +6,8 @@
    alike the owners are) supply candidate replies;
 4. only when nothing fits does the model write a new line (handlers.practice_turn), and code tags its source.
 Stdlib only. The bank is built offline (build_bank) and stored per track in ai_kb_docs (slug turn_bank)."""
-import json, math, re, collections
-import taxonomy as T
+import json, math, re, collections, os
+import taxonomy as T, realism as R, embed
 
 RULES = [  # (move, regex): cheap expert rules that back up the neighbours on the common moves
     ("how_are_you", r"\bhow (are|r) (you|ya)( doing| today)?\b|how'?s it going|how you doing"),
@@ -43,6 +43,8 @@ class Bank:
         self.post = collections.defaultdict(list)
         for i, v in enumerate(self.vecs):
             for k in v: self.post[k].append(i)
+        self.hz = data.get("hazard") or {}
+        self.emb = embed.bank_matrix(self.track, [t["t"] for t in self.turns]) if embed.available() and self.turns else None
 
     def vec(self, text):
         tf = collections.Counter(toks(text))
@@ -51,10 +53,17 @@ class Bank:
         return {k: x / nrm for k, x in v.items()}
 
     def near(self, text, k=25):
+        """Closest real caller turns: meaning (embeddings) blended with shared words (TF-IDF)."""
         q, sc = self.vec(text), collections.Counter()
         for key, x in q.items():
             for i in self.post.get(key, ()): sc[i] += x * self.vecs[i][key]
-        return sc.most_common(k)
+        if self.emb is None: return sc.most_common(k)
+        cos = self.emb @ embed.encode([text])[0]
+        top = set(cos.argsort()[-3 * k:].tolist()) | {i for i, _ in sc.most_common(3 * k)}
+        out = collections.Counter({i: round(.7 * max(0.0, (float(cos[i]) - .5) / .5) + .3 * sc.get(i, 0), 4) for i in top})
+        return out.most_common(k)
+
+    def hang_p(self, move, k, neg, fr): return R.hazard(self.hz, move, k, neg, fr)
 
     def classify(self, text):
         """-> (move, confidence 0..1, neighbours)."""
@@ -62,24 +71,36 @@ class Bank:
         votes = collections.Counter()
         for i, s in nb[:12]: votes[self.turns[i]["m"]] += s
         for mv, rx in RULES:
-            if mv in T.CALLER[self.track] and re.search(rx, text, re.I): votes[mv] += 0.8
+            if mv in T.CALLER.get(self.track.split("_")[0], ()) and re.search(rx, text, re.I): votes[mv] += 0.8
         if not votes: return "other", 0.0, nb
         mv, top = votes.most_common(1)[0]
         return mv, round(top / (sum(votes.values()) or 1), 2), nb
 
-    def candidates(self, text, move, persona, nb=None, n=4):
-        """Real owner replies to caller turns like this one, best first."""
-        nb = nb or self.near(text, 40)
+    def candidates(self, text, move, persona, nb=None, n=4, arc=None, ending=None):
+        """Real owner replies to caller turns like this one, best first. arc = (profile, k, neg, guide call) ranks
+        lines from owners like this one at this point of the call higher; ending True/False keeps only / drops
+        replies that end the call (the hazard decides which)."""
+        nb = nb or self.near(text, 60)
         fr, out, seen = persona.get("first_reaction"), [], set()
         for i, s in nb:
             t = self.turns[i]
             if t["m"] != move and s < .5: continue
             if persona.get("exclude_call") and t.get("c") == persona["exclude_call"]: continue   # blind tests
             if not t.get("r") or t["r"] in seen: continue
-            sc = s * (1 + .3 * math.log1p(t.get("w", 1))) * (1.5 if t.get("fr") == fr else 1) * (1.3 if t["m"] == move else 1)
-            out.append((round(sc, 3), t)); seen.add(t["r"])
+            if ending is not None and R.is_end(t) != ending: continue
+            sc = s * (1 + .3 * math.log1p(t.get("w", 1))) * (1.3 if t["m"] == move else 1)
+            sc *= R.arc_bonus(t, *arc) if arc else (1.5 if t.get("fr") == fr else 1)
+            out.append((round(sc, 3), s, t)); seen.add(t["r"])
         out.sort(key=lambda x: -x[0])
-        return [dict(t, score=sc) for sc, t in out[:n]]
+        return [dict(t, score=sc, sim=s) for sc, s, t in out[:n]]
+
+    def endings(self, move, persona, arc, n=3):
+        """Real last words of owners who ended the call, same part of the call, ranked by the arc."""
+        sec, ex = T.section_of_any(move), persona.get("exclude_call")
+        pool = [t for t in self.turns if R.is_end(t) and t.get("r") and t.get("c") != ex]
+        same = [t for t in pool if T.section_of_any(t["m"]) == sec] or pool
+        same.sort(key=lambda t: -R.arc_bonus(t, *arc))
+        return same[:n]
 
 
 def path_step(path, pos, move, conf):
@@ -130,13 +151,17 @@ def call_path(c):
 
 
 def build_bank(calls, track, weight_fn):
-    turns = []
+    turns, per_call = [], []
     for c in calls:
         if c.get("track") != track or c.get("dm", -1) < 0: continue
         fr = (c.get("ai") or {}).get("first_reaction")
-        for p in call_path(c):
-            turns.append(dict(p, c=c["id"][:8], w=weight_fn(c), fr=fr))
-    return {"track": track, "turns": turns}
+        prof = R.profile(c, T.OUTCOMES.get(c.get("outcome_tx")))
+        steps = R.annotate(call_path(c), c.get("outcome_tx"))
+        per_call.append((fr, steps))
+        nm = dict(owner=c.get("owner_name"), company=c.get("company_name"), caller=c.get("caller"))
+        for p in steps:
+            turns.append(dict(p, t=R.mask(p["t"], **nm), r=R.mask(p["r"], **nm), c=c["id"][:8], w=weight_fn(c), fr=fr, p=prof))
+    return {"track": track, "turns": turns, "hazard": R.build_hazard(per_call)}
 
 
 def dumps(b): return json.dumps(b, ensure_ascii=False, separators=(",", ":"))

@@ -101,7 +101,7 @@ def practice_turn(sb, job, cfg):
     turns = ses["turns"]
     said = next((t["text"] for t in reversed(turns) if t["role"] == "intern"), "")
     plan, real = E.plan_reply(sb, ses, said)
-    if plan and plan.get("source") == "path": r = dict(plan)          # the real owner's own reply, no model needed
+    if plan and plan.get("say"): r = dict(plan)          # a real owner's own line (path, ending or near-identical), no model
     else:
         raw = cl.run_claude(P.prospect_user(turns), P.prospect_system(sb, ses, real), model=cfg["model_prospect"], timeout=90)
         r = cl.parse_json(raw)
@@ -109,8 +109,9 @@ def practice_turn(sb, job, cfg):
             r = {"say": (raw or "").strip().strip('"')[:400] or "Sorry, who is this?", "hang_up": False}
         r["source"], r["match"] = E.tag_source(r, plan) if plan else ("new", 0)
         if plan: r.update(move=plan["move"], path_pos=plan["path_pos"])
+        if plan and plan.get("stay"): r["hang_up"] = False        # the hang-up odds already said this owner stays
     t = {"role": "prospect", "text": cl.no_dashes(str(r["say"]).strip())[:600], "at": now(), "source": r["source"]}
-    for k in ("move", "path_pos", "match"):
+    for k in ("move", "path_pos", "match", "act"):
         if r.get(k) is not None: t[k] = r[k]
     already = any(x.get("opener_ok") is not None for x in turns)
     if r.get("opener_ok") in (True, False) and not already: t["opener_ok"] = r["opener_ok"]

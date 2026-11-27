@@ -1,7 +1,7 @@
 """Runtime glue between the path store (paths.py) and the handlers: loads the turn bank per track, picks real owner
 replies for practice, and assembles the outcome-first grade with peer examples."""
-import json, os, time
-import paths, taxonomy as T
+import json, os, random, time
+import paths, realism as R, taxonomy as T
 import prompts as P
 
 _banks = {}
@@ -32,31 +32,63 @@ def grade_weights(sb, track):
 
 
 # ------------------------------------------------------------------------------------------------- practice
+ARC = os.environ.get("AI_COACH_ARC", "0") == "1"     # whole-call arc: off, judge r9 showed no gain (data -.02, ma +.03)
+DIRECT = float(os.environ.get("AI_COACH_DIRECT", ".6"))   # caller line this close to a real one: use the real reply as is
+
+
+def call_state(ses):
+    """(caller turns so far, times the owner already pushed back)."""
+    turns = ses["turns"]
+    k = sum(t["role"] == "intern" for t in turns)
+    neg = sum(t["role"] == "prospect" and bool(t.get("objection") or t.get("act") in R.NEG) for t in turns)
+    return k, neg
+
+
+def _real(t, p, ses, source, move, conf, pos, hang):
+    out = {"say": R.unmask(t["r"], p, ses["turns"]), "source": source, "path_pos": pos, "move": move, "conf": conf,
+           "act": t.get("a"), **paths.flags_from_act(t.get("a"), t.get("o"), move,
+                                                      any(x.get("opener_ok") is not None for x in ses["turns"]))}
+    out["hang_up"] = bool(hang)
+    return out
+
+
 def plan_reply(sb, ses, intern_text):
-    """-> (decision, real_lines_text). decision is a finished reply when the source call has the real answer to this
-    move; otherwise None and the model chooses from real_lines (or writes new)."""
+    """-> (decision, real_lines_text). decision is a finished reply when a real line fits (the source call's own
+    answer, an owner ending the call, or a near-identical real caller line); otherwise None-like meta and the model
+    picks from real_lines (or writes new, staying on the line)."""
     b = bank(sb, ses["track"])
     if not b: return None, ""
     p = ses.get("persona") or {}
-    move, conf, nb = b.classify(intern_text)
+    q = R.mask(intern_text, owner=p.get("name"), company=p.get("company"))
+    move, conf, nb = b.classify(q)
     prev = [t for t in ses["turns"] if t["role"] == "prospect"]
     pos = next((t["path_pos"] for t in reversed(prev) if "path_pos" in t), 0)
     path = p.get("path") or []
     j = paths.path_step(path, pos, move, conf)
-    meta = {"move": move, "conf": conf}
     if j is not None and path[j].get("r") and conf >= .45:
         st = path[j]
-        out = {"say": st["r"], "source": "path", "path_pos": j + 1, **meta,
-               **paths.flags_from_act(st.get("a"), st.get("o"), move, any(t.get("opener_ok") is not None for t in prev))}
-        return out, ""
-    cands = b.candidates(intern_text, move, p, nb)
-    lines = []
-    if j is not None and path[j].get("r"): lines.append(f'0. PATH (what you really said here): "{path[j]["r"]}"')
+        return _real(st, p, ses, "path", move, conf, j + 1, st.get("e") or st.get("a") == "hang_up"), ""
+    k, neg = call_state(ses)
+    prof = {"fr": p.get("first_reaction"), "oc": T.OUTCOMES.get(p.get("outcome_tx"))}
+    guide = p.get("path_call") or R.guide_call(b.turns, prof, exclude=p.get("exclude_call"))
+    arc = (prof, k, neg, guide if ARC else None)
+    npos = j + 1 if j is not None else pos
+    on_path = j is not None and bool(path[j].get("r"))   # this owner's own real line is a candidate: let it compete
+    # the hazard (how often real owners end the call here) decides whether this owner hangs up now
+    rng = random.Random(f"{ses.get('id') or p.get('path_call') or p.get('name')}|{k}")
+    if not on_path and rng.random() < b.hang_p(move, k, neg, p.get("first_reaction")):
+        e = b.candidates(q, move, p, nb, n=1, arc=arc if ARC else None, ending=True) or b.endings(move, p, arc, 1)
+        if e: return _real(e[0], p, ses, "bank", move, conf, npos, True), ""
+    cands = b.candidates(q, move, p, nb, n=6, arc=arc if ARC else None, ending=False)
+    if not on_path and cands and cands[0]["m"] == move and cands[0]["sim"] >= DIRECT:
+        return _real(cands[0], p, ses, "bank", move, conf, npos, False), ""
+    lines = ["(You stay on the line this turn: do not end the call.)"]
+    if j is not None and path[j].get("r"): lines.append(f'0. PATH (what you really said here): "{R.unmask(path[j]["r"], p, ses["turns"])}"')
     for i, c in enumerate(cands, 1):
-        lines.append(f'{i}. BANK (an owner like you, after the caller\'s "{c["t"][:120]}"): "{c["r"]}"')
-    meta["path_pos"] = j + 1 if j is not None else pos
-    meta["cands"] = [path[j]["r"]] if j is not None else []
-    meta["cands"] += [c["r"] for c in cands]
+        lines.append(f'{i}. BANK (an owner like you, after the caller\'s "{R.unmask(c["t"], p, ses["turns"])[:120]}"): '
+                     f'"{R.unmask(c["r"], p, ses["turns"])}"')
+    meta = {"move": move, "conf": conf, "path_pos": npos, "stay": True}
+    meta["cands"] = ([R.unmask(path[j]["r"], p, ses["turns"])] if j is not None else []) + [R.unmask(c["r"], p, ses["turns"]) for c in cands]
     return meta, "\n".join(lines)
 
 

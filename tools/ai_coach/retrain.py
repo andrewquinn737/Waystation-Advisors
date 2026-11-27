@@ -4,10 +4,11 @@
    date), so recency decay and the star-caller week boost move on their own. Keep the top MAX_ACTIVE per track.
 3. Rewrite calls_playbook from the current version + this window's weighted stats and examples (the model edits,
    it does not start over), and keep the previous version as calls_playbook_prev.
-4. Log ai_training_runs. Also used by the first build (build_from_staging in the staging folder)."""
+4. Grow the turn bank from the new calls (refresh.py) and give new personas their real call path.
+5. Log ai_training_runs. Also used by the first build (build_from_staging in the staging folder)."""
 import json, os
 from datetime import datetime, timedelta, timezone
-import bank, coachlib as cl, prompts as P
+import bank, coachlib as cl, paths, prompts as P, refresh
 
 RECENT_DAYS = 21
 MAX_ACTIVE = 300
@@ -92,11 +93,19 @@ def run(sb, track, cfg):
     now = datetime.now(timezone.utc)
     run_row = sb.insert("ai_training_runs", [{"track": track, "notes": "weekly retrain"}])[0]
     calls = db_calls(sb, track)
+    try:
+        labeled, bst = refresh.run(sb, track, calls, save_doc)
+    except cl.ClaudeError as e:                      # the bank waits a week; personas and playbook still update
+        labeled, bst = [], {"bank": f"skipped ({e})"}
     new_p = bank.persona_rows(calls, now)
+    lab = {c["id"]: c for c in labeled}
+    for r in new_p:
+        c = lab.get(r["source_call_id"])
+        if c: r["persona"].update(path=paths.call_path(c), path_call=c["id"][:8], outcome_tx=c.get("outcome_tx"))
     upsert_personas(sb, new_p)
     rw = reweight(sb, track, now)
     convos = sum(bank.is_conversation(c) for c in calls)
-    stats = {"calls_graded": len(calls), "conversations": convos, "new_personas": len(new_p), **rw}
+    stats = {"calls_graded": len(calls), "conversations": convos, "new_personas": len(new_p), **rw, **bst}
     if convos >= 8:                                  # too few new conversations: keep last week's playbook as is
         cur = P.doc(sb, track, "calls_playbook")
         md, st = write_playbook(sb, track, calls, cfg, now, cur)
