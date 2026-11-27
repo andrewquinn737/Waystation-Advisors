@@ -64,8 +64,8 @@ def plan_reply(sb, ses, intern_text):
     prev = [t for t in ses["turns"] if t["role"] == "prospect"]
     pos = next((t["path_pos"] for t in reversed(prev) if "path_pos" in t), 0)
     path = p.get("path") or []
-    j = paths.path_step(path, pos, move, conf)
-    if j is not None and path[j].get("r") and conf >= .45:
+    j = paths.path_step(path, pos, move, conf, q)
+    if j is not None and path[j].get("r") and (conf >= .45 or path[j]["m"] != move):
         st = path[j]
         return _real(st, p, ses, "path", move, conf, j + 1, st.get("e") or st.get("a") == "hang_up"), ""
     k, neg = call_state(ses)

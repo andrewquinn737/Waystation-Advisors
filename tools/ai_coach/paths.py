@@ -103,10 +103,13 @@ class Bank:
         return same[:n]
 
 
-def path_step(path, pos, move, conf):
-    """Index of the next real caller turn in the source call that matches this move (allowing a skip of up to 2)."""
+def path_step(path, pos, move, conf, said=""):
+    """Index of the next real caller turn in the source call that matches this move (allowing a skip of up to 2), or
+    whose words the intern closely repeats (move labels and the live classifier can disagree on the same line)."""
     for j in range(pos, min(len(path), pos + 3)):
         if path[j]["m"] == move: return j
+    for j in range(pos, min(len(path), pos + 3)):
+        if said and len(path[j].get("t") or "") > 15 and overlap(path[j]["t"], said) >= .7 and overlap(said, path[j]["t"]) >= .7: return j
     if conf < .45 and pos < len(path) and T.section_of_any(path[pos]["m"]) == T.section_of_any(move): return pos
     return None
 
