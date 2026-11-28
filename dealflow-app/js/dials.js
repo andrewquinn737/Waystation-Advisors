@@ -874,7 +874,8 @@ async function loadLists() {
 }
 
 function filteredLists() {
-  const visibleAccountIds = getVisibleAccountIds();
+  // Only admins and team leads have the "Accounts visible" button; a filter an admin saved in this browser must not hide an intern's own tabs.
+  const visibleAccountIds = isAdmin || isTeamLead ? getVisibleAccountIds() : null;
   return allLists
     .filter(
       (l) =>

@@ -705,8 +705,10 @@ function clientSearchMatches(c, q) {
 
 function renderTable() {
   const q = els.search.value.trim().toLowerCase();
-  const visibleAccountIds = getVisibleAccountIds();
-  const visibleBuyerIds = getVisibleAccountIds(BUYERS_VISIBLE_KEY);
+  // Only admins and team leads have these filter buttons; a filter saved in this browser by another login must not hide an intern's rows.
+  const canFilter = isAdmin || isTeamLead;
+  const visibleAccountIds = canFilter ? getVisibleAccountIds() : null;
+  const visibleBuyerIds = canFilter ? getVisibleAccountIds(BUYERS_VISIBLE_KEY) : null;
   const rows = clients.filter(
     (c) =>
       (!q || clientSearchMatches(c, q)) &&
