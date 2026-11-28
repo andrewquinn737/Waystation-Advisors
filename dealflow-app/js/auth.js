@@ -287,7 +287,6 @@ function navItems(role) {
     { href: "clients.html", label: "Clients", icon: NAV_ICONS.handshake },
     { href: "dials.html", label: "Calls", icon: NAV_ICONS.phone },
     { href: "messages.html", label: "Inbox", icon: NAV_ICONS.mail },
-    { href: "ai.html", label: "AI", icon: NAV_ICONS.spark },
   ];
   if (role === "admin") items.push({ href: "admin.html", label: "Admin", icon: NAV_ICONS.server, also: ["campaigns.html", "mailboxes.html"] });
   return items;

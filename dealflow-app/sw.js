@@ -2,7 +2,7 @@
 // offline fallback for the app shell (HTML/CSS/JS). It never caches
 // Supabase API calls or the CDN'd supabase-js library — those always hit
 // the network so data stays live.
-const CACHE = "waystation-shell-v134";
+const CACHE = "waystation-shell-v135";
 // Every page, script and stylesheet is precached (a page whose module is missing offline used to hang on its skeleton for good).
 // Paths are relative to wherever the app is served (the site root on Vercel, a sub-folder on the GitHub Pages test copy).
 const APP = (u) => new URL(String(u).replace(/^\//, ""), self.registration?.scope || self.location.href).href;
